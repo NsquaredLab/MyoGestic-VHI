@@ -1,0 +1,171 @@
+[gd_scene load_steps=10 format=3 uid="uid://b68somn1qruo4"]
+
+[ext_resource type="Script" uid="uid://d0dp111j18yhi" path="res://LSLCommunicationController.cs" id="1_comm"]
+[ext_resource type="Script" uid="uid://boppee7wyc2tb" path="res://ControlHandSkeleton.cs" id="2_control"]
+[ext_resource type="PackedScene" uid="uid://do4t3sdx40fcv" path="res://models/WVRLeftHand_1106_ASCII.fbx" id="3_ak64q"]
+[ext_resource type="Script" uid="uid://d4hnpqqr5y24f" path="res://PredictedHandSkeleton.cs" id="3_predicted"]
+[ext_resource type="Script" uid="uid://bc43y0yqssd2x" path="res://MovementUI.cs" id="5_ui"]
+[ext_resource type="Texture2D" uid="uid://1lnobkviynsp" path="res://images/logo.png" id="6_23hlc"]
+[ext_resource type="PackedScene" uid="uid://dca640i6dpaya" path="res://ControlPanel.tscn" id="8_controlpanel"]
+
+[sub_resource type="Sky" id="Sky_blue"]
+
+[sub_resource type="Environment" id="Environment_blue"]
+background_mode = 1
+background_color = Color(0.44313726, 0.5921569, 0.6862745, 1)
+sky = SubResource("Sky_blue")
+tonemap_mode = 2
+glow_intensity = 0.3
+glow_bloom = 0.1
+
+[node name="Main" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_blue")
+
+[node name="LSLCommunicationController" type="Node" parent="."]
+script = ExtResource("1_comm")
+
+[node name="ControlHand" type="Node3D" parent="."]
+script = ExtResource("2_control")
+
+[node name="Wrist" type="Node3D" parent="ControlHand"]
+
+[node name="Thumb2" type="Node3D" parent="ControlHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 0, 0.3)
+
+[node name="Thumb1" type="Node3D" parent="ControlHand/Thumb2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Thumb0" type="Node3D" parent="ControlHand/Thumb2/Thumb1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Index2" type="Node3D" parent="ControlHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0.3)
+
+[node name="Index1" type="Node3D" parent="ControlHand/Index2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.4, 0, 0)
+
+[node name="Index0" type="Node3D" parent="ControlHand/Index2/Index1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Middle2" type="Node3D" parent="ControlHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0.1)
+
+[node name="Middle1" type="Node3D" parent="ControlHand/Middle2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.4, 0, 0)
+
+[node name="Middle0" type="Node3D" parent="ControlHand/Middle2/Middle1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Ring2" type="Node3D" parent="ControlHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, -0.1)
+
+[node name="Ring1" type="Node3D" parent="ControlHand/Ring2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.4, 0, 0)
+
+[node name="Ring0" type="Node3D" parent="ControlHand/Ring2/Ring1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Pinky2" type="Node3D" parent="ControlHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, -0.3)
+
+[node name="Pinky1" type="Node3D" parent="ControlHand/Pinky2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Pinky0" type="Node3D" parent="ControlHand/Pinky2/Pinky1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="WVRLeftHand_1106_ASCII" parent="ControlHand" instance=ExtResource("3_ak64q")]
+transform = Transform3D(4.895619e-07, 2.853257e-14, -3.7332897, 3.2637456e-07, -3.7332897, 1.4266288e-14, -3.7332897, -3.2637456e-07, -4.895619e-07, 0.75758225, 0, 0)
+
+[node name="PredictedHand" type="Node3D" parent="."]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+script = ExtResource("3_predicted")
+
+[node name="Wrist" type="Node3D" parent="PredictedHand"]
+
+[node name="Thumb2" type="Node3D" parent="PredictedHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 0, 0.3)
+
+[node name="Thumb1" type="Node3D" parent="PredictedHand/Thumb2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Thumb0" type="Node3D" parent="PredictedHand/Thumb2/Thumb1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Index2" type="Node3D" parent="PredictedHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0.3)
+
+[node name="Index1" type="Node3D" parent="PredictedHand/Index2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.4, 0, 0)
+
+[node name="Index0" type="Node3D" parent="PredictedHand/Index2/Index1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Middle2" type="Node3D" parent="PredictedHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0.1)
+
+[node name="Middle1" type="Node3D" parent="PredictedHand/Middle2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.4, 0, 0)
+
+[node name="Middle0" type="Node3D" parent="PredictedHand/Middle2/Middle1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Ring2" type="Node3D" parent="PredictedHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, -0.1)
+
+[node name="Ring1" type="Node3D" parent="PredictedHand/Ring2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.4, 0, 0)
+
+[node name="Ring0" type="Node3D" parent="PredictedHand/Ring2/Ring1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Pinky2" type="Node3D" parent="PredictedHand"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, -0.3)
+
+[node name="Pinky1" type="Node3D" parent="PredictedHand/Pinky2"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="Pinky0" type="Node3D" parent="PredictedHand/Pinky2/Pinky1"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
+
+[node name="WVRLeftHand_1106_ASCII" parent="PredictedHand" instance=ExtResource("3_ak64q")]
+transform = Transform3D(4.895619e-07, -2.853257e-14, 3.7332897, -3.2637456e-07, -3.7332897, 1.4266288e-14, 3.7332897, -3.2637456e-07, -4.895619e-07, 0.17892405, 0, 0)
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(-1, 8.742278e-08, 0, 3.821371e-15, 4.371139e-08, 1, 8.742278e-08, 1, -4.371139e-08, 0, 0.383, 0.09948146)
+projection = 1
+fov = 60.0
+
+[node name="MovementUI" type="Label" parent="."]
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 300.0
+offset_bottom = 150.0
+theme_override_font_sizes/font_size = 16
+script = ExtResource("5_ui")
+
+[node name="Logo" type="TextureRect" parent="."]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -508.0
+offset_right = 0.9177246
+offset_bottom = 102.0
+grow_horizontal = 0
+texture = ExtResource("6_23hlc")
+expand_mode = 3
+stretch_mode = 5
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, -0.75, 0.433013, 0, 5, 0)
+
+[node name="ControlPanel" parent="." instance=ExtResource("8_controlpanel")]
+anchors_preset = 1
+anchor_bottom = 0.0
+offset_left = -321.0
+offset_top = 116.0
+offset_right = 0.0
+offset_bottom = 509.0
+grow_vertical = 1

@@ -1,0 +1,194 @@
+[gd_scene load_steps=2 format=3 uid="uid://dca640i6dpaya"]
+
+[ext_resource type="Script" uid="uid://ci3pdrwnbvvev" path="res://ControlPanelUI.cs" id="1_script"]
+
+[node name="ControlPanel" type="Control"]
+layout_mode = 3
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -320.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 0
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Panel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -40.0
+offset_right = -40.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 6.0
+offset_right = -7.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Panel/VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Hand Settings"
+horizontal_alignment = 1
+
+[node name="HSeparator1" type="HSeparator" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="HandChiralityGroup" type="VBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="RightHandToggle" type="CheckBox" parent="Panel/VBoxContainer/HandChiralityGroup"]
+layout_mode = 2
+button_pressed = true
+text = "Right Hand (mirror)"
+
+[node name="HSeparator2" type="HSeparator" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ControlHandGroup" type="VBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ControlHandLabel" type="Label" parent="Panel/VBoxContainer/ControlHandGroup"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Control Hand"
+
+[node name="SpeedContainer" type="HBoxContainer" parent="Panel/VBoxContainer/ControlHandGroup"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SpeedLabel" type="Label" parent="Panel/VBoxContainer/ControlHandGroup/SpeedContainer"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "Speed (Hz):"
+
+[node name="SpeedSlider" type="HSlider" parent="Panel/VBoxContainer/ControlHandGroup/SpeedContainer"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.05
+max_value = 2.0
+step = 0.05
+value = 0.5
+
+[node name="SpeedValue" type="Label" parent="Panel/VBoxContainer/ControlHandGroup/SpeedContainer"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "0.50"
+horizontal_alignment = 2
+
+[node name="HoldingTimeContainer" type="HBoxContainer" parent="Panel/VBoxContainer/ControlHandGroup"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="HoldingTimeLabel" type="Label" parent="Panel/VBoxContainer/ControlHandGroup/HoldingTimeContainer"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "Holding Time:"
+
+[node name="HoldingTimeSlider" type="HSlider" parent="Panel/VBoxContainer/ControlHandGroup/HoldingTimeContainer"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 10.0
+step = 0.1
+value = 1.0
+
+[node name="HoldingTimeValue" type="Label" parent="Panel/VBoxContainer/ControlHandGroup/HoldingTimeContainer"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "1.0s"
+horizontal_alignment = 2
+
+[node name="RestingTimeContainer" type="HBoxContainer" parent="Panel/VBoxContainer/ControlHandGroup"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="RestingTimeLabel" type="Label" parent="Panel/VBoxContainer/ControlHandGroup/RestingTimeContainer"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "Resting Time:"
+
+[node name="RestingTimeSlider" type="HSlider" parent="Panel/VBoxContainer/ControlHandGroup/RestingTimeContainer"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 10.0
+step = 0.1
+value = 1.0
+
+[node name="RestingTimeValue" type="Label" parent="Panel/VBoxContainer/ControlHandGroup/RestingTimeContainer"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "1.0s"
+horizontal_alignment = 2
+
+[node name="HSeparator3" type="HSeparator" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="PredictedHandGroup" type="VBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PredictedHandLabel" type="Label" parent="Panel/VBoxContainer/PredictedHandGroup"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Predicted Hand"
+
+[node name="SmoothingToggle" type="CheckBox" parent="Panel/VBoxContainer/PredictedHandGroup"]
+layout_mode = 2
+text = "Enable Smoothing"
+
+[node name="SmoothingSpeedContainer" type="VBoxContainer" parent="Panel/VBoxContainer/PredictedHandGroup"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="SmoothingSpeedRow" type="HBoxContainer" parent="Panel/VBoxContainer/PredictedHandGroup/SmoothingSpeedContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SmoothingSpeedLabel" type="Label" parent="Panel/VBoxContainer/PredictedHandGroup/SmoothingSpeedContainer/SmoothingSpeedRow"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "  Speed:"
+
+[node name="SmoothingSpeedSlider" type="HSlider" parent="Panel/VBoxContainer/PredictedHandGroup/SmoothingSpeedContainer"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 1.0
+max_value = 20.0
+step = 0.5
+value = 5.0
+
+[node name="SmoothingSpeedValue" type="Label" parent="Panel/VBoxContainer/PredictedHandGroup/SmoothingSpeedContainer"]
+custom_minimum_size = Vector2(50, 0)
+layout_mode = 2
+text = "5.0"
+horizontal_alignment = 2
+
+[node name="CollapseButton" type="Button" parent="."]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -35.0
+offset_right = -5.0
+offset_bottom = 40.0
+grow_horizontal = 0
+theme_override_font_sizes/font_size = 20
+text = ">"
