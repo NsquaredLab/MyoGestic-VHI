@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="VHI_godot"
-run/main_scene="res://HandMain.tscn"
+run/main_scene="res://scenes/HandMain.tscn"
 config/features=PackedStringArray("4.5", "C#", "GL Compatibility")
 boot_splash/show_image=false
 boot_splash/fullsize=false
@@ -20,11 +20,20 @@ boot_splash/image="uid://1lnobkviynsp"
 
 [display]
 
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/initial_position_type=4
 window/stretch/mode="canvas_items"
 
 [dotnet]
 
 project/assembly_name="VHI_godot"
+
+[physics]
+
+2d/physics_engine="Dummy"
+3d/physics_engine="Dummy"
+common/enable_object_picking=false
 
 [rendering]
 
@@ -32,4 +41,6 @@ renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
 textures/default_filters/anisotropic_filtering_level=4
+camera/depth_of_field/depth_of_field_bokeh_shape=0
 anti_aliasing/quality/msaa_3d=2
+environment/defaults/default_clear_color=Color(0.44313726, 0.5921569, 0.6862745, 1)

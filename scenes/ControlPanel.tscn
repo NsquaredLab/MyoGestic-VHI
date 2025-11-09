@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://dca640i6dpaya"]
 
-[ext_resource type="Script" uid="uid://ci3pdrwnbvvev" path="res://ControlPanelUI.cs" id="1_script"]
+[ext_resource type="Script" uid="uid://ci3pdrwnbvvev" path="res://src/ControlPanelUI.cs" id="1_script"]
 
 [node name="ControlPanel" type="Control"]
 layout_mode = 3

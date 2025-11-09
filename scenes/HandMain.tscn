@@ -1,12 +1,12 @@
 [gd_scene load_steps=10 format=3 uid="uid://b68somn1qruo4"]
 
-[ext_resource type="Script" uid="uid://d0dp111j18yhi" path="res://LSLCommunicationController.cs" id="1_comm"]
-[ext_resource type="Script" uid="uid://boppee7wyc2tb" path="res://ControlHandSkeleton.cs" id="2_control"]
-[ext_resource type="PackedScene" uid="uid://do4t3sdx40fcv" path="res://models/WVRLeftHand_1106_ASCII.fbx" id="3_ak64q"]
-[ext_resource type="Script" uid="uid://d4hnpqqr5y24f" path="res://PredictedHandSkeleton.cs" id="3_predicted"]
-[ext_resource type="Script" uid="uid://bc43y0yqssd2x" path="res://MovementUI.cs" id="5_ui"]
-[ext_resource type="Texture2D" uid="uid://1lnobkviynsp" path="res://images/logo.png" id="6_23hlc"]
-[ext_resource type="PackedScene" uid="uid://dca640i6dpaya" path="res://ControlPanel.tscn" id="8_controlpanel"]
+[ext_resource type="Script" uid="uid://d0dp111j18yhi" path="res://src/LSLCommunicationController.cs" id="1_nc24d"]
+[ext_resource type="Script" uid="uid://boppee7wyc2tb" path="res://src/ControlHandSkeleton.cs" id="2_yx6bi"]
+[ext_resource type="PackedScene" uid="uid://do4t3sdx40fcv" path="res://models/WVRLeftHand_1106_ASCII.fbx" id="3_gy4eo"]
+[ext_resource type="Script" uid="uid://d4hnpqqr5y24f" path="res://src/PredictedHandSkeleton.cs" id="4_ye01p"]
+[ext_resource type="Script" uid="uid://bc43y0yqssd2x" path="res://src/MovementUI.cs" id="5_lsrjb"]
+[ext_resource type="Texture2D" uid="uid://1lnobkviynsp" path="res://images/logo.png" id="6_2hcoy"]
+[ext_resource type="PackedScene" uid="uid://dca640i6dpaya" path="res://scenes/ControlPanel.tscn" id="7_ou7ap"]
 
 [sub_resource type="Sky" id="Sky_blue"]
 
@@ -14,9 +14,20 @@
 background_mode = 1
 background_color = Color(0.44313726, 0.5921569, 0.6862745, 1)
 sky = SubResource("Sky_blue")
-tonemap_mode = 2
-glow_intensity = 0.3
-glow_bloom = 0.1
+ambient_light_source = 2
+ambient_light_color = Color(1, 1, 1, 1)
+ambient_light_energy = 0.15
+reflected_light_source = 1
+tonemap_exposure = 1.31
+tonemap_white = 3.97
+glow_intensity = 0.0
+glow_bloom = 0.02
+glow_hdr_threshold = 0.07
+glow_hdr_scale = 0.0
+glow_hdr_luminance_cap = 149.75
+adjustment_enabled = true
+adjustment_brightness = 0.85
+adjustment_contrast = 1.25
 
 [node name="Main" type="Node3D"]
 
@@ -24,10 +35,10 @@ glow_bloom = 0.1
 environment = SubResource("Environment_blue")
 
 [node name="LSLCommunicationController" type="Node" parent="."]
-script = ExtResource("1_comm")
+script = ExtResource("1_nc24d")
 
 [node name="ControlHand" type="Node3D" parent="."]
-script = ExtResource("2_control")
+script = ExtResource("2_yx6bi")
 
 [node name="Wrist" type="Node3D" parent="ControlHand"]
 
@@ -76,12 +87,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
 [node name="Pinky0" type="Node3D" parent="ControlHand/Pinky2/Pinky1"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
 
-[node name="WVRLeftHand_1106_ASCII" parent="ControlHand" instance=ExtResource("3_ak64q")]
+[node name="WVRLeftHand_1106_ASCII" parent="ControlHand" instance=ExtResource("3_gy4eo")]
 transform = Transform3D(4.895619e-07, 2.853257e-14, -3.7332897, 3.2637456e-07, -3.7332897, 1.4266288e-14, -3.7332897, -3.2637456e-07, -4.895619e-07, 0.75758225, 0, 0)
 
 [node name="PredictedHand" type="Node3D" parent="."]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
-script = ExtResource("3_predicted")
+script = ExtResource("4_ye01p")
 
 [node name="Wrist" type="Node3D" parent="PredictedHand"]
 
@@ -130,7 +141,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
 [node name="Pinky0" type="Node3D" parent="PredictedHand/Pinky2/Pinky1"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 0, 0)
 
-[node name="WVRLeftHand_1106_ASCII" parent="PredictedHand" instance=ExtResource("3_ak64q")]
+[node name="WVRLeftHand_1106_ASCII" parent="PredictedHand" instance=ExtResource("3_gy4eo")]
 transform = Transform3D(4.895619e-07, -2.853257e-14, 3.7332897, -3.2637456e-07, -3.7332897, 1.4266288e-14, 3.7332897, -3.2637456e-07, -4.895619e-07, 0.17892405, 0, 0)
 
 [node name="Camera3D" type="Camera3D" parent="."]
@@ -144,7 +155,7 @@ offset_top = 10.0
 offset_right = 300.0
 offset_bottom = 150.0
 theme_override_font_sizes/font_size = 16
-script = ExtResource("5_ui")
+script = ExtResource("5_lsrjb")
 
 [node name="Logo" type="TextureRect" parent="."]
 anchors_preset = 1
@@ -154,14 +165,23 @@ offset_left = -508.0
 offset_right = 0.9177246
 offset_bottom = 102.0
 grow_horizontal = 0
-texture = ExtResource("6_23hlc")
+texture = ExtResource("6_2hcoy")
 expand_mode = 3
 stretch_mode = 5
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, -0.75, 0.433013, 0, 5, 0)
+light_energy = 0.6
+light_specular = 0.0
+light_bake_mode = 1
+shadow_bias = 0.0
+shadow_normal_bias = 0.775
+shadow_transmittance_bias = -1.305
+directional_shadow_mode = 0
+directional_shadow_fade_start = 0.593
+sky_mode = 1
 
-[node name="ControlPanel" parent="." instance=ExtResource("8_controlpanel")]
+[node name="ControlPanel" parent="." instance=ExtResource("7_ou7ap")]
 anchors_preset = 1
 anchor_bottom = 0.0
 offset_left = -321.0
