@@ -277,6 +277,22 @@ public static class LSLWrapper
 	}
 
 	/// <summary>
+	/// Push a string sample to a StreamOutlet
+	/// </summary>
+	public static void PushSample(object outlet, string[] sample)
+	{
+		try
+		{
+			var pushMethod = streamOutletType.GetMethod("PushSample", [typeof(string[])]);
+			pushMethod.Invoke(outlet, [sample]);
+		}
+		catch (Exception e)
+		{
+			GD.PrintErr($"❌ PushSample (string) failed: {e.Message}");
+		}
+	}
+
+	/// <summary>
 	/// Get StreamInfo name
 	/// </summary>
 	public static string GetStreamInfoName(object streamInfo)
@@ -305,6 +321,31 @@ public static class LSLWrapper
 		catch
 		{
 			return 0;
+		}
+	}
+
+	/// <summary>
+	/// Add initial state/schema to StreamInfo metadata
+	/// </summary>
+	public static void SetStreamMetadata(object streamInfo, string fieldName, string value)
+	{
+		try
+		{
+			var descMethod = streamInfoType.GetMethod("Desc");
+			if (descMethod == null) return;
+
+			object xmlElement = descMethod.Invoke(streamInfo, null);
+			if (xmlElement == null) return;
+
+			var appendMethod = xmlElement.GetType().GetMethod("AppendChildValue", [typeof(string), typeof(string)]);
+			if (appendMethod != null)
+			{
+				appendMethod.Invoke(xmlElement, [fieldName, value]);
+			}
+		}
+		catch (Exception e)
+		{
+			GD.PrintErr($"❌ Failed to set stream metadata: {e.Message}");
 		}
 	}
 

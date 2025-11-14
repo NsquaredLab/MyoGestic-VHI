@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 public partial class ControlHandSkeleton : Node3D
 {
@@ -8,6 +9,7 @@ public partial class ControlHandSkeleton : Node3D
 	[Export] public bool EnableDataStream = false;
 	[Export] public bool EnableMovementControl = true;  // Enable predefined movement playback
 	[Export] public MovementMode Mode = MovementMode.AI;  // AI or Classifier mode
+	[Export] public string ConfigFilePath = "user://movements.toml";  // Path to movement config file
 	[Export] public float Frequency = 0.5f;  // Movement cycles per second
 	[Export] public float HoldTime = 1.0f;  // Time to hold at max flexion (seconds)
 	[Export] public float RestTime = 1.0f;  // Time to hold at rest (seconds)
@@ -23,13 +25,14 @@ public partial class ControlHandSkeleton : Node3D
 	private readonly float[][][] jointMaximumMovement = new float[16][][];
 
 	// Movement control system
-	private Dictionary<Movements, float[][][]> movementPoses;
-	private Movements[] availableMovements;
+	private Dictionary<string, float[][][]> movementPoses;
+	private string[] availableMovements;
 	private int currentMovementIndex = 0;
 	private string animationState = "waiting";  // waiting, closing, holding, opening, resting
 	private float animationArgument = 0.0f;
 	private float stateTimer = 0.0f;
 	private DateTime animationStartTime;
+	private FileSystemWatcher configWatcher;  // Watches for config file changes
 
 	// Bone names in the FBX model (WaveBone naming convention)
 	// Based on the Unity hand structure, mapping to WaveBone_0 through WaveBone_15
@@ -91,13 +94,25 @@ public partial class ControlHandSkeleton : Node3D
 		if (EnableMovementControl)
 		{
 			GD.Print("  Initializing movement control system...");
-			movementPoses = MovementPoses.GetMovementPoses();
-			availableMovements = Mode == MovementMode.AI ?
-				MovementPoses.AIModeMovements :
-				MovementPoses.ClassifierModeMovements;
+			LoadMovementConfig();
 			animationStartTime = DateTime.Now;
-			GD.Print($"  Movement mode: {Mode} ({availableMovements.Length} movements available)");
-			GD.Print($"  Current movement: {availableMovements[currentMovementIndex]}");
+
+			if (movementPoses != null && availableMovements != null && availableMovements.Length > 0)
+			{
+				GD.Print($"  Movement mode: {Mode} ({availableMovements.Length} movements available)");
+				GD.Print($"  Current movement: {availableMovements[currentMovementIndex]}");
+
+				// Send initial movement name via LSL
+				communicationController?.SendMovementState(availableMovements[currentMovementIndex]);
+
+				// Set up file watcher for hot-reload
+				SetupConfigWatcher();
+			}
+			else
+			{
+				GD.PrintErr("  Failed to load movements - using empty movement list");
+				availableMovements = [];
+			}
 		}
 
 		// Apply skin color material to the hand mesh
@@ -362,6 +377,9 @@ public partial class ControlHandSkeleton : Node3D
 				stateTimer = 0;
 				animationStartTime = DateTime.Now;
 				GD.Print($"▼ START movement: {availableMovements[currentMovementIndex]}");
+
+				// Send current movement name via LSL when starting
+				communicationController?.SendMovementState(availableMovements[currentMovementIndex].ToString());
 			}
 		}
 
@@ -372,6 +390,9 @@ public partial class ControlHandSkeleton : Node3D
 			stateTimer = 0;
 			ResetBones();
 			GD.Print($"▲ STOP movement");
+
+			// Send "Rest" via LSL when stopping
+			communicationController?.SendMovementState("Rest");
 		}
 	}
 
@@ -380,7 +401,13 @@ public partial class ControlHandSkeleton : Node3D
 		if (animationState == "waiting" || skeleton == null || movementPoses == null)
 			return;
 
-		Movements currentMovement = availableMovements[currentMovementIndex];
+		string currentMovement = availableMovements[currentMovementIndex];
+		if (!movementPoses.ContainsKey(currentMovement))
+		{
+			GD.PrintErr($"Movement '{currentMovement}' not found in poses dictionary");
+			return;
+		}
+
 		float[][][] poses = movementPoses[currentMovement];
 
 		stateTimer += delta;
@@ -465,12 +492,139 @@ public partial class ControlHandSkeleton : Node3D
 		if (!EnableMovementControl || availableMovements == null || currentMovementIndex >= availableMovements.Length)
 			return "None";
 
-		return availableMovements[currentMovementIndex].ToString();
+		return availableMovements[currentMovementIndex];
 	}
 
 	public string GetAnimationState()
 	{
 		return animationState;
+	}
+
+	// ========== CONFIG LOADING SYSTEM ==========
+
+	private void LoadMovementConfig()
+	{
+		string configPath = ProjectSettings.GlobalizePath(ConfigFilePath);
+
+		// Generate default config if it doesn't exist
+		if (!File.Exists(configPath))
+		{
+			GD.Print($"Config file not found at {configPath}, generating default...");
+			MovementConfigGenerator.GenerateDefaultConfig(configPath);
+		}
+
+		// Load config
+		var loadedPoses = MovementConfigLoader.LoadConfig(configPath);
+
+		if (loadedPoses == null || loadedPoses.Count == 0)
+		{
+			GD.PrintErr("Failed to load movement config, falling back to hardcoded poses");
+			// Fallback to hardcoded poses
+			var hardcodedPoses = MovementPoses.GetMovementPoses();
+			movementPoses = new Dictionary<string, float[][][]>();
+			foreach (var kvp in hardcodedPoses)
+			{
+				movementPoses[kvp.Key.ToString()] = kvp.Value;
+			}
+
+			// Get movement list based on mode
+			var hardcodedMovements = Mode == MovementMode.AI ?
+				MovementPoses.AIModeMovements :
+				MovementPoses.ClassifierModeMovements;
+			availableMovements = new string[hardcodedMovements.Length];
+			for (int i = 0; i < hardcodedMovements.Length; i++)
+			{
+				availableMovements[i] = hardcodedMovements[i].ToString();
+			}
+		}
+		else
+		{
+			movementPoses = loadedPoses;
+			availableMovements = MovementConfigLoader.GetMovementNames(loadedPoses);
+			GD.Print($"Loaded {availableMovements.Length} movements from config");
+		}
+	}
+
+	private void SetupConfigWatcher()
+	{
+		string configPath = ProjectSettings.GlobalizePath(ConfigFilePath);
+		string directory = Path.GetDirectoryName(configPath);
+		string filename = Path.GetFileName(configPath);
+
+		if (!Directory.Exists(directory))
+		{
+			GD.PrintErr($"Config directory does not exist: {directory}");
+			return;
+		}
+
+		try
+		{
+			configWatcher = new FileSystemWatcher(directory, filename);
+			configWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size;
+			configWatcher.Changed += OnConfigFileChanged;
+			configWatcher.EnableRaisingEvents = true;
+			GD.Print($"Watching config file: {configPath}");
+		}
+		catch (Exception e)
+		{
+			GD.PrintErr($"Failed to set up config watcher: {e.Message}");
+		}
+	}
+
+	private DateTime lastConfigReload = DateTime.MinValue;
+	private void OnConfigFileChanged(object sender, FileSystemEventArgs e)
+	{
+		// Debounce: ignore rapid consecutive changes
+		if ((DateTime.Now - lastConfigReload).TotalMilliseconds < 500)
+			return;
+
+		lastConfigReload = DateTime.Now;
+
+		GD.Print($"Config file changed, reloading...");
+
+		// Call deferred to avoid threading issues
+		CallDeferred(nameof(ReloadConfig));
+	}
+
+	private void ReloadConfig()
+	{
+		string configPath = ProjectSettings.GlobalizePath(ConfigFilePath);
+		var loadedPoses = MovementConfigLoader.LoadConfig(configPath);
+
+		if (loadedPoses != null && loadedPoses.Count > 0)
+		{
+			int oldIndex = currentMovementIndex;
+			string oldMovement = availableMovements[oldIndex];
+
+			movementPoses = loadedPoses;
+			availableMovements = MovementConfigLoader.GetMovementNames(loadedPoses);
+
+			// Try to preserve current movement selection
+			currentMovementIndex = Array.IndexOf(availableMovements, oldMovement);
+			if (currentMovementIndex < 0)
+				currentMovementIndex = 0;
+
+			GD.Print($"Config reloaded: {availableMovements.Length} movements");
+
+			// Reset animation state to prevent issues
+			animationState = "waiting";
+			ResetBones();
+		}
+		else
+		{
+			GD.PrintErr("Config reload failed, keeping current configuration");
+		}
+	}
+
+	public override void _ExitTree()
+	{
+		// Clean up file watcher
+		if (configWatcher != null)
+		{
+			configWatcher.EnableRaisingEvents = false;
+			configWatcher.Dispose();
+			configWatcher = null;
+		}
 	}
 
 	private void ApplySkinColor()

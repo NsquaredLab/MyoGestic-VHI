@@ -7,5 +7,6 @@
   <ItemGroup>
     <PackageReference Include="SharpLSL.Native.all" Version="1.16.2" />
     <PackageReference Include="SharpLSL" Version="1.16.2-rc.1" />
+    <PackageReference Include="Tomlyn" Version="0.17.0" />
   </ItemGroup>
 </Project>

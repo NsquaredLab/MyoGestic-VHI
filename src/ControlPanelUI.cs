@@ -1,10 +1,12 @@
 using Godot;
+using System.Text.Json;
 
 public partial class ControlPanelUI : Control
 {
 	// References to hand controllers
 	private ControlHandSkeleton controlHand;
 	private PredictedHandSkeleton predictedHand;
+	private LSLCommunicationController lslController;
 
 	// Control Hand UI elements
 	private HSlider speedSlider;
@@ -30,6 +32,9 @@ public partial class ControlPanelUI : Control
 	private Vector3 controlMeshOriginalPos;
 	private Vector3 predictedMeshOriginalPos;
 
+	// Config file button
+	private Button openConfigButton;
+
 	// UI scaling
 	private Vector2 baseResolution = new(1152, 648); // Default window size
 	private Window window;
@@ -42,6 +47,7 @@ public partial class ControlPanelUI : Control
 		// Get references to hand controllers
 		controlHand = GetNode<ControlHandSkeleton>("/root/Main/ControlHand");
 		predictedHand = GetNode<PredictedHandSkeleton>("/root/Main/PredictedHand");
+		lslController = GetNode<LSLCommunicationController>("/root/Main/LSLCommunicationController");
 
 		// Save original mesh positions
 		var controlMesh = controlHand.GetNode<Node3D>("WVRLeftHand_1106_ASCII");
@@ -59,6 +65,9 @@ public partial class ControlPanelUI : Control
 
 		// Get hand chirality toggle
 		rightHandToggle = GetNode<CheckBox>("Panel/VBoxContainer/HandChiralityGroup/RightHandToggle");
+
+		// Get config button
+		openConfigButton = GetNode<Button>("Panel/VBoxContainer/ConfigGroup/OpenConfigButton");
 
 		// Get UI element references
 		speedSlider = GetNode<HSlider>("Panel/VBoxContainer/ControlHandGroup/SpeedContainer/SpeedSlider");
@@ -97,6 +106,7 @@ public partial class ControlPanelUI : Control
 		smoothingSpeedSlider.ValueChanged += OnSmoothingSpeedChanged;
 		collapseButton.Pressed += OnCollapseToggled;
 		rightHandToggle.Toggled += OnHandChiralityToggled;
+		openConfigButton.Pressed += OnOpenConfigPressed;
 	}
 
 	private void OnSpeedChanged(double value)
@@ -159,6 +169,12 @@ public partial class ControlPanelUI : Control
 		isCollapsed = !isCollapsed;
 		mainPanel.Visible = !isCollapsed;
 		collapseButton.Text = isCollapsed ? ">" : "<";
+
+		// Send menu state when collapsing (user finished editing)
+		if (isCollapsed)
+		{
+			SendMenuStateUpdate();
+		}
 	}
 
 	private void OnHandChiralityToggled(bool isRightHand)
@@ -193,6 +209,55 @@ public partial class ControlPanelUI : Control
 			// When flipped, negate X to compensate for the flip around wrist origin
 			controlMesh.Position = new Vector3(controlMeshOriginalPos.X, controlMeshOriginalPos.Y, controlMeshOriginalPos.Z);
 			predictedMesh.Position = new Vector3(predictedMeshOriginalPos.X, predictedMeshOriginalPos.Y, predictedMeshOriginalPos.Z);
+		}
+	}
+
+	private void SendMenuStateUpdate()
+	{
+		if (lslController == null) return;
+
+		// Create a dictionary with all menu settings
+		var menuState = new System.Collections.Generic.Dictionary<string, object>
+		{
+			{ "speed", controlHand.Frequency },
+			{ "holdingTime", controlHand.HoldTime },
+			{ "restingTime", controlHand.RestTime },
+			{ "smoothingEnabled", predictedHand.EnableSmoothing },
+			{ "smoothingSpeed", predictedHand.SmoothingSpeed },
+			{ "isRightHand", rightHandToggle.ButtonPressed }
+		};
+
+		// Serialize to JSON
+		string json = JsonSerializer.Serialize(menuState);
+
+		// Send via LSL
+		lslController.SendMenuState(json);
+	}
+
+	private void OnOpenConfigPressed()
+	{
+		// Get the config file path from ControlHandSkeleton
+		string configPath = controlHand.ConfigFilePath;
+
+		// Convert Godot path (user://) to absolute system path
+		string absolutePath = ProjectSettings.GlobalizePath(configPath);
+
+		// Check if file exists, create it if it doesn't
+		if (!System.IO.File.Exists(absolutePath))
+		{
+			GD.Print($"Config file not found at {absolutePath}, generating...");
+			MovementConfigGenerator.GenerateDefaultConfig(absolutePath);
+		}
+
+		// Open with default system editor
+		try
+		{
+			OS.ShellOpen(absolutePath);
+			GD.Print($"Opening config file: {absolutePath}");
+		}
+		catch (System.Exception e)
+		{
+			GD.PrintErr($"Failed to open config file: {e.Message}");
 		}
 	}
 }

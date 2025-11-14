@@ -8,16 +8,20 @@ using System.Threading.Tasks;
 
 public partial class LSLCommunicationController : Node
 {
-	[Export] public string PredictionStreamName = "HandPredictions";
-	[Export] public string PredictionStreamType = "EMG";
-	[Export] public string ControlOutletName = "ControlHand";
-	[Export] public string PredictedOutletName = "PredictedHand";
+	[Export] public string PredictionStreamName = "MyoGestic_Output";
+	[Export] public string PredictionStreamType = "MyoGestic_9DVector";
+	[Export] public string ControlOutletName = "VHI_Control";
+	[Export] public string PredictedOutletName = "VHI_Predict";
+	[Export] public string MovementStateOutletName = "VHI_MovementState";
+	[Export] public string MenuStateOutletName = "VHI_MenuState";
 	[Export] public int ExpectedChannels = 9;
 	[Export] public bool EnableOutlets = true;  // Can disable outlets if they cause issues
 
 	private object predictionInlet;  // Actually StreamInlet, but using object to avoid type reference
 	private object controlOutlet;    // Actually StreamOutlet
 	private object predictedOutlet;  // Actually StreamOutlet
+	private object movementStateOutlet;  // Actually StreamOutlet
+	private object menuStateOutlet;  // Actually StreamOutlet
 
 	private List<float> receivedDataControl = [];
 	private List<float> receivedDataPredicted = [];
@@ -116,6 +120,9 @@ public partial class LSLCommunicationController : Node
 				GD.PrintErr($"❌ Error pulling LSL sample: {e.Message}");
 				predictionInlet = null;
 				IsConnected = false;
+				// Clear stale data when disconnected
+				receivedDataControl.Clear();
+				receivedDataPredicted.Clear();
 			}
 		}
 
@@ -136,14 +143,8 @@ public partial class LSLCommunicationController : Node
 			// This runs on a background thread, so use CallDeferred for GD.Print
 			CallDeferred(nameof(LogMessage), $"🔍 Searching for LSL stream: {PredictionStreamName}...");
 
-			// Try to resolve by name first with short timeout (1 second)
+			// Only resolve by name to avoid connecting to VHI outlets
 			var availableStreams = LSLWrapper.Resolve("name", PredictionStreamName, 1.0);
-
-			// If not found by name, try by type
-			if (availableStreams == null || availableStreams.Length == 0)
-			{
-				availableStreams = LSLWrapper.Resolve("type", PredictionStreamType, 1.0);
-			}
 
 			if (availableStreams != null && availableStreams.Length > 0)
 			{
@@ -166,6 +167,8 @@ public partial class LSLCommunicationController : Node
 				{
 					IsConnected = false;
 				}
+				// Clear any stale data when no stream is found
+				CallDeferred(nameof(ClearReceivedData));
 			}
 		}
 		catch (Exception e)
@@ -198,6 +201,12 @@ public partial class LSLCommunicationController : Node
 		GD.PrintErr(message);
 	}
 
+	private void ClearReceivedData()
+	{
+		receivedDataControl.Clear();
+		receivedDataPredicted.Clear();
+	}
+
 	private void CreateOutlets()
 	{
 		GD.Print("    ENTERING CreateOutlets()...");
@@ -207,7 +216,7 @@ public partial class LSLCommunicationController : Node
 			// Create control hand outlet
 			var controlInfo = LSLWrapper.CreateStreamInfo(
 				name: ControlOutletName,
-				type: "HandData",
+				type: "MyoGestic_9DVector",
 				channelCount: ExpectedChannels,
 				nominalSrate: 60.0,
 				channelFormat: "Float",
@@ -223,7 +232,7 @@ public partial class LSLCommunicationController : Node
 			// Create predicted hand outlet
 			var predictedInfo = LSLWrapper.CreateStreamInfo(
 				name: PredictedOutletName,
-				type: "HandData",
+				type: "MyoGestic_9DVector",
 				channelCount: ExpectedChannels,
 				nominalSrate: 60.0,
 				channelFormat: "Float",
@@ -234,6 +243,48 @@ public partial class LSLCommunicationController : Node
 			GD.Print("    Creating StreamOutlet...");
 			predictedOutlet = LSLWrapper.CreateStreamOutlet(predictedInfo);
 			GD.Print($"    ✅ Predicted outlet created successfully!");
+
+			GD.Print("    Creating movement state StreamInfo...");
+			// Create movement state outlet (irregular string stream)
+			// Sends movement name strings: OpenHand, CloseHand, Pinch, ThumbsUp, Point, etc.
+			var movementStateInfo = LSLWrapper.CreateStreamInfo(
+				name: MovementStateOutletName,
+				type: "String",
+				channelCount: 1,
+				nominalSrate: 0.0,  // Irregular stream
+				channelFormat: "String",
+				sourceId: "vhi_movementstate_001"
+			);
+			GD.Print("    StreamInfo created successfully");
+
+			// Add initial state as metadata (default first movement is "Rest")
+			LSLWrapper.SetStreamMetadata(movementStateInfo, "initial_state", "Rest");
+
+			GD.Print("    Creating StreamOutlet...");
+			movementStateOutlet = LSLWrapper.CreateStreamOutlet(movementStateInfo);
+			GD.Print($"    ✅ Movement state outlet created successfully!");
+
+			GD.Print("    Creating menu state StreamInfo...");
+			// Create menu state outlet (irregular JSON string stream)
+			// JSON format: {"speed":float, "holdingTime":float, "restingTime":float,
+			//               "smoothingEnabled":bool, "smoothingSpeed":float, "isRightHand":bool}
+			var menuStateInfo = LSLWrapper.CreateStreamInfo(
+				name: MenuStateOutletName,
+				type: "JSON",
+				channelCount: 1,
+				nominalSrate: 0.0,  // Irregular stream
+				channelFormat: "String",
+				sourceId: "vhi_menustate_001"
+			);
+			GD.Print("    StreamInfo created successfully");
+
+			// Add initial state as metadata
+			string initialState = @"{""speed"":0.5,""holdingTime"":1.0,""restingTime"":1.0,""smoothingEnabled"":false,""smoothingSpeed"":5.0,""isRightHand"":false}";
+			LSLWrapper.SetStreamMetadata(menuStateInfo, "initial_state", initialState);
+
+			GD.Print("    Creating StreamOutlet...");
+			menuStateOutlet = LSLWrapper.CreateStreamOutlet(menuStateInfo);
+			GD.Print($"    ✅ Menu state outlet created successfully!");
 		}
 		catch (Exception e)
 		{
@@ -291,6 +342,38 @@ public partial class LSLCommunicationController : Node
 		}
 	}
 
+	public void SendMovementState(string movementName)
+	{
+		if (movementStateOutlet != null && !string.IsNullOrEmpty(movementName))
+		{
+			try
+			{
+				string[] sample = [movementName];
+				LSLWrapper.PushSample(movementStateOutlet, sample);
+			}
+			catch (Exception e)
+			{
+				GD.PrintErr($"❌ Error sending movement state: {e.Message}");
+			}
+		}
+	}
+
+	public void SendMenuState(string jsonData)
+	{
+		if (menuStateOutlet != null && !string.IsNullOrEmpty(jsonData))
+		{
+			try
+			{
+				string[] sample = [jsonData];
+				LSLWrapper.PushSample(menuStateOutlet, sample);
+			}
+			catch (Exception e)
+			{
+				GD.PrintErr($"❌ Error sending menu state: {e.Message}");
+			}
+		}
+	}
+
 	public override void _ExitTree()
 	{
 		// Clean up LSL resources
@@ -299,6 +382,8 @@ public partial class LSLCommunicationController : Node
 			LSLWrapper.Dispose(predictionInlet);
 			LSLWrapper.Dispose(controlOutlet);
 			LSLWrapper.Dispose(predictedOutlet);
+			LSLWrapper.Dispose(movementStateOutlet);
+			LSLWrapper.Dispose(menuStateOutlet);
 		}
 		catch (Exception e)
 		{

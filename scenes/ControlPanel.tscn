@@ -181,6 +181,22 @@ layout_mode = 2
 text = "5.0"
 horizontal_alignment = 2
 
+[node name="HSeparator4" type="HSeparator" parent="Panel/VBoxContainer"]
+layout_mode = 2
+
+[node name="ConfigGroup" type="VBoxContainer" parent="Panel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ConfigLabel" type="Label" parent="Panel/VBoxContainer/ConfigGroup"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Movement Config"
+
+[node name="OpenConfigButton" type="Button" parent="Panel/VBoxContainer/ConfigGroup"]
+layout_mode = 2
+text = "Open Config File"
+
 [node name="CollapseButton" type="Button" parent="."]
 layout_mode = 1
 anchors_preset = 1
