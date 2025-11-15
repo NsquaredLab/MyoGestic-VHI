@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.Linq;
 using System.Reflection;
 
 /// <summary>
@@ -331,16 +332,28 @@ public static class LSLWrapper
 	{
 		try
 		{
-			var descMethod = streamInfoType.GetMethod("Desc");
-			if (descMethod == null) return;
+			var descMethod = streamInfoType.GetMethod("get_Description");
+			if (descMethod == null)
+			{
+				GD.PrintErr("SetStreamMetadata: get_Description method not found");
+				return;
+			}
 
 			object xmlElement = descMethod.Invoke(streamInfo, null);
-			if (xmlElement == null) return;
+			if (xmlElement == null)
+			{
+				GD.PrintErr("SetStreamMetadata: Description is null");
+				return;
+			}
 
-			var appendMethod = xmlElement.GetType().GetMethod("AppendChildValue", [typeof(string), typeof(string)]);
+			var appendMethod = xmlElement.GetType().GetMethod("AppendChild", [typeof(string), typeof(string)]);
 			if (appendMethod != null)
 			{
 				appendMethod.Invoke(xmlElement, [fieldName, value]);
+			}
+			else
+			{
+				GD.PrintErr("SetStreamMetadata: AppendChild method not found");
 			}
 		}
 		catch (Exception e)
