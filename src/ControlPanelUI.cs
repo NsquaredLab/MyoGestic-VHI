@@ -39,6 +39,9 @@ public partial class ControlPanelUI : Control
 	private Vector2 baseResolution = new(1152, 648); // Default window size
 	private Window window;
 
+	// Public property to access hand chirality
+	public bool IsRightHand => rightHandToggle?.ButtonPressed ?? false;
+
 	public override void _Ready()
 	{
 		// Get window for scaling

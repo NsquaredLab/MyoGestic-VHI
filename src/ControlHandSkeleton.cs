@@ -102,8 +102,7 @@ public partial class ControlHandSkeleton : Node3D
 				GD.Print($"  Movement mode: {Mode} ({availableMovements.Length} movements available)");
 				GD.Print($"  Current movement: {availableMovements[currentMovementIndex]}");
 
-				// Send initial movement name via LSL
-				communicationController?.SendMovementState(availableMovements[currentMovementIndex]);
+				// Movement state will be sent when movement is first initiated (not while in waiting state)
 
 				// Set up file watcher for hot-reload
 				SetupConfigWatcher();

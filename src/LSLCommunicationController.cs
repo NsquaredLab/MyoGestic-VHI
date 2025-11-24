@@ -23,6 +23,10 @@ public partial class LSLCommunicationController : Node
 	private object movementStateOutlet;  // Actually StreamOutlet
 	private object menuStateOutlet;  // Actually StreamOutlet
 
+	// References to hand skeletons for reading current state
+	private ControlHandSkeleton controlHand;
+	private PredictedHandSkeleton predictedHand;
+
 	private List<float> receivedDataControl = [];
 	private List<float> receivedDataPredicted = [];
 	private float[] sampleBuffer;
@@ -43,6 +47,11 @@ public partial class LSLCommunicationController : Node
 	public override void _Ready()
 	{
 		GD.Print("=== LSL Communication Controller _Ready() START ===");
+
+		// Get references to hand skeletons
+		controlHand = GetNode<ControlHandSkeleton>("/root/Main/ControlHand");
+		predictedHand = GetNode<PredictedHandSkeleton>("/root/Main/PredictedHand");
+		GD.Print("  Hand skeleton references obtained");
 
 		// Initialize LSL wrapper
 		GD.Print("  Initializing LSL wrapper...");
@@ -226,7 +235,7 @@ public partial class LSLCommunicationController : Node
 
 			GD.Print("    Creating StreamOutlet...");
 			controlOutlet = LSLWrapper.CreateStreamOutlet(controlInfo);
-			GD.Print($"    ✅ Control outlet created successfully!");
+			GD.Print($"    \u2705 Control outlet created successfully!");
 
 			GD.Print("    Creating predicted hand StreamInfo...");
 			// Create predicted hand outlet
@@ -242,27 +251,9 @@ public partial class LSLCommunicationController : Node
 
 			GD.Print("    Creating StreamOutlet...");
 			predictedOutlet = LSLWrapper.CreateStreamOutlet(predictedInfo);
-			GD.Print($"    ✅ Predicted outlet created successfully!");
+			GD.Print($"    \u2705 Predicted outlet created successfully!");
 
-			GD.Print("    Creating movement state StreamInfo...");
-			// Create movement state outlet (irregular string stream)
-			// Sends movement name strings: OpenHand, CloseHand, Pinch, ThumbsUp, Point, etc.
-			var movementStateInfo = LSLWrapper.CreateStreamInfo(
-				name: MovementStateOutletName,
-				type: "String",
-				channelCount: 1,
-				nominalSrate: 0.0,  // Irregular stream
-				channelFormat: "String",
-				sourceId: "vhi_movementstate_001"
-			);
-			GD.Print("    StreamInfo created successfully");
-
-			// Add initial state as metadata (default first movement is "Rest")
-			LSLWrapper.SetStreamMetadata(movementStateInfo, "initial_state", "Rest");
-
-			GD.Print("    Creating StreamOutlet...");
-			movementStateOutlet = LSLWrapper.CreateStreamOutlet(movementStateInfo);
-			GD.Print($"    ✅ Movement state outlet created successfully!");
+			// Movement state outlet will be created on-demand when first movement is initiated
 
 			GD.Print("    Creating menu state StreamInfo...");
 			// Create menu state outlet (irregular JSON string stream)
@@ -278,20 +269,67 @@ public partial class LSLCommunicationController : Node
 			);
 			GD.Print("    StreamInfo created successfully");
 
-			// Add initial state as metadata
-			string initialState = @"{""speed"":0.5,""holdingTime"":1.0,""restingTime"":1.0,""smoothingEnabled"":false,""smoothingSpeed"":5.0,""isRightHand"":false}";
+			// Build initial state from current hand configuration
+			string initialState = $@"{{""speed"":{controlHand.Frequency},""holdingTime"":{controlHand.HoldTime},""restingTime"":{controlHand.RestTime},""smoothingEnabled"":{(predictedHand.EnableSmoothing ? "true" : "false")},""smoothingSpeed"":{predictedHand.SmoothingSpeed},""isRightHand"":false}}";
 			LSLWrapper.SetStreamMetadata(menuStateInfo, "initial_state", initialState);
 
 			GD.Print("    Creating StreamOutlet...");
 			menuStateOutlet = LSLWrapper.CreateStreamOutlet(menuStateInfo);
-			GD.Print($"    ✅ Menu state outlet created successfully!");
+			GD.Print($"    \u2705 Menu state outlet created successfully!");
+
+			// Send initial state
+			string[] initialMenuSample = [initialState];
+			LSLWrapper.PushSample(menuStateOutlet, initialMenuSample);
+			GD.Print("    Initial menu state sent");
 		}
 		catch (Exception e)
 		{
-			GD.PrintErr($"❌ Error creating LSL outlets: {e.Message}");
+			GD.PrintErr($"\u274c Error creating LSL outlets: {e.Message}");
 			GD.PrintErr($"    Stack trace: {e.StackTrace}");
 		}
 		GD.Print("    EXITING CreateOutlets()");
+	}
+
+	private void CreateMovementStateOutlet()
+	{
+		if (movementStateOutlet != null)
+			return; // Already created
+
+		GD.Print("    Creating movement state StreamInfo...");
+		try
+		{
+			// Create movement state outlet (irregular string stream)
+			// Sends movement name strings: OpenHand, CloseHand, Pinch, ThumbsUp, Point, etc.
+			var movementStateInfo = LSLWrapper.CreateStreamInfo(
+				name: MovementStateOutletName,
+				type: "String",
+				channelCount: 1,
+				nominalSrate: 0.0,  // Irregular stream
+				channelFormat: "String",
+				sourceId: "vhi_movementstate_001"
+			);
+			GD.Print("    StreamInfo created successfully");
+
+			// Get current movement from control hand
+			string currentMovement = controlHand?.GetCurrentMovementName() ?? "Rest";
+			
+			// Add initial state as metadata
+			LSLWrapper.SetStreamMetadata(movementStateInfo, "initial_state", currentMovement);
+
+			GD.Print("    Creating StreamOutlet...");
+			movementStateOutlet = LSLWrapper.CreateStreamOutlet(movementStateInfo);
+			GD.Print($"    \u2705 Movement state outlet created successfully!");
+
+			// Send initial state
+			string[] initialSample = [currentMovement];
+			LSLWrapper.PushSample(movementStateOutlet, initialSample);
+			GD.Print($"    Initial movement state '{currentMovement}' sent");
+		}
+		catch (Exception e)
+		{
+			GD.PrintErr($"\u274c Error creating movement state outlet: {e.Message}");
+			GD.PrintErr($"    Stack trace: {e.StackTrace}");
+		}
 	}
 
 	public List<float> GetReceivedDataControl()
@@ -344,6 +382,12 @@ public partial class LSLCommunicationController : Node
 
 	public void SendMovementState(string movementName)
 	{
+		// Create outlet on first use (lazy initialization)
+		if (movementStateOutlet == null)
+		{
+			CreateMovementStateOutlet();
+		}
+
 		if (movementStateOutlet != null && !string.IsNullOrEmpty(movementName))
 		{
 			try
@@ -353,7 +397,7 @@ public partial class LSLCommunicationController : Node
 			}
 			catch (Exception e)
 			{
-				GD.PrintErr($"❌ Error sending movement state: {e.Message}");
+				GD.PrintErr($"\u274c Error sending movement state: {e.Message}");
 			}
 		}
 	}
