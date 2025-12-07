@@ -103,18 +103,30 @@ public partial class LSLCommunicationController : Node
 		{
 			try
 			{
-				// Non-blocking pull using wrapper
-				double timestamp = LSLWrapper.PullSample(predictionInlet, sampleBuffer, 0.0);
-
-				if (timestamp > 0)
+				// Pull ALL available samples to avoid choppy visualization
+				// Keep only the most recent sample
+				double timestamp = 0;
+				int samplesThisFrame = 0;
+				
+				while (true)
 				{
-					// Successfully received data
+					double ts = LSLWrapper.PullSample(predictionInlet, sampleBuffer, 0.0);
+					if (ts <= 0)
+						break;  // No more samples available
+					
+					timestamp = ts;
+					samplesThisFrame++;
+					
+					// Update data with latest sample
 					List<float> data = [.. sampleBuffer];
 					receivedDataControl = [.. data];
 					receivedDataPredicted = [.. data];
+				}
 
+				if (samplesThisFrame > 0)
+				{
 					// Update input FPS
-					inputFrameCount++;
+					inputFrameCount += samplesThisFrame;
 					var timeSinceLastInput = (DateTime.Now - lastInputTime).TotalSeconds;
 					if (timeSinceLastInput >= 1.0)
 					{
@@ -126,7 +138,7 @@ public partial class LSLCommunicationController : Node
 			}
 			catch (Exception e)
 			{
-				GD.PrintErr($"❌ Error pulling LSL sample: {e.Message}");
+				GD.PrintErr($"Error pulling LSL sample: {e.Message}");
 				predictionInlet = null;
 				IsConnected = false;
 				// Clear stale data when disconnected
@@ -221,6 +233,9 @@ public partial class LSLCommunicationController : Node
 		GD.Print("    ENTERING CreateOutlets()...");
 		try
 		{
+			// Get the absolute path to the movements config file
+			string configPath = ProjectSettings.GlobalizePath("user://movements.toml");
+			
 			GD.Print("    Creating control hand StreamInfo...");
 			// Create control hand outlet
 			var controlInfo = LSLWrapper.CreateStreamInfo(
@@ -232,6 +247,9 @@ public partial class LSLCommunicationController : Node
 				sourceId: "control_hand_001"
 			);
 			GD.Print("    StreamInfo created successfully");
+			
+			// Add config path to control stream description
+			LSLWrapper.SetStreamMetadata(controlInfo, "config_file", configPath);
 
 			GD.Print("    Creating StreamOutlet...");
 			controlOutlet = LSLWrapper.CreateStreamOutlet(controlInfo);
@@ -248,6 +266,9 @@ public partial class LSLCommunicationController : Node
 				sourceId: "predicted_hand_001"
 			);
 			GD.Print("    StreamInfo created successfully");
+			
+			// Add config path to predicted stream description
+			LSLWrapper.SetStreamMetadata(predictedInfo, "config_file", configPath);
 
 			GD.Print("    Creating StreamOutlet...");
 			predictedOutlet = LSLWrapper.CreateStreamOutlet(predictedInfo);
