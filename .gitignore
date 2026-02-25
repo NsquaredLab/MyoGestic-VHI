@@ -1,4 +1,12 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Editor/IDE config
 .idea/
+.vscode/
+
+# AI tool config
+.claude/
+.serena/
+CLAUDE.md
