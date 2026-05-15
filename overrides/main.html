@@ -11,4 +11,29 @@
 {% block extrahead %}
   {{ super() }}
   <script src="https://context7.com/widget.js" data-library="/nsquaredlab/myogestic-vhi" defer></script>
+
+  {# Material binds global hotkeys (s = search, f = filter, n / p = nav)
+     on document and bails out when document.activeElement is an input.
+     The Context7 widget puts its <input> inside a CLOSED shadow root, so
+     activeElement re-targets to the host <div> and Material's check
+     fails: typing in the chat opens search. Fix: stop key events at the
+     widget host so they never reach Material. The widget's own listeners
+     are inside the shadow (innermost in the propagation path) and fire
+     first, so chat input still works. #}
+  <script>
+    (function () {
+      function attach() {
+        var host = document.getElementById('context7-widget');
+        if (!host) { requestAnimationFrame(attach); return; }
+        ['keydown', 'keyup', 'keypress'].forEach(function (t) {
+          host.addEventListener(t, function (e) { e.stopPropagation(); });
+        });
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', attach);
+      } else {
+        attach();
+      }
+    })();
+  </script>
 {% endblock %}
