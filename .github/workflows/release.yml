@@ -173,7 +173,11 @@ jobs:
         shell: bash
 
       - name: Upload platform artifact
-        uses: actions/upload-artifact@v7
+        # actions/upload-artifact@v7 silently fails the upload step on Windows
+        # runners (v7 is a very recent major; the upload process exits before
+        # the artifact is committed and the job records failure with no error
+        # text). v4 is the stable, well-tested pair.
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
@@ -185,7 +189,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all platform artifacts
-        uses: actions/download-artifact@v8
+        # Version-paired with actions/upload-artifact@v4 above.
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
