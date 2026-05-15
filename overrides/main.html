@@ -2,8 +2,13 @@
 
 {# Inject the Context7 chat widget on every page. The widget renders a
    floating chat button via https://context7.com/widget.js — see
-   context7.json at the repo root for the library binding. #}
+   context7.json at the repo root for the library binding.
+
+   `defer` is required: the script lives in <head> (via extrahead) but its
+   IIFE ends with `document.body.appendChild(...)`, which throws
+   TypeError(null) if it runs before <body> is parsed. `defer` delays
+   execution until after the DOM is ready. #}
 {% block extrahead %}
   {{ super() }}
-  <script src="https://context7.com/widget.js" data-library="/nsquaredlab/myogestic-vhi"></script>
+  <script src="https://context7.com/widget.js" data-library="/nsquaredlab/myogestic-vhi" defer></script>
 {% endblock %}
