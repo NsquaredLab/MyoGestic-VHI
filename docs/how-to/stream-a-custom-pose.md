@@ -58,3 +58,61 @@ the control hand does not touch the predicted hand.
   `Stream` mode simply holds its last pose - VHI keeps retrying the inlet.
 - `VHI_Control` still publishes the control hand's *actual* pose, so a streamed
   pose round-trips into the recording just like a played movement does.
+
+## Use case: 9-DOF model-robustness validation
+
+`Stream` mode is the right tool for **systematically testing a myocontrol
+model across the full 9-DOF pose space** - including multi-DOF activations
+that no single named movement covers. The pattern is:
+
+```python
+import time
+from itertools import product
+import numpy as np
+from myogestic.interfaces import virtual_hand
+
+vhi = virtual_hand()
+client = vhi.control_client()
+pose_outlet = vhi.control_outlet()
+
+# 1. Orchestration over gRPC.
+client.set_session_active(True)       # gate VHI's keyboard - MyoGestic owns the hand
+client.set_control_mode("STREAM")     # control hand reads from MyoGestic_ControlPose
+assert client.get_state().control_mode == "STREAM"   # sanity-check
+
+# 2. Continuous pose injection over LSL.
+LEVELS = [0.0, 0.5, 1.0]                # rest / half / full flexion per DOF
+DOFS = 6                                # 6 finger DOFs; wrist held at 0
+SETTLE_S = 0.5
+
+for combo in product(LEVELS, repeat=DOFS):           # 3^6 = 729 multi-DOF poses
+    pose = np.array([*combo, 0, 0, 0], dtype=np.float32)
+    pose_outlet.push(pose)
+    time.sleep(SETTLE_S)
+    # Your model's prediction at this moment is recorded on its own LSL
+    # outlet; line it up with VHI_Control post-hoc via XDF timestamps.
+
+# 3. Tear down.
+client.set_control_mode("MOVEMENT")
+client.set_session_active(False)
+```
+
+Two planes, two roles - this is the whole design:
+
+| Plane | What it carries here | Role |
+|---|---|---|
+| **gRPC** | `SetControlMode`, `SetSessionActive`, `GetState` | discrete setup / assertions |
+| **LSL** (`MyoGestic_ControlPose`) | the 9-DOF test poses themselves | continuous data |
+
+Two LSL records line everything up offline:
+
+- `VHI_Control` is the **ground truth** the participant saw - record this and
+  align it to your model's prediction outlet via [XDF](../concepts/lsl-streams.md).
+- `MyoGestic_ControlPose` (your test injection) and the model's output are
+  what you compare. Robust models track the injected pose with bounded error
+  across all combos; brittle models fail on combos no single named movement
+  covers.
+
+Edge cases the named-movement set can't reach - "thumb half-flexed + index
+fully flexed + everything else at rest", say - are exactly what this loop
+exposes.

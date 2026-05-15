@@ -51,10 +51,15 @@ ways to get motion:
 
     | Key | Action |
     |---|---|
-    | :material-arrow-left: / :material-arrow-right: | cycle the selected movement |
+    | :material-arrow-left: / :material-arrow-right: | cycle the selected movement (wraps around at both ends) |
     | :material-arrow-down: | start the movement |
     | :material-arrow-up: | stop, return to rest |
     | ++space++ | freeze / unfreeze at the current pose |
+
+    Cycling is the keyboard equivalent of gRPC `SetMovement` - both pick a
+    movement by name from the same `available_movements` list. The
+    programmatic path is `client.set_movement(name)` (see
+    [gRPC control](concepts/grpc-control.md)).
 
 === "LSL stream (predicted hand)"
 
