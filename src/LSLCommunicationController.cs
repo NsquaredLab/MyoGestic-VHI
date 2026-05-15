@@ -1,6 +1,7 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 namespace Vhi;
@@ -434,19 +435,32 @@ public partial class LSLCommunicationController : Node
 
 	public override void _Notification(int what)
 	{
-		// Force exit when the window close is requested
-		// LSL background threads can prevent clean shutdown
+		// Force exit when the window close is requested. LSL background
+		// threads (and the in-process gRPC Kestrel server) keep .NET from
+		// returning from Main on its own, so we have to push the process
+		// out.
 		if (what == NotificationWMCloseRequest)
 		{
 			isShuttingDown = true;
 			GetTree().Quit();
 
-			// Give a moment for cleanup, then force exit
+			// Why _exit() and not Environment.Exit()? Environment.Exit() runs
+			// C++ static destructors via __cxa_finalize. On macOS, that races
+			// with Godot's main-thread SceneTree::finalize() teardown - both
+			// touch Godot's global StringName mutex, the second one finds it
+			// in a half-destroyed state, throws std::system_error, and the
+			// process aborts with a crash report. _exit() is the POSIX
+			// immediate-exit syscall: it skips destructors, the kernel
+			// reaps the process directly, no race possible. We've already
+			// given Godot a half-second to repaint / flush.
 			Task.Run(async () =>
 			{
-				await Task.Delay(1000);
-				System.Environment.Exit(0);
+				await Task.Delay(500);
+				_exit(0);
 			});
 		}
 	}
+
+	[DllImport("libc", EntryPoint = "_exit")]
+	private static extern void _exit(int status);
 }

@@ -10,6 +10,9 @@
 [MyoGestic](https://github.com/NsquaredLab/MyoGestic) ·
 [N-squared Lab](https://www.nsquared.tf.fau.de/)
 
+[![Docs](https://github.com/NsquaredLab/MyoGestic-VHI/actions/workflows/docs.yml/badge.svg)](https://github.com/NsquaredLab/MyoGestic-VHI/actions/workflows/docs.yml)
+[![Release](https://github.com/NsquaredLab/MyoGestic-VHI/actions/workflows/release.yml/badge.svg)](https://github.com/NsquaredLab/MyoGestic-VHI/actions/workflows/release.yml)
+
 </div>
 
 ---

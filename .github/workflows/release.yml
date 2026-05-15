@@ -1,0 +1,199 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write  # required to create the GitHub Release in the release job
+
+jobs:
+  export:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            preset: "Linux"
+            godot_output: dist/VHI.x86_64
+            rid: linux-x64
+            godot_platform: linuxbsd
+            data_dir: dist/data_VHI_godot_linuxbsd_x86_64
+            artifact: VHI-linux-x64.tar.gz
+            templates_path: ~/.local/share/godot/export_templates
+            key_native: libcoreclr.so
+
+          - os: windows-latest
+            preset: "Windows Desktop"
+            godot_output: dist/VHI.exe
+            rid: win-x64
+            godot_platform: windows
+            data_dir: dist/data_VHI_godot_windows_x86_64
+            artifact: VHI-windows-x64.zip
+            templates_path: ~\AppData\Roaming\Godot\export_templates
+            key_native: coreclr.dll
+
+          - os: macos-latest
+            preset: "macOS"
+            godot_output: dist/VHI.app
+            rid: osx-arm64
+            godot_platform: macos
+            # macOS bundles the data dir inside the .app structure.
+            data_dir: dist/VHI.app/Contents/Resources/data_VHI_godot_macos_arm64
+            artifact: VHI-macos-arm64.zip
+            templates_path: ~/Library/Application Support/Godot/export_templates
+            key_native: libcoreclr.dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # global.json at repo root pins .NET 8.0.x; setup-dotnet@v5 respects it.
+      - name: Set up .NET 8 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      # chickensoft-games/setup-godot installs Godot 4.6.1 with .NET support,
+      # downloads the matching export templates, and puts `godot` on PATH.
+      - name: Set up Godot 4.6.1 .NET
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.6.1
+          use-dotnet: true
+          include-templates: true
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('VHI_godot.csproj', '.config/dotnet-tools.json') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Cache Godot export templates
+        uses: actions/cache@v5
+        with:
+          path: ${{ matrix.templates_path }}
+          key: godot-templates-${{ matrix.os }}-4.6.1-mono
+
+      - name: Restore C# project
+        run: dotnet restore VHI_godot.csproj
+        shell: bash
+
+      # First headless pass so Godot imports resources into .godot/. The
+      # `|| true` is because a fresh import can exit non-zero on warnings that
+      # don't actually break the export.
+      - name: Headless import pass
+        run: godot --headless --import --quit-after 60 || true
+        shell: bash
+
+      - name: Create dist directory
+        run: mkdir -p dist
+        shell: bash
+
+      # Godot's own export. On macOS (and possibly Linux/Windows) the .NET
+      # bundling step inside this call silently fails (godot#94957) and the
+      # resulting bundle ships without DLLs. We still need to run it to get
+      # the bundle structure / icon / .pck; we then manually drop in the
+      # publish output in the next step.
+      - name: Godot --export-release (shell only)
+        run: godot --headless --export-release "${{ matrix.preset }}" "${{ matrix.godot_output }}"
+        shell: bash
+
+      # Self-contained publish: includes the .NET runtime + every dependency.
+      # `-p:GodotTargetPlatform=<platform>` tells Godot.NET.Sdk to wire up the
+      # right native interop bits for the target.
+      - name: Publish .NET (self-contained, ${{ matrix.rid }})
+        run: |
+          dotnet publish VHI_godot.csproj \
+            -c ExportRelease -r ${{ matrix.rid }} --self-contained true \
+            -p:GodotTargetPlatform=${{ matrix.godot_platform }} \
+            -p:DebugType=None -p:DebugSymbols=false \
+            -o publish/${{ matrix.rid }}
+        shell: bash
+
+      # Stitch the publish output into the bundle at Godot's expected data
+      # dir. macOS path lives inside the .app; Linux/Windows live alongside
+      # the binary.
+      - name: Stitch publish output into the bundle
+        run: |
+          rm -rf "${{ matrix.data_dir }}"
+          mkdir -p "${{ matrix.data_dir }}"
+          # `cp -R` instead of rsync — rsync is not on the Windows runner by
+          # default. cp -R works on all three OSes via Git Bash on Windows.
+          cp -R publish/${{ matrix.rid }}/. "${{ matrix.data_dir }}/"
+        shell: bash
+
+      # Sanity check: the assembly + runtime native must be in the bundle.
+      # If they're missing, the resulting binary would crash with "Assemblies
+      # not found" - fail loudly rather than ship a broken artifact.
+      - name: Verify bundle contains .NET assemblies
+        run: |
+          test -f "${{ matrix.data_dir }}/VHI_godot.dll"     || { echo "::error::VHI_godot.dll missing"; exit 1; }
+          test -f "${{ matrix.data_dir }}/GodotSharp.dll"   || { echo "::error::GodotSharp.dll missing"; exit 1; }
+          test -f "${{ matrix.data_dir }}/${{ matrix.key_native }}" || { echo "::error::${{ matrix.key_native }} missing"; exit 1; }
+          echo "✓ bundle has the .NET runtime + project DLLs"
+        shell: bash
+
+      # macOS only: re-sign without the hardened runtime. Godot's export
+      # ad-hoc-signs with `hardened` enabled, which silently breaks the
+      # embedded .NET host. We re-sign with bare ad-hoc and assert the
+      # `runtime` flag is gone.
+      - name: macOS - re-sign without hardened runtime
+        if: matrix.os == 'macos-latest'
+        run: |
+          codesign --force --deep --sign - "${{ matrix.godot_output }}"
+          info=$(codesign -dv "${{ matrix.godot_output }}" 2>&1 || true)
+          echo "$info" | grep -E '^CodeDirectory|flags=' || true
+          if echo "$info" | grep -q 'runtime'; then
+            echo "::error::Hardened runtime still present after re-sign" >&2
+            exit 1
+          fi
+        shell: bash
+
+      # Per-OS packaging.
+      - name: Package - Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          chmod +x dist/VHI.x86_64
+          tar -czf "${{ matrix.artifact }}" -C dist .
+        shell: bash
+
+      - name: Package - Windows
+        if: matrix.os == 'windows-latest'
+        run: Compress-Archive -Path dist\* -DestinationPath "${{ matrix.artifact }}"
+        shell: pwsh
+
+      - name: Package - macOS
+        if: matrix.os == 'macos-latest'
+        # `ditto` preserves macOS bundle metadata; plain `zip` would corrupt
+        # the .app and Finder would refuse to unzip it.
+        run: ditto -ck --sequesterRsrc --keepParent "${{ matrix.godot_output }}" "${{ matrix.artifact }}"
+        shell: bash
+
+      - name: Upload platform artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    # Only on real tag pushes - workflow_dispatch runs export but skips this.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: export
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

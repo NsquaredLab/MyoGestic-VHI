@@ -95,16 +95,21 @@ public partial class GrpcControlServer : Node
 
     public override void _ExitTree()
     {
+        // Do NOT call app.StopAsync() or block waiting for Kestrel to drain.
+        //
+        // On macOS, gracefully stopping the ASP.NET Core host while Godot's
+        // SceneTree teardown is in flight triggers a fatal race: a thread-pool
+        // worker spawned by Kestrel's drain logic ends up in Environment.Exit
+        // while Godot's main thread is mid-_propagate_exit_tree, and the two
+        // simultaneous destructor paths fight over Godot's global StringName
+        // mutex - throwing std::system_error and aborting the process.
+        //
+        // The pragmatic fix is to skip the graceful shutdown entirely:
+        // macOS's process reaper will reclaim port 50051 + the listener
+        // threads when this process dies. We just drop the reference so the
+        // GC and the runtime exit handlers have less to coordinate.
         isShuttingDown = true;
-        try
-        {
-            app?.StopAsync().Wait(2500);
-        }
-        catch (Exception)
-        {
-            // Best effort — LSLCommunicationController force-exits the process
-            // shortly after a close request anyway.
-        }
-        GD.Print("gRPC control server stopped");
+        app = null;
+        GD.Print("gRPC control server: skipping graceful StopAsync (process exit will reclaim)");
     }
 }
