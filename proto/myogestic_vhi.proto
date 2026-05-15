@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package myogestic.vhi.v1;
+
+// Control plane between MyoGestic (gRPC client) and the Virtual Hand Interface
+// (gRPC server, hosted in-process by the Godot app). Continuous time-series
+// (predictions, hand poses) stays on LSL; this service carries only discrete
+// commands. The unary return value is the ack/reject.
+//
+// This file is the canonical contract. The copy in the MyoGestic repo
+// (myogestic/_proto/myogestic_vhi.proto) is vendored from here.
+service VhiControl {
+  // Select + start playing a movement on the control hand. movement_name must
+  // match a VHI movement (see MovementDefinitions.cs / the movements TOML) and,
+  // by convention, a MyoGestic class name. "Rest" returns the hand to rest.
+  rpc SetMovement (SetMovementRequest) returns (CommandAck);
+
+  // Freeze the control hand at its current pose, or release it.
+  rpc Freeze (FreezeRequest) returns (CommandAck);
+
+  // Adjust the control-hand animation timing (the UI speed/hold/rest sliders).
+  rpc SetSpeed (SetSpeedRequest) returns (CommandAck);
+
+  // Toggle predicted-hand smoothing and its speed.
+  rpc SetSmoothing (SetSmoothingRequest) returns (CommandAck);
+
+  // Set control-hand chirality (left/right mirror). NOT IMPLEMENTED in the
+  // current VHI - the RPC is wired up but the handler always returns
+  // applied=false. Both hands stay left.
+  rpc SetChirality (SetChiralityRequest) returns (CommandAck);
+
+  // Tell VHI whether a MyoGestic recording session is active. While active,
+  // VHI ignores local keyboard input so MyoGestic is the sole movement source.
+  rpc SetSessionActive (SetSessionActiveRequest) returns (CommandAck);
+
+  // Set how the control hand is driven (see ControlMode) — the predefined
+  // movement state machine, or a continuous pose streamed over LSL.
+  rpc SetControlMode (SetControlModeRequest) returns (CommandAck);
+
+  // Query current VHI state. Doubles as a connection handshake and lets the
+  // client discover the valid movement names for the current mode.
+  rpc GetState (GetStateRequest) returns (StateReply);
+}
+
+// Arguments to SetMovement. movement_name must match an entry in
+// StateReply.available_movements; "Rest" is a special-case that returns
+// the hand to its resting state.
+message SetMovementRequest {
+  // A name from StateReply.available_movements, or the special value "Rest"
+  // to return to the resting state.
+  string movement_name = 1;
+  // false (default): snap to the movement's end pose and hold it — the right
+  //   behaviour for a classifier output or a manual movement command.
+  // true: play the open/close movement cycle (rest -> flex -> hold -> release,
+  //   looping) — used when recording regression data so VHI_Control sweeps a
+  //   continuous kinematic range.
+  bool cycle = 2;
+}
+
+// Arguments to Freeze.
+message FreezeRequest {
+  // true: hold the live pose indefinitely. false: release back to the
+  // resting state and resume the normal movement state machine.
+  bool frozen = 1;
+}
+
+// Arguments to SetSpeed - the control-hand animation timing for a Movement
+// cycle. Non-positive frequency is ignored; negative hold/rest are ignored.
+message SetSpeedRequest {
+  // Movement cycles per second (the closing/opening interpolation speed).
+  float frequency_hz = 1;
+  // Seconds held at max flexion in each cycle.
+  float hold_time_s = 2;
+  // Seconds held at rest in each cycle.
+  float rest_time_s = 3;
+}
+
+// Arguments to SetSmoothing - predicted-hand pose interpolation.
+message SetSmoothingRequest {
+  // true: slerp toward the next sample. false: snap to it.
+  bool enabled = 1;
+  // Slerp speed when enabled; ignored otherwise. Higher = snappier.
+  float smoothing_speed = 2;
+}
+
+// Arguments to SetChirality. Currently not implemented - VHI returns
+// applied=false. Both hands stay left.
+message SetChiralityRequest {
+  // true: right hand. false: left hand.
+  bool right_hand = 1;
+}
+
+// Arguments to SetSessionActive.
+message SetSessionActiveRequest {
+  // true: a MyoGestic recording session is active - VHI's local keyboard
+  // input is gated off so MyoGestic is the sole movement source. false:
+  // keyboard input is enabled again.
+  bool active = 1;
+}
+
+// How the control hand is driven.
+enum ControlMode {
+  // Predefined-movement state machine + local keyboard. The default — nothing
+  // changes for callers that never touch SetControlMode.
+  MOVEMENT = 0;
+  // Continuous 9-DOF pose streamed in over the MyoGestic_ControlPose LSL inlet.
+  // Movement commands (SetMovement / Freeze / SetSpeed) are rejected here.
+  STREAM = 1;
+  // Hold the rest pose; ignore keyboard, stream, and movement commands.
+  IDLE = 2;
+}
+
+// Arguments to SetControlMode.
+message SetControlModeRequest {
+  // The target driver mode for the control hand.
+  ControlMode mode = 1;
+}
+
+// Empty - GetState takes no arguments. proto3 requires a message type even
+// when there are no parameters.
+message GetStateRequest {}
+
+// Returned by every command RPC. Carries the post-command state so the
+// caller doesn't have to follow up with GetState just to confirm.
+message CommandAck {
+  // true: VHI accepted and applied the command. false: rejected (see message).
+  bool applied = 1;
+  // One of: "waiting" | "closing" | "holding" | "opening" | "resting" | "frozen".
+  string current_state = 2;
+  // The currently selected movement name (e.g. "Fist", "Rest").
+  string current_movement = 3;
+  // Human-readable reason when applied == false.
+  string message = 4;
+}
+
+// Returned by GetState. Doubles as a connection handshake (clients know
+// VHI is reachable when the call succeeds) and movement-name discovery.
+message StateReply {
+  // One of: "waiting" | "closing" | "holding" | "opening" | "resting" | "frozen".
+  string current_state = 1;
+  // The currently selected movement name.
+  string current_movement = 2;
+  // Whether a recording session is currently marked active (SetSessionActive).
+  bool session_active = 3;
+  // Valid movement names for the current mode - discover, don't hard-code.
+  repeated string available_movements = 4;
+  // "AI" | "Classifier" - the movement-set mode (see MovementMode).
+  string mode = 5;
+  // How the control hand is currently driven.
+  ControlMode control_mode = 6;
+}

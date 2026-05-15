@@ -1,0 +1,25 @@
+# This is a Godot / .NET project — not a Python package. This pyproject.toml
+# exists only to pin the documentation toolchain (ProperDocs / MkDocs Material)
+# so it can be run with `uv`:
+#
+#     uv run --group docs properdocs serve     # live preview at localhost:8000
+#     uv run --group docs properdocs build     # render the static site into site/
+#
+# See docs/ for the documentation sources and properdocs.yml for the site config.
+
+[project]
+name = "virtual-hand-interface-docs"
+version = "0"
+description = "Documentation toolchain for the Virtual Hand Interface."
+requires-python = ">=3.12"
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+docs = [
+    "properdocs",
+    "mkdocs-material>=9.5",
+    "pymdown-extensions>=10.0",
+    "mkdocs-section-index>=0.3",
+]

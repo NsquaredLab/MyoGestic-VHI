@@ -51,7 +51,7 @@ def main():
     print()
 
     # Check all VHI streams
-    stream_names = ['VHI_Control', 'VHI_Predict', 'VHI_MovementState', 'VHI_MenuState']
+    stream_names = ['VHI_Control', 'VHI_Predict']
 
     for stream_name in stream_names:
         print_stream_info(stream_name)

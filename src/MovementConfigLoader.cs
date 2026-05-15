@@ -5,6 +5,8 @@ using System.Linq;
 using Tomlyn;
 using Tomlyn.Model;
 
+namespace Vhi;
+
 /// <summary>
 /// Loads hand movement configurations from TOML files
 /// </summary>
@@ -51,8 +53,10 @@ public static class MovementConfigLoader
 	};
 
 	/// <summary>
-	/// Load movements from TOML config file
-	/// Returns Dictionary<movementName, float[16][2][3]>
+	/// Load movements from a TOML config file.
+	/// Returns a <c>Dictionary&lt;movementName, float[16][2][3]&gt;</c> (16 joints,
+	/// 2 poses - max-flexion and rest, 3 Euler axes); returns <see langword="null"/>
+	/// on parse or I/O failure.
 	/// </summary>
 	public static Dictionary<string, float[][][]> LoadConfig(string filePath)
 	{

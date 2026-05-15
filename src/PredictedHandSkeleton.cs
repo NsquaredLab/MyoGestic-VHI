@@ -2,10 +2,36 @@ using Godot;
 using System;
 using System.Collections.Generic;
 
+namespace Vhi;
+
+/// <summary>
+/// The "predicted" hand - the model-output hand on the right of the scene.
+///
+/// Pulls 9-DOF samples from the <c>MyoGestic_Output</c> LSL inlet
+/// (via <see cref="LSLCommunicationController"/>) each frame and writes per-joint
+/// rotations across the same 16-joint subskeleton the control hand uses. When
+/// <see cref="EnableSmoothing"/> is on, the pose is spherically interpolated
+/// (<c>Slerp</c>) toward the new sample at <see cref="SmoothingSpeed"/> instead
+/// of snapping - smoother on the eye, but with a small latency cost.
+///
+/// The "right hand" appearance is achieved by a mirrored root transform on the
+/// node; both this node and the control hand instance the same left-hand FBX.
+/// The current pose is published to the <c>VHI_Predict</c> LSL outlet at 60 Hz.
+/// </summary>
 public partial class PredictedHandSkeleton : Node3D
 {
+	/// <summary>Path to the <c>Skeleton3D</c> to animate. Left empty, the
+	/// skeleton is auto-discovered inside the FBX child.</summary>
 	[Export] public NodePath SkeletonPath;
+
+	/// <summary>Spherically interpolate (<c>Slerp</c>) toward each incoming
+	/// pose at <see cref="SmoothingSpeed"/> instead of snapping. Smoother on
+	/// the eye, slight latency cost. Toggle live via the control panel or
+	/// the gRPC <c>SetSmoothing</c> RPC.</summary>
 	[Export] public bool EnableSmoothing = false;
+
+	/// <summary>Interpolation speed when <see cref="EnableSmoothing"/> is on.
+	/// Higher is snappier. Ignored when smoothing is off.</summary>
 	[Export] public float SmoothingSpeed = 5.0f;
 
 	private Skeleton3D skeleton;
@@ -333,6 +359,9 @@ public partial class PredictedHandSkeleton : Node3D
 		return rot.GetEuler() * (180.0f / Mathf.Pi);
 	}
 
+	/// <summary>Reset all 16 animated joints to their rest pose. Used to clear
+	/// the hand to neutral - typically when the prediction stream stops or a
+	/// fresh stream connects.</summary>
 	public void ResetBones()
 	{
 		if (skeleton == null)
@@ -344,5 +373,21 @@ public partial class PredictedHandSkeleton : Node3D
 		}
 
 		GD.Print("Predicted hand bones reset");
+	}
+
+	/// <summary>
+	/// Programmatic smoothing control. Used by the UI panel and the gRPC
+	/// control service. A non-positive smoothingSpeed leaves the speed unchanged.
+	/// </summary>
+	/// <param name="enabled"><see langword="true"/> to spherically interpolate
+	/// (<c>Slerp</c>) toward each incoming sample; <see langword="false"/> to
+	/// snap to it.</param>
+	/// <param name="smoothingSpeed">Interpolation speed when smoothing is on.
+	/// Higher is snappier. Values &lt;= 0 leave the current speed unchanged.</param>
+	public void SetSmoothing(bool enabled, float smoothingSpeed)
+	{
+		EnableSmoothing = enabled;
+		if (smoothingSpeed > 0)
+			SmoothingSpeed = smoothingSpeed;
 	}
 }

@@ -1,12 +1,34 @@
 using Godot;
-using System.Text.Json;
 
+namespace Vhi;
+
+/// <summary>
+/// Runtime control panel - the collapsible UI on the right edge of the scene
+/// that lets the operator tweak the hands without restarting the app or opening
+/// the Godot editor.
+///
+/// Hosts:
+/// <list type="bullet">
+///   <item><description>sliders for the control-hand movement timing
+///     (<c>Frequency</c> / <c>HoldTime</c> / <c>RestTime</c>);</description></item>
+///   <item><description>a freeze toggle (calls <see cref="ControlHandSkeleton.SetFrozen"/>);</description></item>
+///   <item><description>a chirality toggle (currently disabled - both hands stay left);</description></item>
+///   <item><description>a smoothing toggle + speed for the predicted hand
+///     (<see cref="PredictedHandSkeleton.SetSmoothing"/>);</description></item>
+///   <item><description>buttons to <b>Load Config File</b> (open a file dialog and
+///     point VHI at any TOML on disk) and <b>Edit Config File</b>
+///     (<c>OS.ShellOpen</c> the current config in the system text editor).</description></item>
+/// </list>
+///
+/// Collapsed by default; toggled with the <c>&gt;</c> chevron on the right edge.
+/// No driver-mode toggle - that is set in the Inspector or over gRPC
+/// (<see cref="VhiControlService.SetControlMode"/>).
+/// </summary>
 public partial class ControlPanelUI : Control
 {
 	// References to hand controllers
 	private ControlHandSkeleton controlHand;
 	private PredictedHandSkeleton predictedHand;
-	private LSLCommunicationController lslController;
 
 	// Control Hand UI elements
 	private HSlider speedSlider;
@@ -55,7 +77,6 @@ public partial class ControlPanelUI : Control
 		// Get references to hand controllers
 		controlHand = GetNode<ControlHandSkeleton>("/root/Main/ControlHand");
 		predictedHand = GetNode<PredictedHandSkeleton>("/root/Main/PredictedHand");
-		lslController = GetNode<LSLCommunicationController>("/root/Main/LSLCommunicationController");
 
 		// Save original mesh positions
 		var controlMesh = controlHand.GetNode<Node3D>("WVRLeftHand_1106_ASCII");
@@ -188,12 +209,6 @@ public partial class ControlPanelUI : Control
 		isCollapsed = !isCollapsed;
 		mainPanel.Visible = !isCollapsed;
 		collapseButton.Text = isCollapsed ? ">" : "<";
-
-		// Send menu state when collapsing (user finished editing)
-		if (isCollapsed)
-		{
-			SendMenuStateUpdate();
-		}
 	}
 
 	private void OnHandChiralityToggled(bool isRightHand)
@@ -229,28 +244,6 @@ public partial class ControlPanelUI : Control
 			controlMesh.Position = new Vector3(controlMeshOriginalPos.X, controlMeshOriginalPos.Y, controlMeshOriginalPos.Z);
 			predictedMesh.Position = new Vector3(predictedMeshOriginalPos.X, predictedMeshOriginalPos.Y, predictedMeshOriginalPos.Z);
 		}
-	}
-
-	private void SendMenuStateUpdate()
-	{
-		if (lslController == null) return;
-
-		// Create a dictionary with all menu settings
-		var menuState = new System.Collections.Generic.Dictionary<string, object>
-		{
-			{ "speed", controlHand.Frequency },
-			{ "holdingTime", controlHand.HoldTime },
-			{ "restingTime", controlHand.RestTime },
-			{ "smoothingEnabled", predictedHand.EnableSmoothing },
-			{ "smoothingSpeed", predictedHand.SmoothingSpeed },
-			{ "isRightHand", rightHandToggle.ButtonPressed }
-		};
-
-		// Serialize to JSON
-		string json = JsonSerializer.Serialize(menuState);
-
-		// Send via LSL
-		lslController.SendMenuState(json);
 	}
 
 	private void OnFreezePressed()

@@ -12,14 +12,13 @@ except ImportError as e:
     exit(1)
 
 import time
-import json
 
 def main():
     print("\n🔍 Searching for VHI streams...")
     print("   (Press Ctrl+C to stop)\n")
 
     inlets = {}
-    stream_names = ['VHI_Control', 'VHI_Predict', 'VHI_MovementState', 'VHI_MenuState']
+    stream_names = ['VHI_Control', 'VHI_Predict']
 
     # Try to find all streams
     for stream_name in stream_names:
@@ -42,29 +41,31 @@ def main():
     print(f"\n📡 Monitoring {len(inlets)} stream(s)...\n")
     print("=" * 80)
 
-    last_values = {name: None for name in inlets.keys()}
+    counts = {name: 0 for name in inlets}
+    latest = {name: None for name in inlets}
+    last_print = time.time()
 
     try:
         while True:
             for stream_name, inlet in inlets.items():
-                sample, timestamp = inlet.pull_sample(timeout=0.0)
-
+                sample, _timestamp = inlet.pull_sample(timeout=0.0)
                 if sample:
-                    # Only print if value changed (for non-continuous streams)
-                    if stream_name in ['VHI_MovementState', 'VHI_MenuState']:
-                        if last_values[stream_name] != sample[0]:
-                            print(f"\n[{stream_name}] @ {timestamp:.3f}")
-                            if stream_name == 'VHI_MenuState':
-                                try:
-                                    menu_data = json.loads(sample[0])
-                                    print(f"  Menu Settings:")
-                                    for key, value in menu_data.items():
-                                        print(f"    {key}: {value}")
-                                except json.JSONDecodeError:
-                                    print(f"  Raw: {sample[0]}")
-                            else:
-                                print(f"  Movement: {sample[0]}")
-                            last_values[stream_name] = sample[0]
+                    counts[stream_name] += 1
+                    latest[stream_name] = sample
+
+            # VHI_Control / VHI_Predict are continuous 60 Hz pose streams —
+            # summarise the rate and latest pose once per second.
+            if time.time() - last_print >= 1.0:
+                for stream_name in inlets:
+                    sample = latest[stream_name]
+                    if sample is None:
+                        print(f"[{stream_name}] no samples yet")
+                    else:
+                        pose = " ".join(f"{v:+.2f}" for v in sample[:9])
+                        print(f"[{stream_name}] {counts[stream_name]:3d} Hz | {pose}")
+                    counts[stream_name] = 0
+                print("-" * 80)
+                last_print = time.time()
 
             time.sleep(0.01)  # Small delay
 

@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+namespace Vhi;
+
 /// <summary>
 /// Hand movement definitions from Unity VirtualHandClassifier
 /// Contains all movement types and their corresponding joint poses
@@ -38,6 +40,17 @@ public enum MovementMode
 {
 	AI,          // 17 movements
 	Classifier   // 15 movements
+}
+
+/// <summary>
+/// How the control hand is driven. The default, Movement, preserves the prior
+/// behaviour — nothing changes unless a caller switches the mode.
+/// </summary>
+public enum ControlHandDriverMode
+{
+	Movement,  // predefined-movement state machine + local keyboard
+	Stream,    // continuous pose from the MyoGestic_ControlPose LSL inlet
+	Idle       // hold rest pose; ignore keyboard, stream, and movement commands
 }
 
 /// <summary>

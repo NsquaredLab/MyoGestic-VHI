@@ -34,12 +34,12 @@ def find_and_connect():
     predicted_inlet = None
 
     for stream in streams:
-        if stream.name() == "ControlHand":
+        if stream.name() == "VHI_Control":
             control_inlet = StreamInlet(stream)
-            print("\n✅ Connected to ControlHand outlet")
-        elif stream.name() == "PredictedHand":
+            print("\n✅ Connected to VHI_Control outlet")
+        elif stream.name() == "VHI_Predict":
             predicted_inlet = StreamInlet(stream)
-            print("\n✅ Connected to PredictedHand outlet")
+            print("\n✅ Connected to VHI_Predict outlet")
 
     return control_inlet, predicted_inlet
 

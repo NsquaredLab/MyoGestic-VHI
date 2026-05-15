@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://b68somn1qruo4"]
+[gd_scene load_steps=11 format=3 uid="uid://b68somn1qruo4"]
 
 [ext_resource type="Script" uid="uid://d0dp111j18yhi" path="res://src/LSLCommunicationController.cs" id="1_nc24d"]
 [ext_resource type="Script" uid="uid://boppee7wyc2tb" path="res://src/ControlHandSkeleton.cs" id="2_yx6bi"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" uid="uid://bc43y0yqssd2x" path="res://src/MovementUI.cs" id="5_lsrjb"]
 [ext_resource type="Texture2D" uid="uid://1lnobkviynsp" path="res://images/logo.png" id="6_2hcoy"]
 [ext_resource type="PackedScene" uid="uid://dca640i6dpaya" path="res://scenes/ControlPanel.tscn" id="7_ou7ap"]
+[ext_resource type="Script" uid="uid://dlkaq7r5mwlcu" path="res://src/GrpcControlServer.cs" id="8_grpc"]
 
 [sub_resource type="Sky" id="Sky_blue"]
 
@@ -36,6 +37,9 @@ environment = SubResource("Environment_blue")
 
 [node name="LSLCommunicationController" type="Node" parent="."]
 script = ExtResource("1_nc24d")
+
+[node name="GrpcControlServer" type="Node" parent="."]
+script = ExtResource("8_grpc")
 
 [node name="ControlHand" type="Node3D" parent="."]
 script = ExtResource("2_yx6bi")
@@ -158,7 +162,7 @@ theme_override_font_sizes/font_size = 16
 script = ExtResource("5_lsrjb")
 
 [node name="Logo" type="TextureRect" parent="."]
-visible = false
+visible = true
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0

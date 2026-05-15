@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 780 300" role="img" aria-labelledby="vhi-arch-title vhi-arch-desc"
+     xmlns="http://www.w3.org/2000/svg"
+     preserveAspectRatio="xMidYMid meet">
+  <title id="vhi-arch-title">VHI architecture overview</title>
+  <desc id="vhi-arch-desc">
+    MyoGestic (Python) contains an Operator GUI and a Myocontrol model.
+    Virtual Hand Interface (Godot / C#) contains a Control hand and a Predicted hand.
+    The Operator GUI sends discrete commands to the Control hand over gRPC.
+    The Myocontrol model sends the MyoGestic_Output stream to the Predicted hand over LSL at about 32 Hz.
+    Virtual Hand Interface publishes VHI_Control and VHI_Predict back to MyoGestic over LSL at 60 Hz.
+  </desc>
+  <defs>
+    <style>
+      /* Text color tuned to read on both light and dark MkDocs Material themes.
+         Loaded via &lt;img&gt;, we can't reach into the page's CSS, so we set a
+         mid-tone explicitly and let prefers-color-scheme bump it brighter when
+         the OS is in dark mode. */
+      .text-strong { fill: #475569; font-weight: 600; }
+      .text-body   { fill: #64748b; font-weight: 500; }
+      .text-faint  { fill: #94a3b8; font-weight: 400; }
+      @media (prefers-color-scheme: dark) {
+        .text-strong { fill: #e2e8f0; }
+        .text-body   { fill: #cbd5e1; }
+        .text-faint  { fill: #94a3b8; }
+      }
+      .lane { fill: rgba(113,151,175,0.08); stroke: #7197AF; stroke-width: 1.5; }
+      .node { fill: rgba(113,151,175,0.18); stroke: #7197AF; stroke-width: 1.5; }
+      .edge      { stroke: #7197AF; stroke-width: 2.5; fill: none; }
+      .edge-dash { stroke: #7197AF; stroke-width: 1.5; fill: none; stroke-dasharray: 5 4; opacity: 0.75; }
+      text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    </style>
+    <marker id="vhi-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#7197AF"/>
+    </marker>
+    <marker id="vhi-arrow-faint" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#7197AF" opacity="0.75"/>
+    </marker>
+  </defs>
+
+  <!-- MyoGestic lane -->
+  <rect class="lane" x="10" y="30" width="280" height="240" rx="12"/>
+  <text class="text-faint" x="30" y="56" font-size="13" letter-spacing="0.02em">MyoGestic (Python)</text>
+  <rect class="node" x="40" y="80" width="220" height="48" rx="8"/>
+  <text class="text-strong" x="150" y="110" font-size="15" text-anchor="middle">Operator GUI</text>
+  <rect class="node" x="40" y="190" width="220" height="48" rx="8"/>
+  <text class="text-strong" x="150" y="220" font-size="15" text-anchor="middle">Myocontrol model</text>
+
+  <!-- VHI lane -->
+  <rect class="lane" x="490" y="30" width="280" height="240" rx="12"/>
+  <text class="text-faint" x="510" y="56" font-size="13" letter-spacing="0.02em">Virtual Hand Interface (Godot / C#)</text>
+  <rect class="node" x="520" y="80" width="220" height="48" rx="8"/>
+  <text class="text-strong" x="630" y="110" font-size="15" text-anchor="middle">Control hand</text>
+  <rect class="node" x="520" y="190" width="220" height="48" rx="8"/>
+  <text class="text-strong" x="630" y="220" font-size="15" text-anchor="middle">Predicted hand</text>
+
+  <!-- Forward edge 1: Operator GUI -> Control hand (gRPC) -->
+  <path class="edge" d="M260 104 L520 104" marker-end="url(#vhi-arrow)"/>
+  <text class="text-body" x="390" y="93" font-size="13" text-anchor="middle">gRPC</text>
+  <text class="text-faint" x="390" y="121" font-size="11" text-anchor="middle">discrete commands</text>
+
+  <!-- Forward edge 2: Myocontrol model -> Predicted hand (LSL) -->
+  <path class="edge" d="M260 214 L520 214" marker-end="url(#vhi-arrow)"/>
+  <text class="text-body" x="390" y="203" font-size="13" text-anchor="middle">MyoGestic_Output</text>
+  <text class="text-faint" x="390" y="231" font-size="11" text-anchor="middle">LSL at ~32 Hz</text>
+
+  <!-- Return edge: VHI -> MyoGestic (VHI_Control / VHI_Predict outlets, dashed). -->
+  <path class="edge-dash" d="M520 159 L260 159" marker-end="url(#vhi-arrow-faint)"/>
+  <text class="text-body"  x="390" y="151" font-size="13" text-anchor="middle">VHI_Control &amp; VHI_Predict</text>
+  <text class="text-faint" x="390" y="173" font-size="11" text-anchor="middle">LSL at 60 Hz</text>
+</svg>

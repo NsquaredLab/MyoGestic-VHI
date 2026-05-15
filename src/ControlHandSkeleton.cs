@@ -3,16 +3,73 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
+namespace Vhi;
+
+/// <summary>
+/// The "control" hand - the ground-truth / cued hand on the left of the scene.
+///
+/// Drives 16 finger joints in one of three modes selected by <see cref="DriverMode"/>:
+/// <list type="bullet">
+///   <item><description><b>Movement</b> (default): plays a named predefined movement
+///     through the state machine <i>waiting → closing → holding → opening → resting</i>,
+///     and listens for ←/→/↑/↓ keyboard input to cycle/start/stop. Movement poses
+///     come from the TOML loaded via <see cref="MovementConfigLoader"/>; the available
+///     set is filtered by <see cref="Mode"/> (AI vs Classifier).</description></item>
+///   <item><description><b>Stream</b>: ignores the state machine and follows a continuous
+///     9-DOF pose streamed in over the <c>MyoGestic_ControlPose</c> LSL inlet
+///     (consumed via <see cref="LSLCommunicationController"/>).</description></item>
+///   <item><description><b>Idle</b>: resets to the neutral pose and holds it;
+///     ignores keyboard, stream, and commands.</description></item>
+/// </list>
+///
+/// Frame-by-frame animation logic runs in <c>_Process</c>; the resulting pose is
+/// published to the <c>VHI_Control</c> LSL outlet in <c>_PhysicsProcess</c>.
+/// Commands originate from the gRPC <see cref="VhiControlService"/> (via the public
+/// command API on this class) and from local keyboard input - the same methods are
+/// called either way.
+/// </summary>
 public partial class ControlHandSkeleton : Node3D
 {
+	/// <summary>Path to the <c>Skeleton3D</c> to animate. Left empty, the
+	/// skeleton is auto-discovered inside the FBX child.</summary>
 	[Export] public NodePath SkeletonPath;
-	[Export] public bool EnableDataStream = false;
-	[Export] public bool EnableMovementControl = true;  // Enable predefined movement playback
-	[Export] public MovementMode Mode = MovementMode.AI;  // AI or Classifier mode
-	[Export] public string ConfigFilePath = "user://movements.toml";  // Path to movement config file
-	[Export] public float Frequency = 0.5f;  // Movement cycles per second
-	[Export] public float HoldTime = 1.0f;  // Time to hold at max flexion (seconds)
-	[Export] public float RestTime = 1.0f;  // Time to hold at rest (seconds)
+
+	/// <summary>How the control hand is driven each frame -
+	/// <see cref="ControlHandDriverMode.Movement"/>,
+	/// <see cref="ControlHandDriverMode.Stream"/>, or
+	/// <see cref="ControlHandDriverMode.Idle"/>. Change at runtime with
+	/// <see cref="SetDriverMode"/> or the gRPC <c>SetControlMode</c> RPC.</summary>
+	[Export] public ControlHandDriverMode DriverMode = ControlHandDriverMode.Movement;
+
+	/// <summary>Enable the predefined-movement state machine. When
+	/// <see langword="false"/>, the hand holds its current pose and ignores
+	/// keyboard input.</summary>
+	[Export] public bool EnableMovementControl = true;
+
+	/// <summary>Which subset of movements is exposed in
+	/// <see cref="GetAvailableMovements"/>. <see cref="MovementMode.AI"/> = 17;
+	/// <see cref="MovementMode.Classifier"/> = 15. Filtering rule: hide
+	/// movements exclusive to the other mode.</summary>
+	[Export] public MovementMode Mode = MovementMode.AI;
+
+	/// <summary>Godot resource path to the movements TOML config. Defaults to
+	/// <c>user://movements.toml</c>; auto-generated from the hard-coded poses
+	/// on first run, and hot-reloaded on change. To load a TOML from
+	/// elsewhere at runtime, use the control panel's "Load Config File"
+	/// button or call <see cref="LoadConfigFile"/>.</summary>
+	[Export] public string ConfigFilePath = "user://movements.toml";
+
+	/// <summary>Movement cycles per second in
+	/// <see cref="ControlHandDriverMode.Movement"/> - the closing/opening
+	/// interpolation speed. Live-adjustable via the control panel or the
+	/// gRPC <c>SetSpeed</c> RPC.</summary>
+	[Export] public float Frequency = 0.5f;
+
+	/// <summary>Seconds held at max flexion in each movement cycle.</summary>
+	[Export] public float HoldTime = 1.0f;
+
+	/// <summary>Seconds held at rest in each movement cycle.</summary>
+	[Export] public float RestTime = 1.0f;
 
 	private Skeleton3D skeleton;
 	private LSLCommunicationController communicationController;
@@ -201,21 +258,30 @@ public partial class ControlHandSkeleton : Node3D
 
 	public override void _Process(double delta)
 	{
-		// Handle movement control (keyboard input and animation)
-		if (EnableMovementControl && !EnableDataStream)
+		switch (DriverMode)
 		{
-			HandleMovementInput();
-			UpdateMovementAnimation((float)delta);
-		}
-		// Handle LSL data stream
-		else if (EnableDataStream && communicationController != null)
-		{
-			currentData = communicationController.GetReceivedDataControl();
+			case ControlHandDriverMode.Movement:
+				// Predefined-movement state machine + local keyboard.
+				if (EnableMovementControl)
+				{
+					HandleMovementInput();
+					UpdateMovementAnimation((float)delta);
+				}
+				break;
 
-			if (currentData.Count >= 9 && skeleton != null)
-			{
-				MoveBonesFromStream();
-			}
+			case ControlHandDriverMode.Stream:
+				// Continuous pose streamed in over the MyoGestic_ControlPose inlet.
+				if (communicationController != null)
+				{
+					currentData = communicationController.GetReceivedDataControl();
+					if (currentData.Count >= 9 && skeleton != null)
+						MoveBonesFromStream();
+				}
+				break;
+
+			case ControlHandDriverMode.Idle:
+				// Hold whatever pose; ignore keyboard, stream, and commands.
+				break;
 		}
 	}
 
@@ -324,6 +390,9 @@ public partial class ControlHandSkeleton : Node3D
 		return rot.GetEuler() * (180.0f / Mathf.Pi);
 	}
 
+	/// <summary>Reset all 16 animated joints to their rest pose (neutral
+	/// rotation). Called whenever the hand needs to clear back to neutral -
+	/// stopping a movement, switching driver mode, or releasing freeze.</summary>
 	public void ResetBones()
 	{
 		if (skeleton == null)
@@ -341,104 +410,232 @@ public partial class ControlHandSkeleton : Node3D
 
 	private void HandleMovementInput()
 	{
-		// Left Arrow - Previous movement
+		// While a MyoGestic recording session is active, MyoGestic is the sole
+		// movement authority — ignore local keyboard control.
+		if (SessionActive)
+			return;
+
+		// Left / Right Arrow - cycle the selected movement
 		if (Input.IsActionJustPressed("ui_left"))
-		{
-			currentMovementIndex--;
-			if (currentMovementIndex < 0)
-				currentMovementIndex = availableMovements.Length - 1;
-
-			ResetBones();
-			animationState = "waiting";
-			stateTimer = 0;
-			GD.Print($"← Previous movement: {availableMovements[currentMovementIndex]}");
-		}
-
-		// Right Arrow - Next movement
+			CycleMovement(-1);
 		if (Input.IsActionJustPressed("ui_right"))
-		{
-			currentMovementIndex++;
-			if (currentMovementIndex >= availableMovements.Length)
-				currentMovementIndex = 0;
+			CycleMovement(1);
 
-			ResetBones();
-			animationState = "waiting";
-			stateTimer = 0;
-			GD.Print($"→ Next movement: {availableMovements[currentMovementIndex]}");
-		}
-
-		// Down Arrow - Start movement
+		// Down Arrow - start the selected movement
 		if (Input.IsActionJustPressed("ui_down"))
-		{
-			if (animationState == "waiting")
-			{
-				animationState = "closing";
-				stateTimer = 0;
-				animationStartTime = DateTime.Now;
-				GD.Print($"▼ START movement: {availableMovements[currentMovementIndex]}");
+			StartCurrentMovement();
 
-				// Send current movement name via LSL when starting
-				communicationController?.SendMovementState(availableMovements[currentMovementIndex].ToString());
-			}
-		}
-
-		// Up Arrow - Stop movement
+		// Up Arrow - stop, return to rest
 		if (Input.IsActionJustPressed("ui_up"))
-		{
-			animationState = "waiting";
-			stateTimer = 0;
-			ResetBones();
-			GD.Print($"▲ STOP movement");
+			StopToRest();
 
-			// Send "Rest" via LSL when stopping
-			communicationController?.SendMovementState("Rest");
-		}
-
-		// Space - Toggle freeze (hold at max flexion)
+		// Space - toggle freeze (hold at max flexion)
 		if (Input.IsActionJustPressed("ui_accept"))
-		{
 			ToggleFreeze();
-		}
+	}
+
+	// ===== Programmatic command API =====
+	// Shared by keyboard input (above) and the gRPC control service
+	// (VhiControlService). All of these run on Godot's main thread.
+
+	/// <summary>True when a MyoGestic recording session is currently active.
+	/// While set, VHI's local keyboard input is gated off so the gRPC client
+	/// is the sole movement source. Toggled via the
+	/// <c>VhiControlService.SetSessionActive</c> RPC.</summary>
+	public bool SessionActive { get; set; } = false;
+
+	/// <summary>Movement names valid for the current mode.</summary>
+	public string[] GetAvailableMovements() => availableMovements ?? [];
+
+	/// <summary>"AI" or "Classifier".</summary>
+	public string GetModeName() => Mode.ToString();
+
+	/// <summary>
+	/// Cycle the selected movement by <paramref name="delta"/> steps (e.g. -1 /
+	/// +1, wrapping) and reset to the waiting state.
+	/// </summary>
+	/// <param name="delta">Direction and magnitude of the cycle step. Pass
+	/// <c>+1</c> for the next movement, <c>-1</c> for the previous; wraps at
+	/// the ends of the available-movements list.</param>
+	public void CycleMovement(int delta)
+	{
+		if (!EnableMovementControl || availableMovements == null || availableMovements.Length == 0)
+			return;
+
+		int n = availableMovements.Length;
+		currentMovementIndex = ((currentMovementIndex + delta) % n + n) % n;
+		ResetBones();
+		animationState = "waiting";
+		stateTimer = 0;
+		GD.Print($"Movement selected: {availableMovements[currentMovementIndex]}");
+	}
+
+	/// <summary>Start playing the currently-selected movement from rest.</summary>
+	public void StartCurrentMovement()
+	{
+		if (!EnableMovementControl || availableMovements == null || availableMovements.Length == 0)
+			return;
+
+		animationState = "closing";
+		stateTimer = 0;
+		animationArgument = 0.0f;
+		animationStartTime = DateTime.Now;
+		GD.Print($"▼ START movement: {availableMovements[currentMovementIndex]}");
 	}
 
 	/// <summary>
-	/// Toggle freeze mode: holds the current movement at max flexion indefinitely.
+	/// Select a movement by name and start playing it. The name "Rest" returns
+	/// the hand to its resting state. Returns false if the name is neither a
+	/// known movement nor "Rest".
 	/// </summary>
-	public void ToggleFreeze()
+	/// <param name="name">A name from <see cref="GetAvailableMovements"/>, or
+	/// the special value <c>"Rest"</c> to return to the resting state.</param>
+	/// <param name="cycle">If <see langword="false"/> (default), snap to the
+	/// movement's end pose and hold it - the right behaviour for a classifier
+	/// output. If <see langword="true"/>, play the open/close cycle in a loop -
+	/// used when recording regression data so VHI_Control sweeps a continuous
+	/// kinematic range.</param>
+	/// <returns><see langword="true"/> if the command was applied;
+	/// <see langword="false"/> if <paramref name="name"/> was rejected.</returns>
+	public bool SetMovement(string name, bool cycle = false)
 	{
-		if (animationState == "frozen")
+		// Movement commands only apply when the control hand is in Movement mode.
+		if (DriverMode != ControlHandDriverMode.Movement
+			|| !EnableMovementControl || availableMovements == null)
+			return false;
+
+		int idx = Array.IndexOf(availableMovements, name);
+		if (idx >= 0)
 		{
-			// Unfreeze - go back to waiting
-			animationState = "waiting";
-			stateTimer = 0;
+			currentMovementIndex = idx;
 			ResetBones();
-			GD.Print($"▲ UNFREEZE movement");
-			communicationController?.SendMovementState("Rest");
+			if (cycle)
+			{
+				// Play the open/close movement cycle — used when recording
+				// regression data so the control-hand kinematics sweep a
+				// continuous range for the model to regress against.
+				StartCurrentMovement();
+			}
+			else
+			{
+				// Discrete state command (e.g. a classifier output): snap to
+				// the movement's end pose and hold it.
+				animationState = "frozen";
+				animationArgument = Mathf.Pi * 0.5f;
+				stateTimer = 0;
+				GD.Print($"SetMovement: holding '{name}' end pose");
+			}
+			return true;
+		}
+
+		if (string.Equals(name, "Rest", StringComparison.OrdinalIgnoreCase))
+		{
+			StopToRest();
+			return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>Stop any movement and return the hand to its resting state.</summary>
+	public void StopToRest()
+	{
+		animationState = "waiting";
+		stateTimer = 0;
+		ResetBones();
+		GD.Print("▲ STOP movement");
+	}
+
+	/// <summary>
+	/// Set the control-hand animation timing (the UI speed/hold/rest sliders).
+	/// A non-positive frequency is ignored; negative hold/rest values are ignored.
+	/// </summary>
+	/// <param name="frequencyHz">Movement cycles per second. Values &lt;= 0
+	/// leave the current frequency unchanged.</param>
+	/// <param name="holdTimeS">Seconds to hold at max flexion in each cycle.
+	/// Negative values are ignored.</param>
+	/// <param name="restTimeS">Seconds to hold at rest in each cycle. Negative
+	/// values are ignored.</param>
+	public void SetSpeed(float frequencyHz, float holdTimeS, float restTimeS)
+	{
+		if (DriverMode != ControlHandDriverMode.Movement)
+			return;
+		if (frequencyHz > 0) Frequency = frequencyHz;
+		if (holdTimeS >= 0) HoldTime = holdTimeS;
+		if (restTimeS >= 0) RestTime = restTimeS;
+		GD.Print($"Speed set: freq={Frequency} hold={HoldTime} rest={RestTime}");
+	}
+
+	/// <summary>Toggle freeze mode (used by keyboard input).</summary>
+	public void ToggleFreeze() => SetFrozen(!IsFrozen);
+
+	/// <summary>
+	/// Freeze the control hand at its current pose, or release it back to the
+	/// resting state.
+	/// </summary>
+	/// <param name="frozen"><see langword="true"/> to hold the live pose
+	/// indefinitely; <see langword="false"/> to release back to the resting
+	/// state and resume the normal movement state machine.</param>
+	public void SetFrozen(bool frozen)
+	{
+		if (DriverMode != ControlHandDriverMode.Movement)
+			return;
+		if (frozen)
+		{
+			// Hold wherever the animation currently is — animationArgument is
+			// left untouched so the live pose freezes in place.
+			animationState = "frozen";
+			stateTimer = 0;
+			GD.Print($"■ FREEZE movement: {availableMovements[currentMovementIndex]}");
 		}
 		else
 		{
-			// Freeze - snap to max flexion and hold
-			animationState = "frozen";
-			animationArgument = Mathf.Pi * 0.5f;
+			animationState = "waiting";
 			stateTimer = 0;
-			GD.Print($"■ FREEZE movement: {availableMovements[currentMovementIndex]}");
-			communicationController?.SendMovementState(availableMovements[currentMovementIndex].ToString());
+			ResetBones();
+			GD.Print("▲ UNFREEZE movement");
 		}
 	}
 
+	/// <summary>True while the control hand is in the frozen state - set by
+	/// <see cref="SetFrozen"/> with <c>frozen=true</c>, or by
+	/// <see cref="SetMovement"/> with <c>cycle=false</c> after reaching the
+	/// end pose.</summary>
 	public bool IsFrozen => animationState == "frozen";
+
+	/// <summary>
+	/// Set how the control hand is driven. Switching to Movement resets to the
+	/// resting state; Idle holds the rest pose; Stream lets the next streamed
+	/// sample take over. Used by the gRPC SetControlMode RPC.
+	/// </summary>
+	/// <param name="mode">The target driver mode -
+	/// <see cref="ControlHandDriverMode.Movement"/>,
+	/// <see cref="ControlHandDriverMode.Stream"/>, or
+	/// <see cref="ControlHandDriverMode.Idle"/>.</param>
+	public void SetDriverMode(ControlHandDriverMode mode)
+	{
+		if (mode == DriverMode)
+			return;
+		DriverMode = mode;
+		GD.Print($"Control hand driver mode: {mode}");
+		if (mode == ControlHandDriverMode.Movement)
+		{
+			animationState = "waiting";
+			stateTimer = 0;
+		}
+		if (mode != ControlHandDriverMode.Stream)
+			ResetBones();
+	}
 
 	private void UpdateMovementAnimation(float delta)
 	{
 		if (animationState == "waiting" || skeleton == null || movementPoses == null)
 			return;
 
-		// Frozen state: just hold at max flexion, no timer updates
-		if (animationState == "frozen")
-		{
-			animationArgument = Mathf.Pi * 0.5f;
-			// Fall through to apply poses below
-		}
+		// Frozen state: hold whatever pose we were at — animationArgument keeps
+		// its value, and the state machine below has no "frozen" case, so the
+		// pose is re-applied unchanged each frame. SetFrozen freezes the live
+		// pose; SetMovement(cycle:false) sets the end pose before freezing.
 
 		string currentMovement = availableMovements[currentMovementIndex];
 		if (!movementPoses.ContainsKey(currentMovement))
@@ -579,9 +776,43 @@ public partial class ControlHandSkeleton : Node3D
 		else
 		{
 			movementPoses = loadedPoses;
-			availableMovements = MovementConfigLoader.GetMovementNames(loadedPoses);
+			availableMovements = FilterMovementsByMode(loadedPoses);
 			GD.Print($"Loaded {availableMovements.Length} movements from config");
 		}
+	}
+
+	/// <summary>
+	/// Reduce a loaded movement set to the entries available in the current
+	/// <see cref="Mode"/>. A movement is hidden only if it belongs exclusively
+	/// to the *other* mode's set — movements in this mode, and any custom
+	/// movements not tied to a mode, stay available in config order. The full
+	/// pose dictionary is left intact; this only narrows what is cycled
+	/// through and reported by GetState. If filtering would leave nothing (a
+	/// fully cross-mode custom config), the whole config is exposed instead.
+	/// </summary>
+	private string[] FilterMovementsByMode(Dictionary<string, float[][][]> poses)
+	{
+		var thisMode = Mode == MovementMode.AI
+			? MovementPoses.AIModeMovements
+			: MovementPoses.ClassifierModeMovements;
+		var otherMode = Mode == MovementMode.AI
+			? MovementPoses.ClassifierModeMovements
+			: MovementPoses.AIModeMovements;
+
+		var otherOnly = new HashSet<string>();
+		foreach (var m in otherMode) otherOnly.Add(m.ToString());
+		foreach (var m in thisMode) otherOnly.Remove(m.ToString());
+
+		var filtered = new List<string>();
+		foreach (var name in MovementConfigLoader.GetMovementNames(poses))
+		{
+			if (!otherOnly.Contains(name))
+				filtered.Add(name);
+		}
+
+		return filtered.Count > 0
+			? filtered.ToArray()
+			: MovementConfigLoader.GetMovementNames(poses);
 	}
 
 	private void SetupConfigWatcher()
@@ -636,7 +867,7 @@ public partial class ControlHandSkeleton : Node3D
 			string oldMovement = availableMovements[oldIndex];
 
 			movementPoses = loadedPoses;
-			availableMovements = MovementConfigLoader.GetMovementNames(loadedPoses);
+			availableMovements = FilterMovementsByMode(loadedPoses);
 
 			// Try to preserve current movement selection
 			currentMovementIndex = Array.IndexOf(availableMovements, oldMovement);
@@ -659,6 +890,9 @@ public partial class ControlHandSkeleton : Node3D
 	/// Load a new config file, replacing the current one.
 	/// Updates ConfigFilePath, reloads movements, and re-watches the new file.
 	/// </summary>
+	/// <param name="absolutePath">Absolute filesystem path to a TOML movement
+	/// config. If the path is inside Godot's user data directory it is stored
+	/// back as a <c>user://</c> path; otherwise the absolute path is kept.</param>
 	public void LoadConfigFile(string absolutePath)
 	{
 		var loadedPoses = MovementConfigLoader.LoadConfig(absolutePath);
@@ -677,7 +911,7 @@ public partial class ControlHandSkeleton : Node3D
 
 		// Apply loaded movements
 		movementPoses = loadedPoses;
-		availableMovements = MovementConfigLoader.GetMovementNames(loadedPoses);
+		availableMovements = FilterMovementsByMode(loadedPoses);
 		currentMovementIndex = 0;
 		animationState = "waiting";
 		ResetBones();

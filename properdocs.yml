@@ -1,0 +1,105 @@
+site_name: Virtual Hand Interface
+site_description: Real-time 3D hand visualisation for HD-sEMG, driven over LSL and gRPC.
+repo_url: https://github.com/NsquaredLab/MyoGestic-VHI
+repo_name: MyoGestic-VHI
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 N-squared Lab, FAU Erlangen-N&uuml;rnberg
+
+theme:
+  name: material
+  logo: images/vhi-icon.png
+  favicon: images/vhi-icon.png
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - section-index
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+      use_pygments: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink
+  - pymdownx.smartsymbols
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Concepts:
+      - concepts/index.md
+      - Architecture: concepts/architecture.md
+      - The two hands: concepts/hands.md
+      - LSL streams: concepts/lsl-streams.md
+      - gRPC control plane: concepts/grpc-control.md
+      - Control-hand modes: concepts/control-modes.md
+      - Movements: concepts/movements.md
+  - How-to:
+      - how-to/index.md
+      - Drive VHI from MyoGestic: how-to/drive-from-myogestic.md
+      - Stream a custom pose: how-to/stream-a-custom-pose.md
+      - Add a custom movement: how-to/add-a-custom-movement.md
+      - Build and export: how-to/build-and-export.md
+  - Reference:
+      - reference/index.md
+      - gRPC API: reference/grpc-api.md
+      - LSL streams: reference/lsl-reference.md
+      - Configuration: reference/configuration.md
+      - C# API: reference/api/index.md
+  - Troubleshooting: troubleshooting.md

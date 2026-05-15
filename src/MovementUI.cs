@@ -1,6 +1,15 @@
 using Godot;
 using System.Text.RegularExpressions;
 
+namespace Vhi;
+
+/// <summary>
+/// The on-screen text overlay in the top-left of the scene - a Godot
+/// <see cref="Label"/> that reports the control hand's currently selected
+/// movement, its animation state, and the keyboard-control hint. Refreshed
+/// every frame from <see cref="ControlHandSkeleton"/>; has no inputs of its
+/// own.
+/// </summary>
 public partial class MovementUI : Label
 {
 	private ControlHandSkeleton controlHand;

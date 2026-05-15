@@ -3,6 +3,8 @@ using System;
 using System.Linq;
 using System.Reflection;
 
+namespace Vhi;
+
 /// <summary>
 /// Wrapper for SharpLSL that avoids static initialization hang in Godot.
 /// Uses reflection to dynamically load and call LSL methods.

@@ -2,6 +2,8 @@ using Godot;
 using System.Collections.Generic;
 using System.Text;
 
+namespace Vhi;
+
 /// <summary>
 /// Utility class to generate default movements.toml from hardcoded poses
 /// </summary>

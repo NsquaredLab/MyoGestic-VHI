@@ -1,12 +1,29 @@
 <Project Sdk="Godot.NET.Sdk/4.6.1">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net8.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- Lets the runtimeconfig roll forward onto a newer installed runtime when
+         the exact net8.0 shared framework is not present. -->
+    <RollForward>LatestMajor</RollForward>
+    <!-- Emit XML doc comments next to the assembly so tools/gen_api_docs.sh can
+         turn them into the Markdown API reference under docs/reference/api.
+         CS1591 ("missing XML comment for publicly visible type/member") is
+         silenced because coverage is still partial. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="SharpLSL.Native.all" Version="1.16.2" />
     <PackageReference Include="SharpLSL" Version="1.16.2-rc.1" />
     <PackageReference Include="Tomlyn" Version="0.17.0" />
+    <!-- gRPC server. Godot's host needs SharedFrameworkAssemblyLoader.cs to
+         resolve the Microsoft.AspNetCore.App shared framework at runtime
+         (godot#112701). Grpc.Tools must be referenced explicitly — its MSBuild
+         codegen targets do not flow transitively from Grpc.AspNetCore. -->
+    <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Protobuf Include="proto/myogestic_vhi.proto" GrpcServices="Server" />
   </ItemGroup>
 </Project>

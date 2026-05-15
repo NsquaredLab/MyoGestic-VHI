@@ -33,7 +33,7 @@ def create_outlet():
     """Create an LSL outlet for hand predictions."""
     info = StreamInfo(
         name="MyoGestic_Output",
-        type="MyoGestic9DVector",
+        type="MyoGestic_9DVector",
         channel_count=9,
         nominal_srate=FREQUENCY,
         channel_format="float32", # type: ignore

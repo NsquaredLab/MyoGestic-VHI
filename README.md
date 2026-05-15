@@ -1,129 +1,117 @@
-# Virtual Hand Interface
+<div align="center">
 
-Real-time 3D hand visualization for HD-sEMG data using Lab Streaming Layer (LSL).
+<img src="icon.png" alt="MyoGestic-VHI" width="180" />
 
-Built with Godot 4.5 (.NET) for the N-squared Lab at FAU Erlangen-Nürnberg.
+# MyoGestic-VHI
 
-## Features
+**Real-time 3D hand visualisation for HD-sEMG, driven over LSL and gRPC.**
 
-- **Dual-hand visualization** - Control hand (predefined movements) and Predicted hand (EMG-driven)
-- **LSL integration** - Bidirectional streaming: receives predictions, outputs hand state
-- **Movement library** - 17 AI-mode and 15 Classifier-mode hand movements
-- **UI controls** - Real-time adjustment of speed, smoothing, and hand chirality
-- **Cross-platform** - Windows and Linux builds
+[Documentation](docs/index.md) ·
+[MyoGestic](https://github.com/NsquaredLab/MyoGestic) ·
+[N-squared Lab](https://www.nsquared.tf.fau.de/)
 
-## Requirements
+</div>
 
-- [Godot 4.5](https://godotengine.org/) with .NET support
-- .NET 9.0 SDK
-- Python 3 with `pylsl` and `numpy` (for test scripts)
+---
 
-## Quick Start
+VHI is the Godot / .NET front-end of the **[MyoGestic](https://github.com/NsquaredLab/MyoGestic)** stack. It renders two hands side-by-side: a **control hand** the operator cues with named movements, and a **predicted hand** driven continuously by an EMG model's output. Together they let an experimenter cue a movement and see what the myocontrol model predicts for it, frame by frame.
+
+![VHI in action: the cream control hand on the left holds the cued Fist pose; the gray predicted hand on the right tracks a 9-DOF pose streamed live over LSL.](docs/images/vhi-overview.png)
+
+## How it fits together
+
+VHI talks to MyoGestic over two channels, each chosen for the kind of traffic it carries:
+
+- **LSL** for **continuous time-series**: `MyoGestic_Output` (prediction stream → predicted hand, ~32 Hz), the optional `MyoGestic_ControlPose` (operator-driven pose → control hand), and VHI's own `VHI_Control` / `VHI_Predict` outlets (60 Hz) so the experiment records what was actually shown on screen.
+- **gRPC** for **discrete commands**: select a movement, freeze the hand, switch the control-hand driver mode, adjust speed. VHI hosts the server in-process on `127.0.0.1:50051`; MyoGestic is the client.
+
+`proto/myogestic_vhi.proto` is the canonical wire contract for the gRPC side. MyoGestic vendors a copy and regenerates its Python stubs from it.
+
+## Quick start
+
+You need **Godot 4.6** with .NET support and the **.NET 8 SDK** on your `PATH` (Godot 4.6.1 bundles a .NET 8 host).
 
 ```bash
-# 1. Restore NuGet packages
-dotnet restore
-
-# 2. Open in Godot and press F5, or:
-godot --path .
-
-# 3. (Optional) Send test data from another terminal
-python tests/test_lsl_sender.py
+dotnet restore           # restore SharpLSL, Grpc.AspNetCore, Tomlyn
+godot --path .           # open in the editor, F5 to run
 ```
 
-Use arrow keys to cycle movements (Left/Right) and start/stop them (Down/Up).
+Use **←/→** to cycle movements, **↓/↑** to start/stop, **space** to freeze the current pose.
 
-### Use with a Real EMG System
+### Drive it from your own EMG pipeline
 
-Configure your pipeline to output an LSL stream matching:
-- **Stream name:** `MyoGestic_Output`
-- **Stream type:** `MyoGestic_9DVector`
-- **Channels:** 9 floats (thumb flexion/abduction, index, middle, ring, pinky, wrist flexion/abduction/rotation)
+Publish an LSL stream named `MyoGestic_Output` with 9 float channels:
 
 ```python
 from pylsl import StreamInfo, StreamOutlet
 
-info = StreamInfo('MyoGestic_Output', 'MyoGestic_9DVector', 9, 32, 'float32', 'myuid')
+info = StreamInfo("MyoGestic_Output", "MyoGestic_9DVector", 9, 32, "float32", "my_uid")
 outlet = StreamOutlet(info)
 outlet.push_sample([0.0] * 9)
 ```
 
-## Configuration
+Channel layout is thumb flex/abd, index, middle, ring, pinky, wrist flex/abd/rot. The sign convention is **negative = flexion**: a closed fist is roughly `[-1, -1, -1, -1, -1, -1, 0, 0, 0]` (all fingers and the thumb abduction pulled in, wrist neutral).
 
-All settings are adjustable in the Godot Inspector or at runtime via the collapsible UI panel.
+## Documentation
 
-| Setting | Default | Location |
-|---|---|---|
-| `PredictionStreamName` | `MyoGestic_Output` | `LSLCommunicationController` |
-| `PredictionStreamType` | `MyoGestic_9DVector` | `LSLCommunicationController` |
-| `ExpectedChannels` | 9 | `LSLCommunicationController` |
-| `EnableOutlets` | true | `LSLCommunicationController` |
-| `Mode` | AI | `ControlHand` |
-| `Frequency` | 0.5 Hz | `ControlHand` |
-| `HoldTime` / `RestTime` | 1.0 s | `ControlHand` |
-| `EnableSmoothing` | false | `PredictedHand` |
-| `SmoothingSpeed` | 5.0 | `PredictedHand` |
-
-### LSL Outlet Streams
-
-When `EnableOutlets` is true, the application also publishes:
-- `VHI_Control` - Control hand joint state
-- `VHI_Predict` - Predicted hand joint state
-- `VHI_MovementState` - Current movement and state machine info
-- `VHI_MenuState` - UI/menu state
-
-## File Structure
-
-```
-├── scenes/
-│   ├── HandMain.tscn                # Main scene
-│   └── ControlPanel.tscn            # UI control panel
-├── src/
-│   ├── LSLCommunicationController.cs  # LSL stream management
-│   ├── LSLWrapper.cs                  # SharpLSL native wrapper
-│   ├── ControlHandSkeleton.cs         # Control hand logic & state machine
-│   ├── PredictedHandSkeleton.cs       # Predicted hand visualization
-│   ├── MovementDefinitions.cs         # Hand movement poses
-│   ├── MovementConfigLoader.cs        # TOML config file loading
-│   ├── MovementConfigGenerator.cs     # Config file generation
-│   ├── ControlPanelUI.cs              # UI panel controller
-│   └── MovementUI.cs                  # Movement name/state overlay
-├── models/
-│   ├── WVRLeftHand_1106_ASCII.fbx     # Left hand model (26-bone skeleton)
-│   └── WVRRightHand_1106_ASCII.fbx    # Right hand model
-├── tests/
-│   ├── test_lsl_sender.py             # Simulated EMG data sender
-│   ├── test_lsl_receiver.py           # Stream monitor
-│   ├── test_all_streams.py            # Monitor all LSL streams
-│   ├── test_movementstate_receiver.py # Movement state monitor
-│   └── test_stream_info.py            # Stream info inspector
-├── images/
-│   └── logo.png                       # FAU logo
-├── project.godot
-├── VHI_godot.csproj
-├── VHI_godot.sln
-└── export_presets.cfg
-```
-
-## Building Executables
-
-Export presets for Windows (64-bit) and Linux/X11 (64-bit) are configured in `export_presets.cfg`:
+The full docs live in [`docs/`](docs/) and are built with MkDocs Material via ProperDocs:
 
 ```bash
-godot --headless --export-release "Windows Desktop" VHI_windows.exe
-godot --headless --export-release "Linux/X11" VHI_linux
+dotnet tool restore                       # one-off: installs DefaultDocumentation.Console
+./tools/gen_api_docs.sh                   # regenerates the C# API reference from the source
+uv run --group docs properdocs serve      # browse at http://127.0.0.1:8000
 ```
 
-## Troubleshooting
+Highlights:
 
-| Problem | Solution |
-|---|---|
-| No LSL streams found | Verify sender is running; check stream name is `MyoGestic_Output` (case-sensitive); check firewall |
-| SharpLSL errors | Run `dotnet restore`; verify `dotnet --version` shows 9.0+ |
-| Control hand not moving | Check `EnableMovementControl = true` in Inspector |
-| Predicted hand not moving | Verify LSL stream is active with 9 float channels |
-| Hand appears flipped | Toggle "Right Hand (mirror)" in the control panel |
+- **[Getting Started](docs/getting-started.md)** — install Godot, restore, run, see a hand move
+- **[Concepts](docs/concepts/index.md)** — architecture, the two hands, LSL streams, the gRPC control plane, control-hand modes, the movement set
+- **[How-to guides](docs/how-to/index.md)** — drive VHI from MyoGestic, stream a custom pose, add a custom movement, build & export
+- **[Reference](docs/reference/index.md)** — the full gRPC API, every LSL stream, every `[Export]` field. The reference also includes an auto-generated C# API surface (regenerated by `tools/gen_api_docs.sh`; the generated tree is gitignored, so run the script before serving the docs locally).
+- **[Troubleshooting](docs/troubleshooting.md)** — the common failure modes with symptoms and fixes
 
-## Contact
+## Building executables
 
-N-squared Lab, Friedrich-Alexander-Universität Erlangen-Nürnberg (FAU)
+```bash
+godot --headless --export-release "macOS"           VHI.app
+godot --headless --export-release "Windows Desktop" VHI.exe
+godot --headless --export-release "Linux"           VHI.x86_64
+```
+
+**macOS gotcha** — the export needs to be re-signed without the hardened runtime, otherwise Godot's embedded .NET host silently fails to start and no C# code runs:
+
+```bash
+codesign --force --deep --sign - VHI.app
+```
+
+See [docs/how-to/build-and-export.md](docs/how-to/build-and-export.md) for the full export checklist, including how to pin the .NET 8 SDK.
+
+## Project history
+
+Originally published as [`NsquaredLab/Virtual-Hand-Interface`](https://github.com/NsquaredLab/Virtual-Hand-Interface). That repository is preserved as a historical artefact; all new development lives here. The rename makes VHI's place in the MyoGestic stack explicit.
+
+## License
+
+GPL-3.0 — see [`LICENSE`](LICENSE).
+
+## How to cite
+
+VHI is part of the **MyoGestic** stack. If you use it in your research, please cite the MyoGestic [paper](https://www.science.org/doi/abs/10.1126/sciadv.ads9150):
+
+```bibtex
+@article{
+    Sîmpetru2025,
+    author = {Raul C. Sîmpetru  and Dominik I. Braun  and Arndt U. Simon  and Michael März  and Vlad Cnejevici  and Daniela Souza de Oliveira  and Nico Weber  and Jonas Walter  and Jörg Franke  and Daniel Höglinger  and Cosima Prahm  and Matthias Ponfick  and Alessandro Del Vecchio },
+    title = {MyoGestic: EMG interfacing framework for decoding multiple spared motor dimensions in individuals with neural lesions},
+    journal = {Science Advances},
+    volume = {11},
+    number = {15},
+    pages = {eads9150},
+    year = {2025},
+    doi = {10.1126/sciadv.ads9150},
+    URL = {https://www.science.org/doi/abs/10.1126/sciadv.ads9150},
+    eprint = {https://www.science.org/doi/pdf/10.1126/sciadv.ads9150},
+}
+```
+
+Built by the **[N-squared Lab](https://www.nsquared.tf.fau.de/)** (Neuromuscular Physiology & Neural Interfacing) at Friedrich-Alexander-Universität Erlangen-Nürnberg.
