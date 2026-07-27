@@ -22,7 +22,8 @@ what it is good at.
 ## The server
 
 `GrpcControlServer` is a Godot `Node` that owns a minimal Kestrel
-`WebApplication` hosting the `VhiControl` service. It:
+`WebApplication` hosting **two** services on the same port: `VhiControl` (v1)
+and `VhiCanonicalControl` (v2). It:
 
 - starts in `_Ready()` on `127.0.0.1:<GrpcPort>` (default **50051**, HTTP/2
   cleartext),
@@ -34,8 +35,27 @@ calls; the return value *is* the acknowledgement.
 
 ## The contract
 
-The contract is `proto/myogestic_vhi.proto` in this repo - the canonical
-source. MyoGestic vendors a copy and regenerates its Python stubs from it.
+There are two contracts, both canonical here, and MyoGestic vendors copies of
+both and regenerates its Python stubs from them.
+
+`proto/myogestic_vhi.proto` (**v1**) speaks in movement names and a nine-float
+pose whose channel meaning lives nowhere.
+`proto/myogestic_vhi_v2.proto` (**v2**) speaks the canonical control standard:
+DOFs are addressed by name, and `Declare` negotiates which ones this hand can
+render instead of either side hard-coding a channel index.
+
+Both are served for the whole migration. A client discovers which one a build
+speaks by calling v2's `Declare` — an older VHI answers `UNIMPLEMENTED`, which is
+how the client knows to fall back rather than guess. v1 is removed only once
+nothing speaks it.
+
+!!! warning "A negotiation that settles names but not units is not a negotiation"
+    `DeclareReply.continuous_encoding` says how to encode values on the LSL
+    stream, and it is not optional. The first end-to-end v2 run agreed on channel
+    names while VHI's continuous path still decoded legacy units, so a canonical
+    `+1` arrived as a legacy `+1` and the hand **extended when it was told to
+    flex**. VHI reports `LEGACY_NEGATED` until that decoder is gone; a client that
+    receives `ENCODING_UNSPECIFIED` must fall back rather than assume.
 
 The `VhiControl` service, at a glance:
 

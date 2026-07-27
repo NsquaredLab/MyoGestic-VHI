@@ -375,6 +375,84 @@ public partial class PredictedHandSkeleton : Node3D
 		GD.Print("Predicted hand bones reset");
 	}
 
+	// --- canonical control (v2) --------------------------------------------------
+	//
+	// The v2 service addresses DOFs by name and needs three things this class did not
+	// expose: set ONE channel without disturbing the rest of the pose, read a joint's
+	// signed rotation back, and know which joints a channel drives. All three are
+	// deliberately thin — the name/channel mapping stays in VhiCanonicalControlService,
+	// because a skeleton should not know the wire vocabulary.
+
+	/// <summary>Which joints each legacy channel drives, mirroring
+	/// <c>MoveBonesDirectly</c>. Channels 6-8 are absent: nothing reads them.</summary>
+	private static readonly Dictionary<int, int[]> jointsByChannel = new()
+	{
+		[0] = [1, 2, 3],
+		[1] = [1, 2, 3],
+		[2] = [4, 5, 6],
+		[3] = [7, 8, 9],
+		[4] = [10, 11, 12],
+		[5] = [13, 14, 15],
+	};
+
+	/// <summary>The joints a legacy channel drives, or an empty array for a dead one.</summary>
+	public int[] JointsForChannel(int channel) =>
+		jointsByChannel.TryGetValue(channel, out int[] joints) ? joints : [];
+
+	/// <summary>The model's own name for a joint — the rig's identity claim, not a label.</summary>
+	public string BoneNameForJoint(int jointIndex) =>
+		jointIndex >= 0 && jointIndex < boneNames.Length ? boneNames[jointIndex] : $"joint {jointIndex}";
+
+	/// <summary>
+	/// Set one channel of the pose and render it, leaving every other channel alone.
+	/// </summary>
+	/// <remarks>
+	/// <paramref name="canonical"/> is a canonical value: <c>+1</c> means the direction
+	/// the DOF's name denotes. The negation into this hand's wire convention (its
+	/// flexion gains are negative) happens here, so the canonical standard never has to
+	/// carry a sign that belongs to one renderer.
+	/// <para>
+	/// Bones stay where they are put: <c>_Process</c> only re-poses them when a fresh
+	/// LSL sample arrives, so a value set here persists until the next one does. A
+	/// client streaming poses over LSL while calling this will fight it.
+	/// </para>
+	/// </remarks>
+	public void SetCanonicalValue(int channel, float canonical)
+	{
+		if (skeleton == null || boneMap.Count == 0 || !jointsByChannel.ContainsKey(channel))
+			return;
+		while (currentData.Count < 9)
+			currentData.Add(0f);
+		currentData[channel] = -canonical;
+		MoveBonesDirectly();
+	}
+
+	/// <summary>Every animated channel back to canonical rest, rendered immediately.</summary>
+	public void RestCanonicalPose()
+	{
+		if (skeleton == null || boneMap.Count == 0)
+			return;
+		currentData = [0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f];
+		MoveBonesDirectly();
+	}
+
+	/// <summary>
+	/// Signed rotation in degrees of every joint any channel drives, read back off the
+	/// skeleton so a caller can see what actually moved rather than what was asked for.
+	/// </summary>
+	public Dictionary<int, Vector3> AnimatedJointDegrees()
+	{
+		var pose = new Dictionary<int, Vector3>();
+		foreach (int[] joints in jointsByChannel.Values)
+		{
+			foreach (int joint in joints)
+			{
+				pose.TryAdd(joint, GetBoneRotationDegrees(joint));
+			}
+		}
+		return pose;
+	}
+
 	/// <summary>
 	/// Programmatic smoothing control. Used by the UI panel and the gRPC
 	/// control service. A non-positive smoothingSpeed leaves the speed unchanged.

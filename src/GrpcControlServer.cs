@@ -49,6 +49,11 @@ public partial class GrpcControlServer : Node
 
             app = builder.Build();
             app.MapGrpcService<VhiControlService>();
+            // v2 is served in parallel with v1, on the same port and the same DI
+            // singletons, for the whole migration. A client discovers which one this
+            // build speaks by calling v2's Declare: an older VHI answers UNIMPLEMENTED,
+            // which is how the client knows to fall back rather than guess.
+            app.MapGrpcService<VhiCanonicalControlService>();
             app.StartAsync().Wait(5000);
 
             GD.Print($"✅ gRPC control server listening on 127.0.0.1:{GrpcPort}");

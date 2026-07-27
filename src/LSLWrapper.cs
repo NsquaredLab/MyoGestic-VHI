@@ -380,6 +380,63 @@ public static class LSLWrapper
 	/// <summary>
 	/// Add initial state/schema to StreamInfo metadata
 	/// </summary>
+	/// <summary>
+	/// Read the per-channel labels out of a stream's description, or an empty array
+	/// when it publishes none.
+	/// </summary>
+	/// <remarks>
+	/// The inverse of <see cref="SetChannelLabels"/>, and the reason it matters: a
+	/// producer that reorders its channels without renaming them silently remaps every
+	/// consumer. With labels on the wire, VHI can check that a client is publishing the
+	/// channel order it negotiated in v2's <c>Declare</c> instead of trusting it.
+	/// <para>
+	/// Read it from the <c>StreamInfo</c> of an <b>open</b> inlet. A resolved stream's
+	/// header carries no description — the full XML only arrives once the connection is
+	/// established.
+	/// </para>
+	/// </remarks>
+	public static string[] GetChannelLabels(object streamInfo)
+	{
+		try
+		{
+			var descMethod = streamInfoType.GetMethod("get_Description");
+			object xmlElement = descMethod?.Invoke(streamInfo, null);
+			if (xmlElement == null)
+				return [];
+
+			Type elementType = xmlElement.GetType();
+			var child = elementType.GetMethod("GetChild", [typeof(string)]);
+			var nextSibling = elementType.GetMethod("GetNextSibling", [typeof(string)]);
+			var childValue = elementType.GetMethod("GetChildValue", [typeof(string)]);
+			if (child == null || nextSibling == null || childValue == null)
+			{
+				GD.PrintErr("GetChannelLabels: XML navigation methods not found");
+				return [];
+			}
+
+			object channels = child.Invoke(xmlElement, ["channels"]);
+			if (channels == null)
+				return [];
+
+			var labels = new System.Collections.Generic.List<string>();
+			object channel = child.Invoke(channels, ["channel"]);
+			// Walk the sibling chain rather than indexing: LSL's XML is a linked list,
+			// and a missing <label> must not shift every later channel's name.
+			while (channel != null)
+			{
+				string label = childValue.Invoke(channel, ["label"]) as string;
+				labels.Add(label ?? "");
+				channel = nextSibling.Invoke(channel, ["channel"]);
+			}
+			return [.. labels];
+		}
+		catch (Exception e)
+		{
+			GD.PrintErr($"❌ Failed to read channel labels: {e.Message}");
+			return [];
+		}
+	}
+
 	public static void SetStreamMetadata(object streamInfo, string fieldName, string value)
 	{
 		try
