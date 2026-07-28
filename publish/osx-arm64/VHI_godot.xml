@@ -1,0 +1,1979 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>VHI_godot</name>
+    </assembly>
+    <members>
+        <member name="T:Vhi.ControlHandSkeleton">
+             <summary>
+             The "control" hand - the ground-truth / cued hand on the left of the scene.
+            
+             Drives 16 finger joints in one of three modes selected by <see cref="F:Vhi.ControlHandSkeleton.DriverMode"/>:
+             <list type="bullet">
+               <item><description><b>Movement</b> (default): plays a named predefined movement
+                 through the state machine <i>waiting → closing → holding → opening → resting</i>,
+                 and listens for ←/→/↑/↓ keyboard input to cycle/start/stop. Movement poses
+                 come from the TOML loaded via <see cref="T:Vhi.MovementConfigLoader"/>; the available
+                 set is filtered by <see cref="F:Vhi.ControlHandSkeleton.Mode"/> (AI vs Classifier).</description></item>
+               <item><description><b>Stream</b>: ignores the state machine and follows a continuous
+                 9-DOF pose streamed in over the <c>MyoGestic_ControlPose</c> LSL inlet
+                 (consumed via <see cref="T:Vhi.LSLCommunicationController"/>).</description></item>
+               <item><description><b>Idle</b>: resets to the neutral pose and holds it;
+                 ignores keyboard, stream, and commands.</description></item>
+             </list>
+            
+             Frame-by-frame animation logic runs in <c>_Process</c>; the resulting pose is
+             published to the <c>VHI_Control</c> LSL outlet in <c>_PhysicsProcess</c>.
+             Commands originate from the gRPC <see cref="T:Vhi.VhiControlService"/> (via the public
+             command API on this class) and from local keyboard input - the same methods are
+             called either way.
+             </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.SkeletonPath">
+            <summary>Path to the <c>Skeleton3D</c> to animate. Left empty, the
+            skeleton is auto-discovered inside the FBX child.</summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.DriverMode">
+            <summary>How the control hand is driven each frame -
+            <see cref="F:Vhi.ControlHandDriverMode.Movement"/>,
+            <see cref="F:Vhi.ControlHandDriverMode.Stream"/>, or
+            <see cref="F:Vhi.ControlHandDriverMode.Idle"/>. Change at runtime with
+            <see cref="M:Vhi.ControlHandSkeleton.SetDriverMode(Vhi.ControlHandDriverMode)"/> or the gRPC <c>SetControlMode</c> RPC.</summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.EnableMovementControl">
+            <summary>Enable the predefined-movement state machine. When
+            <see langword="false"/>, the hand holds its current pose and ignores
+            keyboard input.</summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.Mode">
+            <summary>Which subset of movements is exposed in
+            <see cref="M:Vhi.ControlHandSkeleton.GetAvailableMovements"/>. <see cref="F:Vhi.MovementMode.AI"/> = 17;
+            <see cref="F:Vhi.MovementMode.Classifier"/> = 15. Filtering rule: hide
+            movements exclusive to the other mode.</summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.ConfigFilePath">
+            <summary>Godot resource path to the movements TOML config. Defaults to
+            <c>user://movements.toml</c>; auto-generated from the hard-coded poses
+            on first run, and hot-reloaded on change. To load a TOML from
+            elsewhere at runtime, use the control panel's "Load Config File"
+            button or call <see cref="M:Vhi.ControlHandSkeleton.LoadConfigFile(System.String)"/>.</summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.Frequency">
+            <summary>Movement cycles per second in
+            <see cref="F:Vhi.ControlHandDriverMode.Movement"/> - the closing/opening
+            interpolation speed. Live-adjustable via the control panel or the
+            gRPC <c>SetSpeed</c> RPC.</summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.HoldTime">
+            <summary>Seconds held at max flexion in each movement cycle.</summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.RestTime">
+            <summary>Seconds held at rest in each movement cycle.</summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.ResetBones">
+            <summary>Reset all 16 animated joints to their rest pose (neutral
+            rotation). Called whenever the hand needs to clear back to neutral -
+            stopping a movement, switching driver mode, or releasing freeze.</summary>
+        </member>
+        <member name="P:Vhi.ControlHandSkeleton.SessionActive">
+            <summary>True when a MyoGestic recording session is currently active.
+            While set, VHI's local keyboard input is gated off so the gRPC client
+            is the sole movement source. Toggled via the
+            <c>VhiControlService.SetSessionActive</c> RPC.</summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.GetAvailableMovements">
+            <summary>Movement names valid for the current mode.</summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.GetModeName">
+            <summary>"AI" or "Classifier".</summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.CycleMovement(System.Int32)">
+            <summary>
+            Cycle the selected movement by <paramref name="delta"/> steps (e.g. -1 /
+            +1, wrapping) and reset to the waiting state.
+            </summary>
+            <param name="delta">Direction and magnitude of the cycle step. Pass
+            <c>+1</c> for the next movement, <c>-1</c> for the previous; wraps at
+            the ends of the available-movements list.</param>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.StartCurrentMovement">
+            <summary>Start playing the currently-selected movement from rest.</summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.SetMovement(System.String,System.Boolean)">
+            <summary>
+            Select a movement by name and start playing it. The name "Rest" returns
+            the hand to its resting state. Returns false if the name is neither a
+            known movement nor "Rest".
+            </summary>
+            <param name="name">A name from <see cref="M:Vhi.ControlHandSkeleton.GetAvailableMovements"/>, or
+            the special value <c>"Rest"</c> to return to the resting state.</param>
+            <param name="cycle">If <see langword="false"/> (default), snap to the
+            movement's end pose and hold it - the right behaviour for a classifier
+            output. If <see langword="true"/>, play the open/close cycle in a loop -
+            used when recording regression data so VHI_Control sweeps a continuous
+            kinematic range.</param>
+            <returns><see langword="true"/> if the command was applied;
+            <see langword="false"/> if <paramref name="name"/> was rejected.</returns>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.StopToRest">
+            <summary>Stop any movement and return the hand to its resting state.</summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.SetSpeed(System.Single,System.Single,System.Single)">
+            <summary>
+            Set the control-hand animation timing (the UI speed/hold/rest sliders).
+            A non-positive frequency is ignored; negative hold/rest values are ignored.
+            </summary>
+            <param name="frequencyHz">Movement cycles per second. Values &lt;= 0
+            leave the current frequency unchanged.</param>
+            <param name="holdTimeS">Seconds to hold at max flexion in each cycle.
+            Negative values are ignored.</param>
+            <param name="restTimeS">Seconds to hold at rest in each cycle. Negative
+            values are ignored.</param>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.ToggleFreeze">
+            <summary>Toggle freeze mode (used by keyboard input).</summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.SetFrozen(System.Boolean)">
+            <summary>
+            Freeze the control hand at its current pose, or release it back to the
+            resting state.
+            </summary>
+            <param name="frozen"><see langword="true"/> to hold the live pose
+            indefinitely; <see langword="false"/> to release back to the resting
+            state and resume the normal movement state machine.</param>
+        </member>
+        <member name="P:Vhi.ControlHandSkeleton.IsFrozen">
+            <summary>True while the control hand is in the frozen state - set by
+            <see cref="M:Vhi.ControlHandSkeleton.SetFrozen(System.Boolean)"/> with <c>frozen=true</c>, or by
+            <see cref="M:Vhi.ControlHandSkeleton.SetMovement(System.String,System.Boolean)"/> with <c>cycle=false</c> after reaching the
+            end pose.</summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.SetDriverMode(Vhi.ControlHandDriverMode)">
+            <summary>
+            Set how the control hand is driven. Switching to Movement resets to the
+            resting state; Idle holds the rest pose; Stream lets the next streamed
+            sample take over. Used by the gRPC SetControlMode RPC.
+            </summary>
+            <param name="mode">The target driver mode -
+            <see cref="F:Vhi.ControlHandDriverMode.Movement"/>,
+            <see cref="F:Vhi.ControlHandDriverMode.Stream"/>, or
+            <see cref="F:Vhi.ControlHandDriverMode.Idle"/>.</param>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.FilterMovementsByMode(System.Collections.Generic.Dictionary{System.String,System.Single[][][]})">
+            <summary>
+            Reduce a loaded movement set to the entries available in the current
+            <see cref="F:Vhi.ControlHandSkeleton.Mode"/>. A movement is hidden only if it belongs exclusively
+            to the *other* mode's set — movements in this mode, and any custom
+            movements not tied to a mode, stay available in config order. The full
+            pose dictionary is left intact; this only narrows what is cycled
+            through and reported by GetState. If filtering would leave nothing (a
+            fully cross-mode custom config), the whole config is exposed instead.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.LoadConfigFile(System.String)">
+            <summary>
+            Load a new config file, replacing the current one.
+            Updates ConfigFilePath, reloads movements, and re-watches the new file.
+            </summary>
+            <param name="absolutePath">Absolute filesystem path to a TOML movement
+            config. If the path is inside Godot's user data directory it is stored
+            back as a <c>user://</c> path; otherwise the absolute path is kept.</param>
+        </member>
+        <member name="T:Vhi.ControlHandSkeleton.MethodName">
+            <summary>
+            Cached StringNames for the methods contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName._Ready">
+            <summary>
+            Cached name for the '_Ready' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.FindSkeletonRecursive">
+            <summary>
+            Cached name for the 'FindSkeletonRecursive' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.MapBones">
+            <summary>
+            Cached name for the 'MapBones' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.InitializeMaximumMovements">
+            <summary>
+            Cached name for the 'InitializeMaximumMovements' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName._Process">
+            <summary>
+            Cached name for the '_Process' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName._PhysicsProcess">
+            <summary>
+            Cached name for the '_PhysicsProcess' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.MoveBonesFromStream">
+            <summary>
+            Cached name for the 'MoveBonesFromStream' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.SetBoneRotation">
+            <summary>
+            Cached name for the 'SetBoneRotation' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.SendControlHandData">
+            <summary>
+            Cached name for the 'SendControlHandData' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.GetBoneRotationDegrees">
+            <summary>
+            Cached name for the 'GetBoneRotationDegrees' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.ResetBones">
+            <summary>
+            Cached name for the 'ResetBones' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.HandleMovementInput">
+            <summary>
+            Cached name for the 'HandleMovementInput' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.GetAvailableMovements">
+            <summary>
+            Cached name for the 'GetAvailableMovements' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.GetModeName">
+            <summary>
+            Cached name for the 'GetModeName' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.CycleMovement">
+            <summary>
+            Cached name for the 'CycleMovement' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.StartCurrentMovement">
+            <summary>
+            Cached name for the 'StartCurrentMovement' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.SetMovement">
+            <summary>
+            Cached name for the 'SetMovement' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.StopToRest">
+            <summary>
+            Cached name for the 'StopToRest' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.SetSpeed">
+            <summary>
+            Cached name for the 'SetSpeed' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.ToggleFreeze">
+            <summary>
+            Cached name for the 'ToggleFreeze' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.SetFrozen">
+            <summary>
+            Cached name for the 'SetFrozen' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.SetDriverMode">
+            <summary>
+            Cached name for the 'SetDriverMode' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.UpdateMovementAnimation">
+            <summary>
+            Cached name for the 'UpdateMovementAnimation' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.GetCurrentMovementName">
+            <summary>
+            Cached name for the 'GetCurrentMovementName' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.GetAnimationState">
+            <summary>
+            Cached name for the 'GetAnimationState' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.LoadMovementConfig">
+            <summary>
+            Cached name for the 'LoadMovementConfig' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.SetupConfigWatcher">
+            <summary>
+            Cached name for the 'SetupConfigWatcher' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.ReloadConfig">
+            <summary>
+            Cached name for the 'ReloadConfig' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.LoadConfigFile">
+            <summary>
+            Cached name for the 'LoadConfigFile' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName._ExitTree">
+            <summary>
+            Cached name for the '_ExitTree' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.MethodName.ApplySkinColor">
+            <summary>
+            Cached name for the 'ApplySkinColor' method.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.GetGodotMethodList">
+            <summary>
+            Get the method information for all the methods declared in this class.
+            This method is used by Godot to register the available methods in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.InvokeGodotClassMethod(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.NativeVariantPtrArgs,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.HasGodotClassMethod(Godot.NativeInterop.godot_string_name@)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.ControlHandSkeleton.PropertyName">
+            <summary>
+            Cached StringNames for the properties and fields contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.SessionActive">
+            <summary>
+            Cached name for the 'SessionActive' property.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.IsFrozen">
+            <summary>
+            Cached name for the 'IsFrozen' property.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.SkeletonPath">
+            <summary>
+            Cached name for the 'SkeletonPath' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.DriverMode">
+            <summary>
+            Cached name for the 'DriverMode' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.EnableMovementControl">
+            <summary>
+            Cached name for the 'EnableMovementControl' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.Mode">
+            <summary>
+            Cached name for the 'Mode' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.ConfigFilePath">
+            <summary>
+            Cached name for the 'ConfigFilePath' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.Frequency">
+            <summary>
+            Cached name for the 'Frequency' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.HoldTime">
+            <summary>
+            Cached name for the 'HoldTime' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.RestTime">
+            <summary>
+            Cached name for the 'RestTime' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.skeleton">
+            <summary>
+            Cached name for the 'skeleton' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.communicationController">
+            <summary>
+            Cached name for the 'communicationController' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.availableMovements">
+            <summary>
+            Cached name for the 'availableMovements' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.currentMovementIndex">
+            <summary>
+            Cached name for the 'currentMovementIndex' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.animationState">
+            <summary>
+            Cached name for the 'animationState' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.animationArgument">
+            <summary>
+            Cached name for the 'animationArgument' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.stateTimer">
+            <summary>
+            Cached name for the 'stateTimer' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlHandSkeleton.PropertyName.boneNames">
+            <summary>
+            Cached name for the 'boneNames' field.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.SetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.GetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.GetGodotPropertyList">
+            <summary>
+            Get the property information for all the properties declared in this class.
+            This method is used by Godot to register the available properties in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.SaveGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.ControlHandSkeleton.RestoreGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.ControlHandSkeleton.SignalName">
+            <summary>
+            Cached StringNames for the signals contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="T:Vhi.ControlPanelUI">
+             <summary>
+             Runtime control panel - the collapsible UI on the right edge of the scene
+             that lets the operator tweak the hands without restarting the app or opening
+             the Godot editor.
+            
+             Hosts:
+             <list type="bullet">
+               <item><description>sliders for the control-hand movement timing
+                 (<c>Frequency</c> / <c>HoldTime</c> / <c>RestTime</c>);</description></item>
+               <item><description>a freeze toggle (calls <see cref="M:Vhi.ControlHandSkeleton.SetFrozen(System.Boolean)"/>);</description></item>
+               <item><description>a chirality toggle (currently disabled - both hands stay left);</description></item>
+               <item><description>a smoothing toggle + speed for the predicted hand
+                 (<see cref="M:Vhi.PredictedHandSkeleton.SetSmoothing(System.Boolean,System.Single)"/>);</description></item>
+               <item><description>buttons to <b>Load Config File</b> (open a file dialog and
+                 point VHI at any TOML on disk) and <b>Edit Config File</b>
+                 (<c>OS.ShellOpen</c> the current config in the system text editor).</description></item>
+             </list>
+            
+             Collapsed by default; toggled with the <c>&gt;</c> chevron on the right edge.
+             No driver-mode toggle - that is set in the Inspector or over gRPC
+             (<see cref="M:Vhi.VhiControlService.SetControlMode(Myogestic.Vhi.V1.SetControlModeRequest,Grpc.Core.ServerCallContext)"/>).
+             </summary>
+        </member>
+        <member name="T:Vhi.ControlPanelUI.MethodName">
+            <summary>
+            Cached StringNames for the methods contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName._Ready">
+            <summary>
+            Cached name for the '_Ready' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnSpeedChanged">
+            <summary>
+            Cached name for the 'OnSpeedChanged' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnHoldingTimeChanged">
+            <summary>
+            Cached name for the 'OnHoldingTimeChanged' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnRestingTimeChanged">
+            <summary>
+            Cached name for the 'OnRestingTimeChanged' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnSmoothingToggled">
+            <summary>
+            Cached name for the 'OnSmoothingToggled' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnSmoothingSpeedChanged">
+            <summary>
+            Cached name for the 'OnSmoothingSpeedChanged' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.UpdateSpeedLabel">
+            <summary>
+            Cached name for the 'UpdateSpeedLabel' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.UpdateHoldingTimeLabel">
+            <summary>
+            Cached name for the 'UpdateHoldingTimeLabel' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.UpdateRestingTimeLabel">
+            <summary>
+            Cached name for the 'UpdateRestingTimeLabel' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.UpdateSmoothingSpeedLabel">
+            <summary>
+            Cached name for the 'UpdateSmoothingSpeedLabel' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.UpdateSmoothingSpeedVisibility">
+            <summary>
+            Cached name for the 'UpdateSmoothingSpeedVisibility' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnCollapseToggled">
+            <summary>
+            Cached name for the 'OnCollapseToggled' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnHandChiralityToggled">
+            <summary>
+            Cached name for the 'OnHandChiralityToggled' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnFreezePressed">
+            <summary>
+            Cached name for the 'OnFreezePressed' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.UpdateConfigFileLabel">
+            <summary>
+            Cached name for the 'UpdateConfigFileLabel' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnLoadConfigPressed">
+            <summary>
+            Cached name for the 'OnLoadConfigPressed' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnNativeFileSelected">
+            <summary>
+            Cached name for the 'OnNativeFileSelected' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.MethodName.OnOpenConfigPressed">
+            <summary>
+            Cached name for the 'OnOpenConfigPressed' method.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlPanelUI.GetGodotMethodList">
+            <summary>
+            Get the method information for all the methods declared in this class.
+            This method is used by Godot to register the available methods in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlPanelUI.InvokeGodotClassMethod(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.NativeVariantPtrArgs,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.ControlPanelUI.HasGodotClassMethod(Godot.NativeInterop.godot_string_name@)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.ControlPanelUI.PropertyName">
+            <summary>
+            Cached StringNames for the properties and fields contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.IsRightHand">
+            <summary>
+            Cached name for the 'IsRightHand' property.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.controlHand">
+            <summary>
+            Cached name for the 'controlHand' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.predictedHand">
+            <summary>
+            Cached name for the 'predictedHand' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.speedSlider">
+            <summary>
+            Cached name for the 'speedSlider' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.speedValueLabel">
+            <summary>
+            Cached name for the 'speedValueLabel' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.holdingTimeSlider">
+            <summary>
+            Cached name for the 'holdingTimeSlider' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.holdingTimeValueLabel">
+            <summary>
+            Cached name for the 'holdingTimeValueLabel' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.restingTimeSlider">
+            <summary>
+            Cached name for the 'restingTimeSlider' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.restingTimeValueLabel">
+            <summary>
+            Cached name for the 'restingTimeValueLabel' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.smoothingToggle">
+            <summary>
+            Cached name for the 'smoothingToggle' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.smoothingSpeedSlider">
+            <summary>
+            Cached name for the 'smoothingSpeedSlider' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.smoothingSpeedValueLabel">
+            <summary>
+            Cached name for the 'smoothingSpeedValueLabel' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.smoothingSpeedContainer">
+            <summary>
+            Cached name for the 'smoothingSpeedContainer' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.collapseButton">
+            <summary>
+            Cached name for the 'collapseButton' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.mainPanel">
+            <summary>
+            Cached name for the 'mainPanel' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.isCollapsed">
+            <summary>
+            Cached name for the 'isCollapsed' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.rightHandToggle">
+            <summary>
+            Cached name for the 'rightHandToggle' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.controlMeshOriginalPos">
+            <summary>
+            Cached name for the 'controlMeshOriginalPos' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.predictedMeshOriginalPos">
+            <summary>
+            Cached name for the 'predictedMeshOriginalPos' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.openConfigButton">
+            <summary>
+            Cached name for the 'openConfigButton' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.loadConfigButton">
+            <summary>
+            Cached name for the 'loadConfigButton' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.configFileLabel">
+            <summary>
+            Cached name for the 'configFileLabel' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.freezeButton">
+            <summary>
+            Cached name for the 'freezeButton' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.baseResolution">
+            <summary>
+            Cached name for the 'baseResolution' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.ControlPanelUI.PropertyName.window">
+            <summary>
+            Cached name for the 'window' field.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlPanelUI.SetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.ControlPanelUI.GetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.ControlPanelUI.GetGodotPropertyList">
+            <summary>
+            Get the property information for all the properties declared in this class.
+            This method is used by Godot to register the available properties in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.ControlPanelUI.SaveGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.ControlPanelUI.RestoreGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.ControlPanelUI.SignalName">
+            <summary>
+            Cached StringNames for the signals contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="T:Vhi.GrpcControlServer">
+             <summary>
+             Hosts the in-process gRPC control server (Grpc.AspNetCore / Kestrel) that
+             MyoGestic connects to. Discrete commands (set movement, freeze, speed, ...)
+             arrive here; continuous time-series stays on LSL.
+            
+             Loading the ASP.NET Core shared framework inside Godot relies on
+             SharedFrameworkAssemblyLoader (the godot#112701 workaround), which registers
+             from a [ModuleInitializer] before this node's _Ready() runs.
+             </summary>
+        </member>
+        <member name="F:Vhi.GrpcControlServer.GrpcPort">
+            <summary>TCP port the in-process Kestrel server binds to on
+            <c>127.0.0.1</c>. Default <c>50051</c>.</summary>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.InvokeOnMainThread``1(System.Func{``0})">
+            <summary>
+            Run <paramref name="fn"/> on Godot's main thread and return its result.
+            Called from gRPC handler threads, which await the returned task.
+            </summary>
+            <typeparam name="T">Return type of <paramref name="fn"/>.</typeparam>
+            <param name="fn">The closure to execute. Runs synchronously on Godot's
+            main thread on the next <c>_Process</c> tick; any exception it throws
+            is surfaced through the returned task.</param>
+            <returns>A task that completes with <paramref name="fn"/>'s return
+            value once it has run on the main thread.</returns>
+        </member>
+        <member name="T:Vhi.GrpcControlServer.MethodName">
+            <summary>
+            Cached StringNames for the methods contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.GrpcControlServer.MethodName._Ready">
+            <summary>
+            Cached name for the '_Ready' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.GrpcControlServer.MethodName._Process">
+            <summary>
+            Cached name for the '_Process' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.GrpcControlServer.MethodName._ExitTree">
+            <summary>
+            Cached name for the '_ExitTree' method.
+            </summary>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.GetGodotMethodList">
+            <summary>
+            Get the method information for all the methods declared in this class.
+            This method is used by Godot to register the available methods in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.InvokeGodotClassMethod(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.NativeVariantPtrArgs,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.HasGodotClassMethod(Godot.NativeInterop.godot_string_name@)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.GrpcControlServer.PropertyName">
+            <summary>
+            Cached StringNames for the properties and fields contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.GrpcControlServer.PropertyName.GrpcPort">
+            <summary>
+            Cached name for the 'GrpcPort' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.GrpcControlServer.PropertyName.isShuttingDown">
+            <summary>
+            Cached name for the 'isShuttingDown' field.
+            </summary>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.SetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.GetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.GetGodotPropertyList">
+            <summary>
+            Get the property information for all the properties declared in this class.
+            This method is used by Godot to register the available properties in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.SaveGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.GrpcControlServer.RestoreGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.GrpcControlServer.SignalName">
+            <summary>
+            Cached StringNames for the signals contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="T:Vhi.LSLCommunicationController">
+             <summary>
+             All Lab Streaming Layer I/O for VHI - the only node that touches LSL directly
+             (and even then only through <see cref="T:Vhi.LSLWrapper"/>, never SharpLSL).
+            
+             Resolves two inlets and publishes two outlets:
+             <list type="bullet">
+               <item><description><b>Inlet</b> <c>MyoGestic_Output</c> - 9 × <c>float32</c>,
+                 drives the predicted hand. Typically ~32 Hz.</description></item>
+               <item><description><b>Inlet</b> <c>MyoGestic_ControlPose</c> (optional) - 9 ×
+                 <c>float32</c>, drives the control hand only when its
+                 <see cref="F:Vhi.ControlHandSkeleton.DriverMode"/> is <c>Stream</c>.</description></item>
+               <item><description><b>Outlet</b> <c>VHI_Control</c> - the control hand's current
+                 pose, 60 Hz. MyoGestic consumes this as a training-target source.</description></item>
+               <item><description><b>Outlet</b> <c>VHI_Predict</c> - the predicted hand's current
+                 pose, 60 Hz. For monitoring / recording alongside EMG.</description></item>
+             </list>
+            
+             Stream resolution blocks ~1 s so it runs on a background <c>Task.Run</c> thread;
+             results and log lines are marshalled back to Godot's main thread via
+             <c>CallDeferred</c>. Sample pulls themselves are non-blocking and happen in
+             <c>_Process</c>. Streams are resolved <i>by name only</i>, so a stream with a
+             different type or channel count won't be rejected - just yields wrong motion.
+             </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PredictionStreamName">
+            <summary>Name of the LSL inlet that drives the predicted hand.
+            Resolved by name only.</summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PredictionStreamType">
+            <summary>LSL type advertised by the predicted-hand stream. Currently
+            not used for resolution - inlets are matched by name only - but kept
+            as Inspector metadata.</summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.ControlPoseStreamName">
+            <summary>Name of the optional LSL inlet that drives the control hand
+            in <see cref="F:Vhi.ControlHandDriverMode.Stream"/>. Resolved by name only;
+            missing is fine - the inlet is simply skipped.</summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.ControlOutletName">
+            <summary>Name of the LSL outlet that publishes the control hand's
+            pose at 60 Hz. Consumed by MyoGestic as a regression-target source.</summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PredictedOutletName">
+            <summary>Name of the LSL outlet that publishes the predicted hand's
+            pose at 60 Hz. For monitoring / recording alongside the EMG.</summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.ExpectedChannels">
+            <summary>Channel count for the 9-DOF hand pose. Sizes both inlet
+            sample buffers and the outlets' advertised channel count. VHI does
+            <i>not</i> reject mismatched inlet streams - it just logs the count
+            on connect and reads into the fixed-size buffer.</summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.EnableOutlets">
+            <summary>Publish <c>VHI_Control</c> / <c>VHI_Predict</c> when
+            <see langword="true"/>; suppress them when <see langword="false"/>.
+            Useful when something downstream resolves them but you don't want
+            them participating yet.</summary>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.SendControlData(System.Collections.Generic.List{System.Single})">
+            <summary>Push a 9-DOF pose sample to the <c>VHI_Control</c> outlet
+            (when <see cref="F:Vhi.LSLCommunicationController.EnableOutlets"/> is on). The sample is silently
+            dropped if the outlet has not been created or if its length does not
+            match <see cref="F:Vhi.LSLCommunicationController.ExpectedChannels"/>. Called by
+            <see cref="T:Vhi.ControlHandSkeleton"/> every <c>_PhysicsProcess</c> tick.</summary>
+            <param name="data">9 float channels - see the LSL stream reference for
+            the channel layout.</param>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.SendPredictedData(System.Collections.Generic.List{System.Single})">
+            <summary>Push a 9-DOF pose sample to the <c>VHI_Predict</c> outlet
+            (when <see cref="F:Vhi.LSLCommunicationController.EnableOutlets"/> is on). Same shape and contract as
+            <see cref="M:Vhi.LSLCommunicationController.SendControlData(System.Collections.Generic.List{System.Single})"/>. Called by
+            <see cref="T:Vhi.PredictedHandSkeleton"/> every <c>_PhysicsProcess</c> tick.</summary>
+            <param name="data">9 float channels - see the LSL stream reference for
+            the channel layout.</param>
+        </member>
+        <member name="T:Vhi.LSLCommunicationController.MethodName">
+            <summary>
+            Cached StringNames for the methods contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName._Ready">
+            <summary>
+            Cached name for the '_Ready' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName._Process">
+            <summary>
+            Cached name for the '_Process' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName.ConnectToInletAsync">
+            <summary>
+            Cached name for the 'ConnectToInletAsync' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName.ConnectControlPoseInletAsync">
+            <summary>
+            Cached name for the 'ConnectControlPoseInletAsync' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName.LogMessage">
+            <summary>
+            Cached name for the 'LogMessage' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName.LogError">
+            <summary>
+            Cached name for the 'LogError' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName.ClearReceivedDataControl">
+            <summary>
+            Cached name for the 'ClearReceivedDataControl' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName.ClearReceivedDataPredicted">
+            <summary>
+            Cached name for the 'ClearReceivedDataPredicted' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName.CreateOutlets">
+            <summary>
+            Cached name for the 'CreateOutlets' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName._ExitTree">
+            <summary>
+            Cached name for the '_ExitTree' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName._Notification">
+            <summary>
+            Cached name for the '_Notification' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.MethodName._exit">
+            <summary>
+            Cached name for the '_exit' method.
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.GetGodotMethodList">
+            <summary>
+            Get the method information for all the methods declared in this class.
+            This method is used by Godot to register the available methods in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.InvokeGodotClassMethod(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.NativeVariantPtrArgs,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.HasGodotClassMethod(Godot.NativeInterop.godot_string_name@)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.LSLCommunicationController.PropertyName">
+            <summary>
+            Cached StringNames for the properties and fields contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.IsConnected">
+            <summary>
+            Cached name for the 'IsConnected' property.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.LastInputFPS">
+            <summary>
+            Cached name for the 'LastInputFPS' property.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.LastOutputFPS">
+            <summary>
+            Cached name for the 'LastOutputFPS' property.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.PredictionStreamName">
+            <summary>
+            Cached name for the 'PredictionStreamName' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.PredictionStreamType">
+            <summary>
+            Cached name for the 'PredictionStreamType' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.ControlPoseStreamName">
+            <summary>
+            Cached name for the 'ControlPoseStreamName' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.ControlOutletName">
+            <summary>
+            Cached name for the 'ControlOutletName' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.PredictedOutletName">
+            <summary>
+            Cached name for the 'PredictedOutletName' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.ExpectedChannels">
+            <summary>
+            Cached name for the 'ExpectedChannels' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.EnableOutlets">
+            <summary>
+            Cached name for the 'EnableOutlets' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.sampleBuffer">
+            <summary>
+            Cached name for the 'sampleBuffer' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.controlPoseBuffer">
+            <summary>
+            Cached name for the 'controlPoseBuffer' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.inputFrameCount">
+            <summary>
+            Cached name for the 'inputFrameCount' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.outputFrameCount">
+            <summary>
+            Cached name for the 'outputFrameCount' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.connectionRetryInterval">
+            <summary>
+            Cached name for the 'connectionRetryInterval' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.isConnecting">
+            <summary>
+            Cached name for the 'isConnecting' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.isConnectingControlPose">
+            <summary>
+            Cached name for the 'isConnectingControlPose' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.LSLCommunicationController.PropertyName.isShuttingDown">
+            <summary>
+            Cached name for the 'isShuttingDown' field.
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.SetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.GetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.GetGodotPropertyList">
+            <summary>
+            Get the property information for all the properties declared in this class.
+            This method is used by Godot to register the available properties in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.SaveGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.LSLCommunicationController.RestoreGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.LSLCommunicationController.SignalName">
+            <summary>
+            Cached StringNames for the signals contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="T:Vhi.LSLWrapper">
+            <summary>
+            Wrapper for SharpLSL that avoids static initialization hang in Godot.
+            Uses reflection to dynamically load and call LSL methods.
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.Initialize">
+            <summary>
+            Initialize LSL types via reflection. Call this once before using LSL.
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.Resolve(System.String,System.String,System.Double)">
+            <summary>
+            Resolve LSL streams by property (e.g., "name" or "type")
+            Uses the simpler Resolve(maxCount, waitTime) and filters results
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.CreateStreamInfo(System.String,System.String,System.Int32,System.Double,System.String,System.String)">
+            <summary>
+            Create a StreamInfo object
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.CreateStreamInlet(System.Object,System.Int32,System.Int32,System.Boolean)">
+            <summary>
+            Create a StreamInlet from a StreamInfo
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.CreateStreamOutlet(System.Object,System.Int32,System.Int32)">
+            <summary>
+            Create a StreamOutlet from a StreamInfo
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.PullSample(System.Object,System.Single[],System.Double)">
+            <summary>
+            Pull a sample from a StreamInlet (non-blocking)
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.PushSample(System.Object,System.Single[])">
+            <summary>
+            Push a sample to a StreamOutlet
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.PushSample(System.Object,System.String[])">
+            <summary>
+            Push a string sample to a StreamOutlet
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.GetStreamInfoName(System.Object)">
+            <summary>
+            Get StreamInfo name
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.GetStreamInfoChannelCount(System.Object)">
+            <summary>
+            Get StreamInfo channel count
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.SetChannelLabels(System.Object,System.String[])">
+            <summary>
+            Set channel labels in StreamInfo description XML
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.SetStreamMetadata(System.Object,System.String,System.String)">
+            <summary>
+            Add initial state/schema to StreamInfo metadata
+            </summary>
+        </member>
+        <member name="M:Vhi.LSLWrapper.Dispose(System.Object)">
+            <summary>
+            Dispose an LSL object (StreamInlet or StreamOutlet)
+            </summary>
+        </member>
+        <member name="T:Vhi.MovementConfigGenerator">
+            <summary>
+            Utility class to generate default movements.toml from hardcoded poses
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementConfigGenerator.GenerateDefaultConfig(System.String)">
+            <summary>
+            Generate default movements.toml file from hardcoded poses
+            </summary>
+        </member>
+        <member name="T:Vhi.MovementConfigLoader">
+            <summary>
+            Loads hand movement configurations from TOML files
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementConfigLoader.LoadConfig(System.String)">
+            <summary>
+            Load movements from a TOML config file.
+            Returns a <c>Dictionary&lt;movementName, float[16][2][3]&gt;</c> (16 joints,
+            2 poses - max-flexion and rest, 3 Euler axes); returns <see langword="null"/>
+            on parse or I/O failure.
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementConfigLoader.GetMovementNames(System.Collections.Generic.Dictionary{System.String,System.Single[][][]})">
+            <summary>
+            Get list of available movement names from config
+            </summary>
+        </member>
+        <member name="T:Vhi.Movements">
+            <summary>
+            Hand movement definitions from Unity VirtualHandClassifier
+            Contains all movement types and their corresponding joint poses
+            </summary>
+        </member>
+        <member name="T:Vhi.MovementMode">
+            <summary>
+            Movement mode types
+            </summary>
+        </member>
+        <member name="T:Vhi.ControlHandDriverMode">
+            <summary>
+            How the control hand is driven. The default, Movement, preserves the prior
+            behaviour — nothing changes unless a caller switches the mode.
+            </summary>
+        </member>
+        <member name="T:Vhi.MovementPoses">
+            <summary>
+            Static class containing all movement pose definitions
+            Data structure: [16 joints][2 states (max/min)][3 axes (x,y,z)]
+            </summary>
+        </member>
+        <member name="T:Vhi.MovementUI">
+            <summary>
+            The on-screen text overlay in the top-left of the scene - a Godot
+            <see cref="T:Godot.Label"/> that reports the control hand's currently selected
+            movement, its animation state, and the keyboard-control hint. Refreshed
+            every frame from <see cref="T:Vhi.ControlHandSkeleton"/>; has no inputs of its
+            own.
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementUI.FormatMovementName(System.String)">
+            <summary>
+            Converts PascalCase to spaced words (e.g., "TwoFingerPinch" -> "Two Finger Pinch")
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementUI.MyRegex">
+            <remarks>
+            Pattern:<br/>
+            <code>(?&lt;!^)([A-Z])</code><br/>
+            Explanation:<br/>
+            <code>
+            ○ Zero-width negative lookbehind.<br/>
+                ○ Match if at the beginning of the string.<br/>
+            ○ 1st capture group.<br/>
+                ○ Match a character in the set [A-Z].<br/>
+            </code>
+            </remarks>
+        </member>
+        <member name="T:Vhi.MovementUI.MethodName">
+            <summary>
+            Cached StringNames for the methods contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.MovementUI.MethodName._Ready">
+            <summary>
+            Cached name for the '_Ready' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.MovementUI.MethodName._Process">
+            <summary>
+            Cached name for the '_Process' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.MovementUI.MethodName.FormatMovementName">
+            <summary>
+            Cached name for the 'FormatMovementName' method.
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementUI.GetGodotMethodList">
+            <summary>
+            Get the method information for all the methods declared in this class.
+            This method is used by Godot to register the available methods in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementUI.InvokeGodotClassMethod(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.NativeVariantPtrArgs,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.MovementUI.HasGodotClassMethod(Godot.NativeInterop.godot_string_name@)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.MovementUI.PropertyName">
+            <summary>
+            Cached StringNames for the properties and fields contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.MovementUI.PropertyName.controlHand">
+            <summary>
+            Cached name for the 'controlHand' field.
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementUI.SetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.MovementUI.GetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.MovementUI.GetGodotPropertyList">
+            <summary>
+            Get the property information for all the properties declared in this class.
+            This method is used by Godot to register the available properties in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.MovementUI.SaveGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.MovementUI.RestoreGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.MovementUI.SignalName">
+            <summary>
+            Cached StringNames for the signals contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="T:Vhi.PredictedHandSkeleton">
+             <summary>
+             The "predicted" hand - the model-output hand on the right of the scene.
+            
+             Pulls 9-DOF samples from the <c>MyoGestic_Output</c> LSL inlet
+             (via <see cref="T:Vhi.LSLCommunicationController"/>) each frame and writes per-joint
+             rotations across the same 16-joint subskeleton the control hand uses. When
+             <see cref="F:Vhi.PredictedHandSkeleton.EnableSmoothing"/> is on, the pose is spherically interpolated
+             (<c>Slerp</c>) toward the new sample at <see cref="F:Vhi.PredictedHandSkeleton.SmoothingSpeed"/> instead
+             of snapping - smoother on the eye, but with a small latency cost.
+            
+             The "right hand" appearance is achieved by a mirrored root transform on the
+             node; both this node and the control hand instance the same left-hand FBX.
+             The current pose is published to the <c>VHI_Predict</c> LSL outlet at 60 Hz.
+             </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.SkeletonPath">
+            <summary>Path to the <c>Skeleton3D</c> to animate. Left empty, the
+            skeleton is auto-discovered inside the FBX child.</summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.EnableSmoothing">
+            <summary>Spherically interpolate (<c>Slerp</c>) toward each incoming
+            pose at <see cref="F:Vhi.PredictedHandSkeleton.SmoothingSpeed"/> instead of snapping. Smoother on
+            the eye, slight latency cost. Toggle live via the control panel or
+            the gRPC <c>SetSmoothing</c> RPC.</summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.SmoothingSpeed">
+            <summary>Interpolation speed when <see cref="F:Vhi.PredictedHandSkeleton.EnableSmoothing"/> is on.
+            Higher is snappier. Ignored when smoothing is off.</summary>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.ResetBones">
+            <summary>Reset all 16 animated joints to their rest pose. Used to clear
+            the hand to neutral - typically when the prediction stream stops or a
+            fresh stream connects.</summary>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.SetSmoothing(System.Boolean,System.Single)">
+            <summary>
+            Programmatic smoothing control. Used by the UI panel and the gRPC
+            control service. A non-positive smoothingSpeed leaves the speed unchanged.
+            </summary>
+            <param name="enabled"><see langword="true"/> to spherically interpolate
+            (<c>Slerp</c>) toward each incoming sample; <see langword="false"/> to
+            snap to it.</param>
+            <param name="smoothingSpeed">Interpolation speed when smoothing is on.
+            Higher is snappier. Values &lt;= 0 leave the current speed unchanged.</param>
+        </member>
+        <member name="T:Vhi.PredictedHandSkeleton.MethodName">
+            <summary>
+            Cached StringNames for the methods contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName._Ready">
+            <summary>
+            Cached name for the '_Ready' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.FindSkeletonRecursive">
+            <summary>
+            Cached name for the 'FindSkeletonRecursive' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.MapBones">
+            <summary>
+            Cached name for the 'MapBones' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.InitializeJointMovements">
+            <summary>
+            Cached name for the 'InitializeJointMovements' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName._Process">
+            <summary>
+            Cached name for the '_Process' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName._PhysicsProcess">
+            <summary>
+            Cached name for the '_PhysicsProcess' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.MoveBonesDirectly">
+            <summary>
+            Cached name for the 'MoveBonesDirectly' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.MoveBonesSmoothly">
+            <summary>
+            Cached name for the 'MoveBonesSmoothly' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.SetBoneRotation">
+            <summary>
+            Cached name for the 'SetBoneRotation' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.SmoothBoneRotation">
+            <summary>
+            Cached name for the 'SmoothBoneRotation' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.SendPredictedHandData">
+            <summary>
+            Cached name for the 'SendPredictedHandData' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.GetBoneRotationDegrees">
+            <summary>
+            Cached name for the 'GetBoneRotationDegrees' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.ResetBones">
+            <summary>
+            Cached name for the 'ResetBones' method.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.MethodName.SetSmoothing">
+            <summary>
+            Cached name for the 'SetSmoothing' method.
+            </summary>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.GetGodotMethodList">
+            <summary>
+            Get the method information for all the methods declared in this class.
+            This method is used by Godot to register the available methods in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.InvokeGodotClassMethod(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.NativeVariantPtrArgs,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.HasGodotClassMethod(Godot.NativeInterop.godot_string_name@)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.PredictedHandSkeleton.PropertyName">
+            <summary>
+            Cached StringNames for the properties and fields contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.PropertyName.SkeletonPath">
+            <summary>
+            Cached name for the 'SkeletonPath' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.PropertyName.EnableSmoothing">
+            <summary>
+            Cached name for the 'EnableSmoothing' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.PropertyName.SmoothingSpeed">
+            <summary>
+            Cached name for the 'SmoothingSpeed' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.PropertyName.skeleton">
+            <summary>
+            Cached name for the 'skeleton' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.PropertyName.communicationController">
+            <summary>
+            Cached name for the 'communicationController' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.PropertyName.boneNames">
+            <summary>
+            Cached name for the 'boneNames' field.
+            </summary>
+        </member>
+        <member name="F:Vhi.PredictedHandSkeleton.PropertyName.inputFrameCount">
+            <summary>
+            Cached name for the 'inputFrameCount' field.
+            </summary>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.SetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.GetGodotClassPropertyValue(Godot.NativeInterop.godot_string_name@,Godot.NativeInterop.godot_variant@)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.GetGodotPropertyList">
+            <summary>
+            Get the property information for all the properties declared in this class.
+            This method is used by Godot to register the available properties in the editor.
+            Do not call this method.
+            </summary>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.SaveGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="M:Vhi.PredictedHandSkeleton.RestoreGodotObjectData(Godot.Bridge.GodotSerializationInfo)">
+            <inheritdoc/>
+        </member>
+        <member name="T:Vhi.PredictedHandSkeleton.SignalName">
+            <summary>
+            Cached StringNames for the signals contained in this class, for fast lookup.
+            </summary>
+        </member>
+        <member name="T:Vhi.VhiControlService">
+            <summary>
+            gRPC service implementation for the VHI control plane. Each RPC marshals its
+            work onto Godot's main thread (via <see cref="T:Vhi.GrpcControlServer"/>) because it
+            mutates the scene; the unary return value is the command ack/reject.
+            </summary>
+        </member>
+        <member name="M:Vhi.VhiControlService.SetMovement(Myogestic.Vhi.V1.SetMovementRequest,Grpc.Core.ServerCallContext)">
+            <inheritdoc cref="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetMovement(Myogestic.Vhi.V1.SetMovementRequest,Grpc.Core.ServerCallContext)"/>
+        </member>
+        <member name="M:Vhi.VhiControlService.Freeze(Myogestic.Vhi.V1.FreezeRequest,Grpc.Core.ServerCallContext)">
+            <inheritdoc cref="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.Freeze(Myogestic.Vhi.V1.FreezeRequest,Grpc.Core.ServerCallContext)"/>
+        </member>
+        <member name="M:Vhi.VhiControlService.SetSpeed(Myogestic.Vhi.V1.SetSpeedRequest,Grpc.Core.ServerCallContext)">
+            <inheritdoc cref="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetSpeed(Myogestic.Vhi.V1.SetSpeedRequest,Grpc.Core.ServerCallContext)"/>
+        </member>
+        <member name="M:Vhi.VhiControlService.SetSmoothing(Myogestic.Vhi.V1.SetSmoothingRequest,Grpc.Core.ServerCallContext)">
+            <inheritdoc cref="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetSmoothing(Myogestic.Vhi.V1.SetSmoothingRequest,Grpc.Core.ServerCallContext)"/>
+        </member>
+        <member name="M:Vhi.VhiControlService.SetChirality(Myogestic.Vhi.V1.SetChiralityRequest,Grpc.Core.ServerCallContext)">
+            <inheritdoc cref="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetChirality(Myogestic.Vhi.V1.SetChiralityRequest,Grpc.Core.ServerCallContext)"/>
+        </member>
+        <member name="M:Vhi.VhiControlService.SetSessionActive(Myogestic.Vhi.V1.SetSessionActiveRequest,Grpc.Core.ServerCallContext)">
+            <inheritdoc cref="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetSessionActive(Myogestic.Vhi.V1.SetSessionActiveRequest,Grpc.Core.ServerCallContext)"/>
+        </member>
+        <member name="M:Vhi.VhiControlService.SetControlMode(Myogestic.Vhi.V1.SetControlModeRequest,Grpc.Core.ServerCallContext)">
+            <inheritdoc cref="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetControlMode(Myogestic.Vhi.V1.SetControlModeRequest,Grpc.Core.ServerCallContext)"/>
+        </member>
+        <member name="M:Vhi.VhiControlService.GetState(Myogestic.Vhi.V1.GetStateRequest,Grpc.Core.ServerCallContext)">
+            <inheritdoc cref="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.GetState(Myogestic.Vhi.V1.GetStateRequest,Grpc.Core.ServerCallContext)"/>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.MyogesticVhiReflection">
+            <summary>Holder for reflection information generated from proto/myogestic_vhi.proto</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.MyogesticVhiReflection.Descriptor">
+            <summary>File descriptor for proto/myogestic_vhi.proto</summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.ControlMode">
+            <summary>
+            How the control hand is driven.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.ControlMode.Movement">
+            <summary>
+            Predefined-movement state machine + local keyboard. The default — nothing
+            changes for callers that never touch SetControlMode.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.ControlMode.Stream">
+            <summary>
+            Continuous 9-DOF pose streamed in over the MyoGestic_ControlPose LSL inlet.
+            Movement commands (SetMovement / Freeze / SetSpeed) are rejected here.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.ControlMode.Idle">
+            <summary>
+            Hold the rest pose; ignore keyboard, stream, and movement commands.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.SetMovementRequest">
+            <summary>
+            Arguments to SetMovement. movement_name must match an entry in
+            StateReply.available_movements; "Rest" is a special-case that returns
+            the hand to its resting state.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetMovementRequest.MovementNameFieldNumber">
+            <summary>Field number for the "movement_name" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetMovementRequest.MovementName">
+            <summary>
+            A name from StateReply.available_movements, or the special value "Rest"
+            to return to the resting state.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetMovementRequest.CycleFieldNumber">
+            <summary>Field number for the "cycle" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetMovementRequest.Cycle">
+            <summary>
+            false (default): snap to the movement's end pose and hold it — the right
+              behaviour for a classifier output or a manual movement command.
+            true: play the open/close movement cycle (rest -> flex -> hold -> release,
+              looping) — used when recording regression data so VHI_Control sweeps a
+              continuous kinematic range.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.FreezeRequest">
+            <summary>
+            Arguments to Freeze.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.FreezeRequest.FrozenFieldNumber">
+            <summary>Field number for the "frozen" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.FreezeRequest.Frozen">
+            <summary>
+            true: hold the live pose indefinitely. false: release back to the
+            resting state and resume the normal movement state machine.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.SetSpeedRequest">
+            <summary>
+            Arguments to SetSpeed - the control-hand animation timing for a Movement
+            cycle. Non-positive frequency is ignored; negative hold/rest are ignored.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetSpeedRequest.FrequencyHzFieldNumber">
+            <summary>Field number for the "frequency_hz" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetSpeedRequest.FrequencyHz">
+            <summary>
+            Movement cycles per second (the closing/opening interpolation speed).
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetSpeedRequest.HoldTimeSFieldNumber">
+            <summary>Field number for the "hold_time_s" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetSpeedRequest.HoldTimeS">
+            <summary>
+            Seconds held at max flexion in each cycle.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetSpeedRequest.RestTimeSFieldNumber">
+            <summary>Field number for the "rest_time_s" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetSpeedRequest.RestTimeS">
+            <summary>
+            Seconds held at rest in each cycle.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.SetSmoothingRequest">
+            <summary>
+            Arguments to SetSmoothing - predicted-hand pose interpolation.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetSmoothingRequest.EnabledFieldNumber">
+            <summary>Field number for the "enabled" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetSmoothingRequest.Enabled">
+            <summary>
+            true: slerp toward the next sample. false: snap to it.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetSmoothingRequest.SmoothingSpeedFieldNumber">
+            <summary>Field number for the "smoothing_speed" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetSmoothingRequest.SmoothingSpeed">
+            <summary>
+            Slerp speed when enabled; ignored otherwise. Higher = snappier.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.SetChiralityRequest">
+            <summary>
+            Arguments to SetChirality. Currently not implemented - VHI returns
+            applied=false. Both hands stay left.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetChiralityRequest.RightHandFieldNumber">
+            <summary>Field number for the "right_hand" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetChiralityRequest.RightHand">
+            <summary>
+            true: right hand. false: left hand.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.SetSessionActiveRequest">
+            <summary>
+            Arguments to SetSessionActive.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetSessionActiveRequest.ActiveFieldNumber">
+            <summary>Field number for the "active" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetSessionActiveRequest.Active">
+            <summary>
+            true: a MyoGestic recording session is active - VHI's local keyboard
+            input is gated off so MyoGestic is the sole movement source. false:
+            keyboard input is enabled again.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.SetControlModeRequest">
+            <summary>
+            Arguments to SetControlMode.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.SetControlModeRequest.ModeFieldNumber">
+            <summary>Field number for the "mode" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.SetControlModeRequest.Mode">
+            <summary>
+            The target driver mode for the control hand.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.GetStateRequest">
+            <summary>
+            Empty - GetState takes no arguments. proto3 requires a message type even
+            when there are no parameters.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.CommandAck">
+            <summary>
+            Returned by every command RPC. Carries the post-command state so the
+            caller doesn't have to follow up with GetState just to confirm.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.CommandAck.AppliedFieldNumber">
+            <summary>Field number for the "applied" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.CommandAck.Applied">
+            <summary>
+            true: VHI accepted and applied the command. false: rejected (see message).
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.CommandAck.CurrentStateFieldNumber">
+            <summary>Field number for the "current_state" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.CommandAck.CurrentState">
+            <summary>
+            One of: "waiting" | "closing" | "holding" | "opening" | "resting" | "frozen".
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.CommandAck.CurrentMovementFieldNumber">
+            <summary>Field number for the "current_movement" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.CommandAck.CurrentMovement">
+            <summary>
+            The currently selected movement name (e.g. "Fist", "Rest").
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.CommandAck.MessageFieldNumber">
+            <summary>Field number for the "message" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.CommandAck.Message">
+            <summary>
+            Human-readable reason when applied == false.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.StateReply">
+            <summary>
+            Returned by GetState. Doubles as a connection handshake (clients know
+            VHI is reachable when the call succeeds) and movement-name discovery.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.StateReply.CurrentStateFieldNumber">
+            <summary>Field number for the "current_state" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.StateReply.CurrentState">
+            <summary>
+            One of: "waiting" | "closing" | "holding" | "opening" | "resting" | "frozen".
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.StateReply.CurrentMovementFieldNumber">
+            <summary>Field number for the "current_movement" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.StateReply.CurrentMovement">
+            <summary>
+            The currently selected movement name.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.StateReply.SessionActiveFieldNumber">
+            <summary>Field number for the "session_active" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.StateReply.SessionActive">
+            <summary>
+            Whether a recording session is currently marked active (SetSessionActive).
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.StateReply.AvailableMovementsFieldNumber">
+            <summary>Field number for the "available_movements" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.StateReply.AvailableMovements">
+            <summary>
+            Valid movement names for the current mode - discover, don't hard-code.
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.StateReply.ModeFieldNumber">
+            <summary>Field number for the "mode" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.StateReply.Mode">
+            <summary>
+            "AI" | "Classifier" - the movement-set mode (see MovementMode).
+            </summary>
+        </member>
+        <member name="F:Myogestic.Vhi.V1.StateReply.ControlModeFieldNumber">
+            <summary>Field number for the "control_mode" field.</summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.StateReply.ControlMode">
+            <summary>
+            How the control hand is currently driven.
+            </summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.VhiControl">
+             <summary>
+             Control plane between MyoGestic (gRPC client) and the Virtual Hand Interface
+             (gRPC server, hosted in-process by the Godot app). Continuous time-series
+             (predictions, hand poses) stays on LSL; this service carries only discrete
+             commands. The unary return value is the ack/reject.
+            
+             This file is the canonical contract. The copy in the MyoGestic repo
+             (myogestic/_proto/myogestic_vhi.proto) is vendored from here.
+             </summary>
+        </member>
+        <member name="P:Myogestic.Vhi.V1.VhiControl.Descriptor">
+            <summary>Service descriptor</summary>
+        </member>
+        <member name="T:Myogestic.Vhi.V1.VhiControl.VhiControlBase">
+            <summary>Base class for server-side implementations of VhiControl</summary>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetMovement(Myogestic.Vhi.V1.SetMovementRequest,Grpc.Core.ServerCallContext)">
+            <summary>
+            Select + start playing a movement on the control hand. movement_name must
+            match a VHI movement (see MovementDefinitions.cs / the movements TOML) and,
+            by convention, a MyoGestic class name. "Rest" returns the hand to rest.
+            </summary>
+            <param name="request">The request received from the client.</param>
+            <param name="context">The context of the server-side call handler being invoked.</param>
+            <returns>The response to send back to the client (wrapped by a task).</returns>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.Freeze(Myogestic.Vhi.V1.FreezeRequest,Grpc.Core.ServerCallContext)">
+            <summary>
+            Freeze the control hand at its current pose, or release it.
+            </summary>
+            <param name="request">The request received from the client.</param>
+            <param name="context">The context of the server-side call handler being invoked.</param>
+            <returns>The response to send back to the client (wrapped by a task).</returns>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetSpeed(Myogestic.Vhi.V1.SetSpeedRequest,Grpc.Core.ServerCallContext)">
+            <summary>
+            Adjust the control-hand animation timing (the UI speed/hold/rest sliders).
+            </summary>
+            <param name="request">The request received from the client.</param>
+            <param name="context">The context of the server-side call handler being invoked.</param>
+            <returns>The response to send back to the client (wrapped by a task).</returns>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetSmoothing(Myogestic.Vhi.V1.SetSmoothingRequest,Grpc.Core.ServerCallContext)">
+            <summary>
+            Toggle predicted-hand smoothing and its speed.
+            </summary>
+            <param name="request">The request received from the client.</param>
+            <param name="context">The context of the server-side call handler being invoked.</param>
+            <returns>The response to send back to the client (wrapped by a task).</returns>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetChirality(Myogestic.Vhi.V1.SetChiralityRequest,Grpc.Core.ServerCallContext)">
+            <summary>
+            Set control-hand chirality (left/right mirror). NOT IMPLEMENTED in the
+            current VHI - the RPC is wired up but the handler always returns
+            applied=false. Both hands stay left.
+            </summary>
+            <param name="request">The request received from the client.</param>
+            <param name="context">The context of the server-side call handler being invoked.</param>
+            <returns>The response to send back to the client (wrapped by a task).</returns>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetSessionActive(Myogestic.Vhi.V1.SetSessionActiveRequest,Grpc.Core.ServerCallContext)">
+            <summary>
+            Tell VHI whether a MyoGestic recording session is active. While active,
+            VHI ignores local keyboard input so MyoGestic is the sole movement source.
+            </summary>
+            <param name="request">The request received from the client.</param>
+            <param name="context">The context of the server-side call handler being invoked.</param>
+            <returns>The response to send back to the client (wrapped by a task).</returns>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.SetControlMode(Myogestic.Vhi.V1.SetControlModeRequest,Grpc.Core.ServerCallContext)">
+            <summary>
+            Set how the control hand is driven (see ControlMode) — the predefined
+            movement state machine, or a continuous pose streamed over LSL.
+            </summary>
+            <param name="request">The request received from the client.</param>
+            <param name="context">The context of the server-side call handler being invoked.</param>
+            <returns>The response to send back to the client (wrapped by a task).</returns>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.VhiControlBase.GetState(Myogestic.Vhi.V1.GetStateRequest,Grpc.Core.ServerCallContext)">
+            <summary>
+            Query current VHI state. Doubles as a connection handshake and lets the
+            client discover the valid movement names for the current mode.
+            </summary>
+            <param name="request">The request received from the client.</param>
+            <param name="context">The context of the server-side call handler being invoked.</param>
+            <returns>The response to send back to the client (wrapped by a task).</returns>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.BindService(Myogestic.Vhi.V1.VhiControl.VhiControlBase)">
+            <summary>Creates service definition that can be registered with a server</summary>
+            <param name="serviceImpl">An object implementing the server-side handling logic.</param>
+        </member>
+        <member name="M:Myogestic.Vhi.V1.VhiControl.BindService(Grpc.Core.ServiceBinderBase,Myogestic.Vhi.V1.VhiControl.VhiControlBase)">
+            <summary>Register service method with a service binder with or without implementation. Useful when customizing the service binding logic.
+            Note: this method is part of an experimental API that can change or be removed without any prior notice.</summary>
+            <param name="serviceBinder">Service methods will be bound by calling <c>AddMethod</c> on this object.</param>
+            <param name="serviceImpl">An object implementing the server-side handling logic.</param>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.MyRegex_0">
+            <summary>Custom <see cref="T:System.Text.RegularExpressions.Regex"/>-derived type for the MyRegex method.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.MyRegex_0.Instance">
+            <summary>Cached, thread-safe singleton instance.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.MyRegex_0.#ctor">
+            <summary>Initializes the instance.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.MyRegex_0.RunnerFactory">
+            <summary>Provides a factory for creating <see cref="T:System.Text.RegularExpressions.RegexRunner"/> instances to be used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.MyRegex_0.RunnerFactory.CreateInstance">
+            <summary>Creates an instance of a <see cref="T:System.Text.RegularExpressions.RegexRunner"/> used by methods on <see cref="T:System.Text.RegularExpressions.Regex"/>.</summary>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.MyRegex_0.RunnerFactory.Runner">
+            <summary>Provides the runner that contains the custom logic implementing the specified regular expression.</summary>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.MyRegex_0.RunnerFactory.Runner.Scan(System.ReadOnlySpan{System.Char})">
+            <summary>Scan the <paramref name="inputSpan"/> starting from base.runtextstart for the next match.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.MyRegex_0.RunnerFactory.Runner.TryFindNextPossibleStartingPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Search <paramref name="inputSpan"/> starting from base.runtextpos for the next location a match could possibly start.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if a possible match was found; false if no more matches are possible.</returns>
+        </member>
+        <member name="M:System.Text.RegularExpressions.Generated.MyRegex_0.RunnerFactory.Runner.TryMatchAtCurrentPosition(System.ReadOnlySpan{System.Char})">
+            <summary>Determine whether <paramref name="inputSpan"/> at base.runtextpos is a match for the regular expression.</summary>
+            <param name="inputSpan">The text being scanned by the regular expression.</param>
+            <returns>true if the regular expression matches at the current position; otherwise, false.</returns>
+        </member>
+        <member name="T:System.Text.RegularExpressions.Generated.Utilities">
+            <summary>Helper methods used by generated <see cref="T:System.Text.RegularExpressions.Regex"/>-derived implementations.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_defaultTimeout">
+            <summary>Default timeout value set in <see cref="T:System.AppContext"/>, or <see cref="F:System.Text.RegularExpressions.Regex.InfiniteMatchTimeout"/> if none was set.</summary>
+        </member>
+        <member name="F:System.Text.RegularExpressions.Generated.Utilities.s_hasTimeout">
+            <summary>Whether <see cref="F:System.Text.RegularExpressions.Generated.Utilities.s_defaultTimeout"/> is non-infinite.</summary>
+        </member>
+    </members>
+</doc>

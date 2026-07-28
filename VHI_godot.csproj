@@ -24,9 +24,6 @@
     <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
-    <Protobuf Include="proto/myogestic_vhi.proto" GrpcServices="Server" />
-    <!-- v2 is served alongside v1 for the whole migration, so both contracts
-         are generated. v1 is removed only once nothing speaks it. -->
     <Protobuf Include="proto/myogestic_vhi_v2.proto" GrpcServices="Server" />
   </ItemGroup>
 </Project>

@@ -7,7 +7,7 @@ namespace Vhi;
 
 /// <summary>
 /// The v2 recording / label-acquisition aid, served alongside
-/// <see cref="VhiCanonicalControlService"/> and <see cref="VhiControlService"/>.
+/// <see cref="VhiCanonicalControlService"/>.
 /// </summary>
 /// <remarks>
 /// <para>

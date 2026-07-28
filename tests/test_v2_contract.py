@@ -278,37 +278,28 @@ def test_the_hand_is_left_at_rest_after_a_sweep(v2):
     assert {o.element for o in after.observed} <= set(EXPECTED["thumb.flexion"])
 
 
-# --- v1 must keep working ------------------------------------------------------
+# --- v1 must be gone ----------------------------------------------------------
 
 
-def test_v1_is_still_served_on_the_same_port(v2_pb2, vhi_process):
-    """The migration is additive: adding v2 must not disturb v1's routes."""
-    import subprocess
-    import sys
-    import tempfile
-    import pathlib
+def test_the_legacy_v1_service_is_no_longer_served(vhi_process):
+    """The removal, asserted rather than assumed.
 
+    Called over a raw channel with no generated stub, which is the point: the v1
+    contract file is deleted, so there is nothing to generate from. A client that still
+    speaks v1 now gets UNIMPLEMENTED — precisely the signal v2's Declare handshake reads
+    to decide it is talking to a build that does not speak its language.
+    """
     import grpc
 
-    v1_proto = pathlib.Path(__file__).resolve().parent.parent / "proto" / "myogestic_vhi.proto"
-    out = pathlib.Path(tempfile.mkdtemp(prefix="vhi-v1-stubs-"))
-    result = subprocess.run(
-        [
-            sys.executable, "-m", "grpc_tools.protoc",
-            f"--proto_path={v1_proto.parent}",
-            f"--python_out={out}", f"--grpc_python_out={out}", str(v1_proto),
-        ],
-        capture_output=True, text=True, check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    sys.path.insert(0, str(out))
-    import myogestic_vhi_pb2 as v1
-    import myogestic_vhi_pb2_grpc as v1_grpc
-
     with grpc.insecure_channel("127.0.0.1:50051") as channel:
-        reply = v1_grpc.VhiControlStub(channel).GetState(v1.GetStateRequest(), timeout=10.0)
-    assert reply.current_state
-    assert list(reply.available_movements)
+        call = channel.unary_unary(
+            "/myogestic.vhi.v1.VhiControl/GetState",
+            request_serializer=lambda _: b"",
+            response_deserializer=lambda raw: raw,
+        )
+        with pytest.raises(grpc.RpcError) as excinfo:
+            call(None, timeout=10.0)
+    assert excinfo.value.code() == grpc.StatusCode.UNIMPLEMENTED, excinfo.value.code()
 
 
 # --- the recording aid: a separate service, and deliberately not control ---------

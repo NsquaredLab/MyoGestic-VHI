@@ -22,8 +22,8 @@ what it is good at.
 ## The server
 
 `GrpcControlServer` is a Godot `Node` that owns a minimal Kestrel
-`WebApplication` hosting **three** services on the same port: `VhiControl`
-(v1), `VhiCanonicalControl` (v2 control), and `VhiTrainingAid` (v2 recording).
+`WebApplication` hosting **two** services on the same port:
+`VhiCanonicalControl` (control) and `VhiTrainingAid` (recording).
 It:
 
 - starts in `_Ready()` on `127.0.0.1:<GrpcPort>` (default **50051**, HTTP/2
@@ -36,19 +36,29 @@ calls; the return value *is* the acknowledgement.
 
 ## The contract
 
-There are two contracts, both canonical here, and MyoGestic vendors copies of
-both and regenerates its Python stubs from them.
+The contract is `proto/myogestic_vhi_v2.proto` in this repo — the canonical
+source. MyoGestic vendors a copy and regenerates its Python stubs from it.
 
-`proto/myogestic_vhi.proto` (**v1**) speaks in movement names and a nine-float
-pose whose channel meaning lives nowhere.
-`proto/myogestic_vhi_v2.proto` (**v2**) speaks the canonical control standard:
-DOFs are addressed by name, and `Declare` negotiates which ones this hand can
-render instead of either side hard-coding a channel index.
+DOFs are addressed **by name**, and `Declare` negotiates which ones this hand can
+render, so neither side hard-codes a channel index.
 
-Both are served for the whole migration. A client discovers which one a build
-speaks by calling v2's `Declare` — an older VHI answers `UNIMPLEMENTED`, which is
-how the client knows to fall back rather than guess. v1 is removed only once
-nothing speaks it.
+!!! warning "The legacy `VhiControl` service has been removed"
+    `proto/myogestic_vhi.proto` and its service are gone. They spoke in movement
+    names and a nine-float pose whose channel meaning lived nowhere — channels 6-8
+    were dead on both ends for years without anything noticing, and MyoGestic's own
+    tables documented channel 1 wrongly.
+
+    A client that still speaks v1 now gets `UNIMPLEMENTED`, which is exactly the
+    signal v2's `Declare` handshake reads to recognise a build it cannot negotiate
+    with. Nothing degrades silently.
+
+    Its capabilities went to three different places, because they were three
+    different kinds of thing: `SetMovement` became a canonical **discrete DOF**
+    (a held state), `SetSessionActive` and movement cycling became the
+    **recording aid**, and `SetSmoothing` became `SetPresentation` — a renderer
+    presentation setting. `Freeze`, `SetSpeed`, `SetChirality` and `SetControlMode`
+    were transport concepts with no consumer and were not replaced. `GetState`'s
+    only real job, discovering movement names, is `GetTrainingState`.
 
 ### Smoothing is three layers, not one
 
@@ -105,25 +115,22 @@ hand.
     stream, and it is not optional. The first end-to-end v2 run agreed on channel
     names while VHI's continuous path still decoded legacy units, so a canonical
     `+1` arrived as a legacy `+1` and the hand **extended when it was told to
-    flex**. VHI reports `LEGACY_NEGATED` until that decoder is gone; a client that
-    receives `ENCODING_UNSPECIFIED` must fall back rather than assume.
+    flex**. The inlet now takes `CANONICAL` values; a client that receives
+    `ENCODING_UNSPECIFIED` must fall back rather than assume.
 
-The `VhiControl` service, at a glance:
+The `VhiCanonicalControl` service, at a glance:
 
 | RPC | Purpose |
 |---|---|
-| `SetMovement` | select a predefined movement; hold its end pose, or play the cycle |
-| `Freeze` | freeze / release the control hand at its current pose |
-| `SetSpeed` | adjust the movement animation timing |
-| `SetSmoothing` | toggle predicted-hand smoothing |
-| `SetSessionActive` | tell VHI a recording session is live (gates the keyboard) |
-| `SetControlMode` | switch the control hand's [driver mode](control-modes.md) |
-| `GetState` | query current state; doubles as a connection handshake and lets the client discover valid movement names |
+| `Declare` | negotiate a control space by name; returns per-DOF verdicts, the channel order, and how to encode it |
+| `SetControl` | command one canonical frame — continuous values and discrete states |
+| `SweepControl` | drive one DOF across its range and report which bones moved, in signed degrees |
+| `SetPresentation` | renderer blending (appearance only — layer 3 of three) |
 
-Every command RPC returns a `CommandAck { applied, current_state,
-current_movement, message }`. A command that can't be applied - an unknown
-movement name, or a movement command while the hand is in `Stream` mode -
-comes back with `applied = false` and a human-readable `message`.
+`SetControl` returns a `ControlAck { applied, rejected }`, where `rejected` maps a
+DOF name to the reason it was refused. A refusal is always *named*: a DOF that
+cannot be rendered is reported, never silently dropped, because a dropped joint
+looks exactly like a joint that is working and holding still.
 
 See the [gRPC API reference](../reference/grpc-api.md) for every message and
 field, including the full `.proto`.

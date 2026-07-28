@@ -48,11 +48,9 @@ public partial class GrpcControlServer : Node
             builder.Services.AddSingleton(this);
 
             app = builder.Build();
-            app.MapGrpcService<VhiControlService>();
-            // v2 is served in parallel with v1, on the same port and the same DI
-            // singletons, for the whole migration. A client discovers which one this
-            // build speaks by calling v2's Declare: an older VHI answers UNIMPLEMENTED,
-            // which is how the client knows to fall back rather than guess.
+            // Two services, both v2. The legacy VhiControl service is gone: a client
+            // that still speaks it now gets UNIMPLEMENTED, which is exactly the signal
+            // v2's Declare handshake was built to interpret.
             app.MapGrpcService<VhiCanonicalControlService>();
             // The recording aid is its own service rather than extra RPCs on the
             // canonical one, so that "this is not a control plane" is structural

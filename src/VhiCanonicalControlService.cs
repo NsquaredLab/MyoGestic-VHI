@@ -8,7 +8,7 @@ using Myogestic.Vhi.V2;
 namespace Vhi;
 
 /// <summary>
-/// The canonical control service (v2), served alongside <see cref="VhiControlService"/>.
+/// The canonical control service (v2), served alongside <see cref="VhiTrainingAidService"/>.
 /// </summary>
 /// <remarks>
 /// <para>

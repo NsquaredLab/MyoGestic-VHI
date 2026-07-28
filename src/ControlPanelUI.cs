@@ -22,7 +22,7 @@ namespace Vhi;
 ///
 /// Collapsed by default; toggled with the <c>&gt;</c> chevron on the right edge.
 /// No driver-mode toggle - that is set in the Inspector or over gRPC
-/// (<see cref="VhiControlService.SetControlMode"/>).
+/// (the gRPC control plane).
 /// </summary>
 public partial class ControlPanelUI : Control
 {

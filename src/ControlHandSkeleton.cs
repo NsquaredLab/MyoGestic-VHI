@@ -24,7 +24,7 @@ namespace Vhi;
 ///
 /// Frame-by-frame animation logic runs in <c>_Process</c>; the resulting pose is
 /// published to the <c>VHI_Control</c> LSL outlet in <c>_PhysicsProcess</c>.
-/// Commands originate from the gRPC <see cref="VhiControlService"/> (via the public
+/// Commands originate from the gRPC control services (via the public
 /// command API on this class) and from local keyboard input - the same methods are
 /// called either way.
 /// </summary>
@@ -436,12 +436,12 @@ public partial class ControlHandSkeleton : Node3D
 
 	// ===== Programmatic command API =====
 	// Shared by keyboard input (above) and the gRPC control service
-	// (VhiControlService). All of these run on Godot's main thread.
+	// (the gRPC control services). All of these run on Godot's main thread.
 
 	/// <summary>True when a MyoGestic recording session is currently active.
 	/// While set, VHI's local keyboard input is gated off so the gRPC client
 	/// is the sole movement source. Toggled via the
-	/// <c>VhiControlService.SetSessionActive</c> RPC.</summary>
+	/// <c>VhiTrainingAid.SetRecordingSession</c> RPC.</summary>
 	public bool SessionActive { get; set; } = false;
 
 	// --- training programs (v2 recording aid) ------------------------------------
