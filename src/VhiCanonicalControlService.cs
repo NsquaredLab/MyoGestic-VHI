@@ -143,10 +143,15 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				// Layer 3 of three, reported so a client can see it — never so it can
 				// mistake it for chatter protection. See SetPresentation.
 				BlendsPresentation = predictedHand.EnableSmoothing,
+				Accepted = true,
 			};
 			reply.ContinuousChannelOrder.AddRange(ChannelOrder);
 
-			bool all = request.Dofs.Count > 0;
+			// A declaration is accepted when everything in it is renderable. "Nothing in
+			// it" is not acceptance — except when the client declared a control-pose
+			// stream instead of DOFs, which is a legitimate thing to negotiate alone.
+			bool all = request.Dofs.Count > 0
+				|| request.ControlPoseEncoding != ContinuousEncoding.EncodingUnspecified;
 			foreach (DofDeclaration dof in request.Dofs)
 			{
 				var verdict = new DofVerdict { Name = dof.Name };
@@ -200,11 +205,62 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				reply.Verdicts.Add(verdict);
 			}
 
-			reply.Accepted = all;
-			GD.Print($"  v2 Declare from {request.ClientName}: accepted={all} "
+			// A declared control-pose stream drives the *control* hand's bones, and so does
+			// a discrete DOF (as a movement). Refuse the combination rather than arbitrate
+			// it per command: two drivers for one hand is exactly what v1's ControlMode
+			// existed to referee, and a client told "no" at handshake time can fix its
+			// configuration, where one told "no" per command just sees things not happen.
+			if (request.ControlPoseEncoding != ContinuousEncoding.EncodingUnspecified)
+			{
+				bool anyDiscrete = false;
+				foreach (DofDeclaration dof in request.Dofs)
+					anyDiscrete |= dof.Kind == Kind.Discrete;
+
+				if (anyDiscrete)
+				{
+					reply.Accepted = false;
+					foreach (DofVerdict verdict in reply.Verdicts)
+					{
+						if (verdict.Renderable && FindDeclaration(request, verdict.Name) == Kind.Discrete)
+						{
+							verdict.Renderable = false;
+							verdict.Message =
+								"a discrete DOF and a control-pose stream would both drive the "
+								+ "control hand — declare one or the other";
+						}
+					}
+				}
+				else
+				{
+					bool canonical = request.ControlPoseEncoding == ContinuousEncoding.Canonical;
+					controlHand.AcceptControlPoseStream(canonical);
+					reply.ControlPoseStreamName = "MyoGestic_ControlPose";
+					reply.ControlPoseChannelOrder.AddRange(ChannelOrder);
+					// Echo what was actually applied, not what was asked for.
+					reply.ControlPoseEncoding = canonical
+						? ContinuousEncoding.Canonical
+						: ContinuousEncoding.LegacyNegated;
+					GD.Print($"  v2 control-pose stream accepted as "
+						+ $"{reply.ControlPoseEncoding}; control hand -> Stream mode");
+				}
+			}
+
+			reply.Accepted = all && reply.Accepted;
+			GD.Print($"  v2 Declare from {request.ClientName}: accepted={reply.Accepted} "
 				+ $"({request.Dofs.Count} DOFs, standard {request.StandardVersion})");
 			return reply;
 		});
+
+	/// <summary>The declared kind of one DOF in a request, for cross-checking.</summary>
+	private static Kind FindDeclaration(DeclareRequest request, string name)
+	{
+		foreach (DofDeclaration dof in request.Dofs)
+		{
+			if (dof.Name == name)
+				return dof.Kind;
+		}
+		return Kind.Unspecified;
+	}
 
 	/// <summary>Apply one canonical frame. Continuous only, for now.</summary>
 	public override Task<ControlAck> SetControl(SetControlRequest request, ServerCallContext context) =>

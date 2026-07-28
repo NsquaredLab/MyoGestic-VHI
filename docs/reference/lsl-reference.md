@@ -88,9 +88,38 @@ is worth stating per stream:
 | Stream | Direction | Convention |
 |---|---|---|
 | `MyoGestic_Output` (inlet) | into VHI | **Canonical** — `+1` is the direction the channel's name denotes, so `+1` on `IndexFlexion` *flexes*. |
-| `MyoGestic_ControlPose` (inlet) | into VHI | **Renderer units** — `-1` flexes. Not part of the v2 negotiation. |
+| `MyoGestic_ControlPose` (inlet) | into VHI | **Negotiated per client.** Renderer units (`-1` flexes) unless a client declares otherwise — see below. |
 | `VHI_Control` (outlet) | out of VHI | **Renderer units** — `-1` flexes. |
 | `VHI_Predict` (outlet) | out of VHI | **Renderer units** — `-1` flexes. |
+
+### `MyoGestic_ControlPose` is negotiated, not fixed
+
+`MyoGestic_Output` had its convention *changed* in 2.0. The control-pose inlet was
+handled differently on purpose: its convention is chosen by the client, and the default
+is the old one. An existing producer that pushes renderer units keeps working with no
+change at all.
+
+Declare it through `DeclareRequest.control_pose_encoding`:
+
+| Value | VHI does |
+|---|---|
+| `ENCODING_UNSPECIFIED` (default, and what omitting the field sends) | Nothing. The stream and the control hand are left exactly as they were. |
+| `CANONICAL` | Reads the stream as canonical values, and switches the control hand to `Stream` mode so the inlet is consumed. |
+| `LEGACY_NEGATED` | Same mode switch, renderer units kept. The migration path: get the handshake now, change your numbers later. |
+
+Two things worth knowing:
+
+- **Declaring the stream is what asks for `Stream` mode.** An inlet nobody reads is
+  indistinguishable from a stream that is not arriving, and there is no separate mode RPC
+  in v2 — declaring that you will stream a control pose *is* the request.
+- **A control-pose stream and a discrete DOF cannot be declared together.** A discrete
+  DOF renders as a control-hand *movement*, and a streamed pose drives the same bones.
+  v1 arbitrated that per command through `ControlMode`; v2 refuses the combination at the
+  handshake, where a client can still fix its configuration rather than watch commands
+  quietly not apply.
+
+`DeclareReply` echoes the encoding **actually applied** rather than the one requested, so
+read it instead of assuming your request won.
 
 `MyoGestic_Output` changed convention in 2.0; see
 [Upgrading to VHI 2.0](../upgrading-to-v2.md). The outlets deliberately did **not**, so

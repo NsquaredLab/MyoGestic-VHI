@@ -274,6 +274,16 @@ public partial class ControlHandSkeleton : Node3D
 				if (communicationController != null)
 				{
 					currentData = communicationController.GetReceivedDataControl();
+					// Canonical values mean +1 is the direction the channel's name denotes,
+					// and this rig's gains are negative — so negate once on ingest and
+					// everything downstream keeps working in the rig's own units, including
+					// the VHI_Control read-back. Off unless a client negotiated it, which is
+					// what keeps existing renderer-unit producers working untouched.
+					if (ControlPoseCanonical)
+					{
+						for (int i = 0; i < currentData.Count; i++)
+							currentData[i] = -currentData[i];
+					}
 					if (currentData.Count >= 9 && skeleton != null)
 						MoveBonesFromStream();
 				}
@@ -459,6 +469,32 @@ public partial class ControlHandSkeleton : Node3D
 	/// held there would always read false. The hand is the thing that is running a
 	/// program, so the hand is where the fact belongs.
 	/// </remarks>
+	/// <summary>
+	/// Whether the <c>MyoGestic_ControlPose</c> inlet is read as canonical values.
+	/// </summary>
+	/// <remarks>
+	/// Negotiated per client through v2's <c>Declare</c>, and <see langword="false"/>
+	/// until one asks — so a producer written before the handshake existed keeps sending
+	/// renderer units and keeps working. Held here rather than in the gRPC service
+	/// because that service is constructed per call.
+	/// </remarks>
+	public bool ControlPoseCanonical { get; private set; }
+
+	/// <summary>
+	/// Accept a control-pose stream in the given convention, switching to
+	/// <see cref="ControlHandDriverMode.Stream"/> so the inlet is actually consumed.
+	/// </summary>
+	/// <remarks>
+	/// Declaring the stream is what asks for the mode: an inlet nobody reads is
+	/// indistinguishable from a stream that is not arriving, and v1's separate
+	/// SetControlMode RPC is gone. Idempotent.
+	/// </remarks>
+	public void AcceptControlPoseStream(bool canonical)
+	{
+		ControlPoseCanonical = canonical;
+		SetDriverMode(ControlHandDriverMode.Stream);
+	}
+
 	public bool TrainingProgramActive { get; private set; }
 
 	/// <summary>The movement a running training program is cycling, or empty.</summary>

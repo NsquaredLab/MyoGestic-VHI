@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   canonical discrete DOF is a *held state*, and collecting training data must not
   redefine that. While a program runs it owns the control hand and discrete DOFs are
   refused with the reason.
+- **The optional `MyoGestic_ControlPose` inlet is under the same handshake, additively.**
+  `DeclareRequest.control_pose_encoding` lets a client say which convention it will send:
+  omitting it (what every existing client does) changes nothing at all, `LEGACY_NEGATED`
+  gets the handshake while keeping renderer units, and `CANONICAL` reads the stream as
+  canonical values. Unlike `MyoGestic_Output`, this stream's convention was **negotiated
+  rather than changed**, so an existing renderer-unit producer needs no edit.
+
+  Declaring the stream is also how a client asks for `Stream` mode, since v2 has no
+  separate mode RPC — an inlet nobody reads is indistinguishable from a stream that is
+  not arriving. Declaring it *together with* a discrete DOF is refused at the handshake:
+  both drive the control hand's bones, and v1 arbitrated that per command via
+  `ControlMode`, where a client only ever saw commands quietly not apply.
 - **`SetPresentation` — renderer blending, named for what it is.** The third of three
   distinct smoothing layers (continuous smoothing and discrete debounce are the other
   two, both on the MyoGestic side). Appearance only; it cannot make an unstable

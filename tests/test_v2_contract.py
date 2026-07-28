@@ -491,3 +491,121 @@ def test_the_training_state_reports_the_current_movement(v2, aid, movements):
     ).applied
     state = aid_stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0)
     assert state.current_movement == target
+
+
+# --- the control-pose stream: negotiated, not flipped ----------------------------
+
+
+@pytest.fixture
+def rest_control_hand(v2, aid):
+    """Leave the control hand in Movement mode for whatever runs next.
+
+    Declaring a control-pose stream switches the hand to Stream mode, and a later test
+    commanding a discrete DOF would then be refused for a reason that has nothing to do
+    with what it is testing.
+    """
+    yield
+    aid_stub, pb2 = aid
+    control_stub, _ = v2
+    movements = aid_stub.GetTrainingState(
+        pb2.GetTrainingStateRequest(), timeout=10.0
+    ).available_movements
+    # Commanding a movement is only possible in Movement mode, so the aid's program
+    # start/stop is the way back: StopTrainingProgram rests via SetMovement.
+    control_stub.SetControl(pb2.SetControlRequest(continuous={}), timeout=10.0)
+    aid_stub.StartTrainingProgram(
+        pb2.StartTrainingProgramRequest(movement=movements[0]), timeout=10.0
+    )
+    aid_stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0)
+
+
+def _declare_pose(stub, pb2, encoding, dofs=("index.flexion",), kind=None):
+    kind = kind if kind is not None else pb2.CONTINUOUS
+    return stub.Declare(
+        pb2.DeclareRequest(
+            standard_version="1",
+            client_name="control-pose-test",
+            control_pose_encoding=encoding,
+            dofs=[
+                pb2.DofDeclaration(name=n, kind=kind, lo=-1.0, hi=1.0, states=[])
+                for n in dofs
+            ],
+        ),
+        timeout=10.0,
+    )
+
+
+def test_not_declaring_a_control_pose_leaves_the_stream_unmentioned(v2):
+    """The additive guarantee: an existing client's handshake is unchanged.
+
+    Every client written before this field sends ENCODING_UNSPECIFIED by omission, and
+    must see exactly what it saw before — no stream name, no order, no mode change.
+    """
+    stub, pb2 = v2
+    reply = _declare(stub, pb2, "index.flexion")
+    assert reply.accepted
+    assert reply.control_pose_stream_name == ""
+    assert list(reply.control_pose_channel_order) == []
+    assert reply.control_pose_encoding == pb2.ENCODING_UNSPECIFIED
+
+
+def test_declaring_a_canonical_control_pose_is_accepted(v2, rest_control_hand):
+    stub, pb2 = v2
+    reply = _declare_pose(stub, pb2, pb2.CANONICAL)
+    assert reply.accepted, [v.message for v in reply.verdicts]
+    assert reply.control_pose_stream_name == "MyoGestic_ControlPose"
+    assert list(reply.control_pose_channel_order) == list(CANONICAL_DOFS)
+    assert reply.control_pose_encoding == pb2.CANONICAL
+
+
+def test_an_existing_producer_can_negotiate_without_changing_its_numbers(v2, rest_control_hand):
+    """The compatibility path: get the handshake, keep renderer units."""
+    stub, pb2 = v2
+    reply = _declare_pose(stub, pb2, pb2.LEGACY_NEGATED)
+    assert reply.accepted
+    assert reply.control_pose_encoding == pb2.LEGACY_NEGATED
+
+
+def test_the_reply_echoes_what_was_applied_not_what_was_asked(v2, rest_control_hand):
+    """A client must be able to read the outcome rather than assume its request won."""
+    stub, pb2 = v2
+    for asked in (pb2.CANONICAL, pb2.LEGACY_NEGATED):
+        assert _declare_pose(stub, pb2, asked).control_pose_encoding == asked
+
+
+def test_a_control_pose_and_a_discrete_dof_are_refused_together(v2, rest_control_hand):
+    """Two drivers for one hand — refused at the handshake, not per command.
+
+    A discrete DOF renders as a control-hand movement and a streamed pose drives the
+    same bones. v1 arbitrated this per command via ControlMode; saying no up front lets
+    the client fix its configuration instead of watching things not happen.
+    """
+    stub, pb2 = v2
+    reply = stub.Declare(
+        pb2.DeclareRequest(
+            standard_version="1",
+            control_pose_encoding=pb2.CANONICAL,
+            dofs=[
+                pb2.DofDeclaration(name="index.flexion", kind=pb2.CONTINUOUS, lo=-1.0, hi=1.0),
+                pb2.DofDeclaration(name="hand.grasp", kind=pb2.DISCRETE, states=["rest", "fist"]),
+            ],
+        ),
+        timeout=10.0,
+    )
+    assert not reply.accepted
+    grasp = next(v for v in reply.verdicts if v.name == "hand.grasp")
+    assert not grasp.renderable
+    assert "control-pose stream" in grasp.message
+    # The continuous DOF is still fine — the refusal is specific, not a blanket no.
+    assert next(v for v in reply.verdicts if v.name == "index.flexion").renderable
+
+
+def test_a_control_pose_may_be_declared_with_no_dofs_at_all(v2, rest_control_hand):
+    """Streaming the control hand is a legitimate thing to negotiate on its own."""
+    stub, pb2 = v2
+    reply = stub.Declare(
+        pb2.DeclareRequest(standard_version="1", control_pose_encoding=pb2.CANONICAL),
+        timeout=10.0,
+    )
+    assert reply.accepted
+    assert reply.control_pose_encoding == pb2.CANONICAL

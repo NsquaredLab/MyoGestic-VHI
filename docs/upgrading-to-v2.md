@@ -58,6 +58,13 @@ extended when it was told to flex.
     deliberate: every session recorded before this release stays readable by the same
     decoder. Only the stream VHI *reads* changed convention.
 
+    Nor did the optional `MyoGestic_ControlPose` inlet change. Its convention is
+    **negotiated** instead — `DeclareRequest.control_pose_encoding`, defaulting to the
+    old behaviour — so a producer pushing renderer units to it needs no change at all.
+    Declaring that stream is also how you ask for `Stream` mode, since v2 has no separate
+    mode RPC. See
+    [the LSL reference](reference/lsl-reference.md#myogestic_controlpose-is-negotiated-not-fixed).
+
 ## Upgrade steps
 
 ### If you use MyoGestic

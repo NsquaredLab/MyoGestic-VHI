@@ -86,9 +86,10 @@ DOFs across the 16 animated joints internally (see [Architecture](architecture.m
     now one copy.
 
     The convention also differs *per stream* as of 2.0: `MyoGestic_Output` takes canonical
-    values (`+1` flexes) while VHI's outlets stay in renderer units (`-1` flexes). Anything
-    that hard-codes a sign is right on one stream and inverted on another — call `Declare`
-    and honour what it reports.
+    values (`+1` flexes), VHI's outlets stay in renderer units (`-1` flexes), and
+    `MyoGestic_ControlPose` is whichever the client negotiated — renderer units by
+    default. Anything that hard-codes a sign is right on one stream and inverted on
+    another; call `Declare` and honour what it reports.
 
 See the [LSL reference](../reference/lsl-reference.md) for stream types,
 source IDs and exact metadata.
