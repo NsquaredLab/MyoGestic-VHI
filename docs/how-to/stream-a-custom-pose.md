@@ -21,12 +21,18 @@ There is no mode RPC in v2. You ask for `Stream` mode **by declaring the stream*
 which is also where you say which convention you will send on it:
 
 ```python
-from myogestic.controls import load_dofs
+from myogestic.controls import load_control_map, resolve
 from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
 client = vhi.canonical_client()
-controls = load_dofs({"dofs": {"index.flexion": "continuous"}})
+
+# `vhi.control.pose.*` is the control hand's own namespace — distinct from
+# `vhi.prediction.*`, and on its own stream. Resolution asks VHI what it exports.
+controls = resolve(
+    load_control_map({"dofs": {"my_index": "vhi.control.pose.index"}}),
+    client.capabilities(),
+)
 
 reply = client.declare(controls, control_pose="canonical")   # or "legacy"
 assert reply is not None and reply.accepted
@@ -82,14 +88,17 @@ that no single named movement covers. The pattern is:
 import time
 from itertools import product
 import numpy as np
-from myogestic.controls import load_dofs
+from myogestic.controls import load_control_map, resolve
 from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
 client = vhi.canonical_client()
 training_aid = vhi.training_client()
 pose_outlet = vhi.control_outlet()
-controls = load_dofs({"dofs": {"index.flexion": "continuous"}})
+controls = resolve(
+    load_control_map({"dofs": {"my_index": "vhi.control.pose.index"}}),
+    client.capabilities(),
+)
 
 # 1. Orchestration over gRPC.
 training_aid.set_recording_session(True)   # gate VHI's keyboard - MyoGestic owns the hand

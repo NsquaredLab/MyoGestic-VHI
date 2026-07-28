@@ -43,7 +43,7 @@ process_launcher(vhi.launcher())
 client = vhi.control_client()
 
 # 3. Command the control hand.
-bus.select("hand.gesture", "fist")       # a held state: snap to the pose, hold it
+bus.select("gesture", "Fist")            # a held state: snap to the pose, hold it
 training_aid.start_program("Index")      # a trajectory, for recording data
 client.freeze(True)                      # freeze at the current pose
 client.set_session_active(True)          # recording live - VHI ignores its keyboard

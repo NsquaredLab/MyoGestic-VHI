@@ -73,30 +73,39 @@ Declare what you control and let `VhiTarget` negotiate. It handles both conventi
 so the same application code works against VHI 1.x and 2.0:
 
 ```python
-from myogestic.controls import ControlBus, load_dofs
+from myogestic.controls import ControlBus, load_control_map, resolve
 from myogestic.vhi import VhiTarget, virtual_hand
 
 vhi = virtual_hand()
-CONTROLS = load_dofs({
+client = vhi.canonical_client()
+
+# Your name on the left, a control VHI declares on the right. VHI owns the
+# semantics — which addresses exist, and whether each is a number or a held state.
+CONTROL_MAP = load_control_map({
     "dofs": {
-        "index.flexion": "continuous",
-        "hand.gesture": {
-            "kind": "discrete",
-            "states": ["rest", "fist"],
-            "rest": "rest",
-            "debounce_s": 0.1,
-        },
+        "my_index": "vhi.prediction.index",
+        "gesture": {"target": "vhi.control.gesture", "debounce_s": 0.1},
     }
 })
 
+# Resolution needs a running VHI, because the manifest is what declares the
+# semantics. So resolve after VHI is up, not at import.
+controls = resolve(CONTROL_MAP, client.capabilities())
+
 target = VhiTarget(
     vhi.outlet(),
-    client=vhi.canonical_client(),     # negotiates v2
+    client=client,                       # negotiates v2
     legacy_client=vhi.control_client(),  # renders discrete DOFs on VHI 1.x
 )
-bus = ControlBus(CONTROLS, targets=[target], hz=32)
+bus = ControlBus(controls, targets=[target], hz=32)
 training_aid = vhi.training_client()
 ```
+
+The mapping is normally a TOML file rather than a dict literal —
+`load_control_map` takes a plain Mapping, so MyoGestic reads no configuration
+files itself. See `examples/controls/` in the MyoGestic repository for
+ready-to-copy files, including a classifier one that gates a probability with
+`threshold_fraction` before the same weighted fan-out a regressor uses.
 
 Then, once VHI is actually running — which for an app that launches VHI from its own UI
 is *after* startup:
@@ -105,7 +114,7 @@ is *after* startup:
 target.negotiate()      # settles the contract; cheap and idempotent
 ```
 
-1. **Replace `set_movement` with a discrete DOF.** `bus.select("hand.gesture", "fist")`
+1. **Replace `set_movement` with a discrete DOF.** `bus.select("gesture", "Fist")`
    for a deliberate click; `bus.push({...})` per tick for a classifier. Delete any
    `EdgeTrigger` you wrapped around the client — `debounce_s` on the DOF replaces it,
    and the bus owns the edge detection, dedupe and rebase.
@@ -148,11 +157,12 @@ smoothly, which is arguably worse because it looks deliberate.
 
 `SweepControl` exists for this. It drives one named DOF across its range and reports
 which rig elements moved and by how many **signed** degrees, read back off the skeleton
-— so "does `index.flexion` curl the index finger, in the flexion direction" is a
+— so "does `vhi.prediction.index.flexion` curl the index finger, in the flexion
+direction" is a
 machine-checkable question rather than something you watch for:
 
 ```python
-reply = vhi.canonical_client().sweep("index.flexion")
+reply = vhi.canonical_client().sweep("vhi.prediction.index.flexion")
 for observation in reply.observed:
     print(observation.element, observation.degrees_at_hi, observation.degrees_at_lo)
 ```

@@ -14,8 +14,8 @@ namespace Vhi;
 /// <para>
 /// v1 speaks in movement names and in a nine-float pose whose channel meaning lives
 /// nowhere. This service speaks the canonical control standard instead: a client
-/// declares what it controls by <b>name</b> ("index.flexion"), and VHI answers with
-/// what it can render. <see cref="Renderable"/> is the only table in VHI that knows
+/// declares which of VHI's <b>addresses</b> it drives ("vhi.prediction.index"), under
+/// whatever names its own configuration uses, and VHI answers with what it can render. <see cref="Renderable"/> is the only table in VHI that knows
 /// both vocabularies, and it exists so that nothing outside this file has to.
 /// </para>
 /// <para>

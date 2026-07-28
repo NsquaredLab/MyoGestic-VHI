@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`VhiCanonicalControl` — the canonical control service.** An application declares
-  what it controls **by name** (`index.flexion`, `hand.grasp`) and VHI answers with what
+  which of VHI's **addresses** it drives (`vhi.prediction.index`, `vhi.control.gesture`),
+  under whatever names its own configuration uses, and VHI answers with what
   it can render. Neither side hard-codes a channel index. `Declare` returns a per-DOF
   verdict, the continuous channel order, how to encode that stream, and whether the
   renderer blends. A DOF that cannot be rendered is reported with a reason and **never
@@ -23,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it is a DOF that silently does nothing some of the time.
 - **`SweepControl` — verification without a human at the screen.** Drives one named DOF
   across its range and reports which rig elements moved and by how many *signed* degrees,
-  read back off the skeleton. Turns "does `index.flexion` curl the index finger, in the
+  read back off the skeleton. Turns "does `vhi.prediction.index.flexion` curl the index
+  finger, in the
   flexion direction" into an assertion. It reports the model's own bone names, so a
   re-rig surfaces as a changed name rather than as a hand moving the wrong finger.
 - **`VhiTrainingAid` — a recording aid, deliberately not a control plane.** Carries the
