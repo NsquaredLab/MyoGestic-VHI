@@ -54,6 +54,10 @@ public partial class GrpcControlServer : Node
             // build speaks by calling v2's Declare: an older VHI answers UNIMPLEMENTED,
             // which is how the client knows to fall back rather than guess.
             app.MapGrpcService<VhiCanonicalControlService>();
+            // The recording aid is its own service rather than extra RPCs on the
+            // canonical one, so that "this is not a control plane" is structural
+            // instead of a comment someone can ignore.
+            app.MapGrpcService<VhiTrainingAidService>();
             app.StartAsync().Wait(5000);
 
             GD.Print($"✅ gRPC control server listening on 127.0.0.1:{GrpcPort}");

@@ -22,8 +22,9 @@ what it is good at.
 ## The server
 
 `GrpcControlServer` is a Godot `Node` that owns a minimal Kestrel
-`WebApplication` hosting **two** services on the same port: `VhiControl` (v1)
-and `VhiCanonicalControl` (v2). It:
+`WebApplication` hosting **three** services on the same port: `VhiControl`
+(v1), `VhiCanonicalControl` (v2 control), and `VhiTrainingAid` (v2 recording).
+It:
 
 - starts in `_Ready()` on `127.0.0.1:<GrpcPort>` (default **50051**, HTTP/2
   cleartext),
@@ -48,6 +49,34 @@ Both are served for the whole migration. A client discovers which one a build
 speaks by calling v2's `Declare` — an older VHI answers `UNIMPLEMENTED`, which is
 how the client knows to fall back rather than guess. v1 is removed only once
 nothing speaks it.
+
+### `VhiTrainingAid` — recording, not control
+
+A separate service, and the separation is the point. A canonical discrete DOF is a
+**held state**: an application asks for a grip and the hand holds a grip. Collecting
+regression training data wants the opposite — a control hand that keeps *moving*, so
+the recorded `VHI_Control` stream sweeps a continuous kinematic range for EMG windows
+to be aligned against. Folding that into the discrete vocabulary would have made
+"grip" mean "grip, unless someone is recording", which is how a control standard rots.
+
+So the aid carries the two things that belong to a recording *session* rather than to
+the thing being controlled:
+
+| RPC | Does |
+|---|---|
+| `SetRecordingSession` | Gate VHI's local keyboard so a session has one movement source. |
+| `StartTrainingProgram` | Cycle the control hand through a movement, producing a trajectory. |
+| `StopTrainingProgram` | Stop it and rest the hand. Idempotent. |
+| `GetTrainingState` | State, plus the movement names a program may use. |
+
+A program names a VHI movement, which is fine *because* this is not canonical: a
+recording aid is allowed to be application-specific, so the canonical vocabulary never
+grows a concept ("sweep me for training") that no application controls.
+
+While a program runs it **owns** the control hand: `SetControl`'s discrete DOFs are
+refused with a reason rather than being allowed to interrupt the trajectory a recording
+is being aligned against. Continuous DOFs are unaffected — they drive the *predicted*
+hand.
 
 !!! warning "A negotiation that settles names but not units is not a negotiation"
     `DeclareReply.continuous_encoding` says how to encode values on the LSL

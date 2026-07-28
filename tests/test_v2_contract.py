@@ -309,3 +309,144 @@ def test_v1_is_still_served_on_the_same_port(v2_pb2, vhi_process):
         reply = v1_grpc.VhiControlStub(channel).GetState(v1.GetStateRequest(), timeout=10.0)
     assert reply.current_state
     assert list(reply.available_movements)
+
+
+# --- the recording aid: a separate service, and deliberately not control ---------
+
+
+@pytest.fixture
+def aid(v2_pb2, vhi_process):
+    """A training-aid stub on the same live VHI, on the same port."""
+    import grpc
+
+    pb2, pb2_grpc = v2_pb2
+    channel = grpc.insecure_channel("127.0.0.1:50051")
+    stub = pb2_grpc.VhiTrainingAidStub(channel)
+    yield stub, pb2
+    # Never leave a program running for the next test.
+    stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0)
+    stub.SetRecordingSession(pb2.SetRecordingSessionRequest(active=False), timeout=10.0)
+    channel.close()
+
+
+def test_the_aid_is_a_separate_service_on_the_same_port(aid):
+    """Structural separation: control and recording are different services."""
+    stub, pb2 = aid
+    state = stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0)
+    assert list(state.available_movements), "the aid discovers movements on its own"
+
+
+def test_the_recording_session_gate_round_trips(aid):
+    stub, pb2 = aid
+    assert stub.SetRecordingSession(
+        pb2.SetRecordingSessionRequest(active=True), timeout=10.0
+    ).applied
+    assert stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0).recording_session_active
+    assert stub.SetRecordingSession(
+        pb2.SetRecordingSessionRequest(active=False), timeout=10.0
+    ).applied
+    assert not stub.GetTrainingState(
+        pb2.GetTrainingStateRequest(), timeout=10.0
+    ).recording_session_active
+
+
+def test_a_training_program_runs_and_reports_itself(aid):
+    stub, pb2 = aid
+    movement = stub.GetTrainingState(
+        pb2.GetTrainingStateRequest(), timeout=10.0
+    ).available_movements[1]
+    ack = stub.StartTrainingProgram(
+        pb2.StartTrainingProgramRequest(movement=movement, frequency_hz=1.0), timeout=10.0
+    )
+    assert ack.applied, ack.message
+    state = stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0)
+    assert state.program_running
+    assert state.program_movement == movement
+
+
+def test_a_second_program_is_refused_rather_than_swapped(aid):
+    """A recording is aligned against the running trajectory; swapping corrupts it."""
+    stub, pb2 = aid
+    movements = stub.GetTrainingState(
+        pb2.GetTrainingStateRequest(), timeout=10.0
+    ).available_movements
+    assert stub.StartTrainingProgram(
+        pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
+    ).applied
+    second = stub.StartTrainingProgram(
+        pb2.StartTrainingProgramRequest(movement=movements[2]), timeout=10.0
+    )
+    assert not second.applied
+    assert "already running" in second.message
+
+
+def test_an_unknown_movement_is_refused_with_what_is_available(aid):
+    stub, pb2 = aid
+    ack = stub.StartTrainingProgram(
+        pb2.StartTrainingProgramRequest(movement="not-a-movement"), timeout=10.0
+    )
+    assert not ack.applied
+    assert "offers" in ack.message
+
+
+def test_stopping_a_program_is_idempotent(aid):
+    """Teardown calls this without knowing whether anything is running."""
+    stub, pb2 = aid
+    assert stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0).applied
+    assert stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0).applied
+    assert not stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0).program_running
+
+
+def test_a_running_program_owns_the_control_hand(aid, v2):
+    """The aid must not be silently overridden mid-recording — nor silently override.
+
+    This is the guard that keeps a recording aid from changing what a discrete DOF
+    means: it does not redefine "hold this state", it refuses to be interrupted, and
+    says so.
+    """
+    aid_stub, pb2 = aid
+    control_stub, _ = v2
+    movements = aid_stub.GetTrainingState(
+        pb2.GetTrainingStateRequest(), timeout=10.0
+    ).available_movements
+    assert aid_stub.StartTrainingProgram(
+        pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
+    ).applied
+
+    ack = control_stub.SetControl(
+        pb2.SetControlRequest(discrete={"hand.grasp": movements[2]}), timeout=10.0
+    )
+    assert not ack.applied
+    assert "training program is running" in ack.rejected["hand.grasp"]
+
+
+def test_discrete_control_works_again_once_the_program_stops(aid, v2):
+    aid_stub, pb2 = aid
+    control_stub, _ = v2
+    movements = aid_stub.GetTrainingState(
+        pb2.GetTrainingStateRequest(), timeout=10.0
+    ).available_movements
+    aid_stub.StartTrainingProgram(
+        pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
+    )
+    aid_stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0)
+    ack = control_stub.SetControl(
+        pb2.SetControlRequest(discrete={"hand.grasp": movements[2]}), timeout=10.0
+    )
+    assert ack.applied, dict(ack.rejected)
+
+
+def test_continuous_control_is_unaffected_by_a_running_program(aid, v2):
+    """The program drives the *control* hand; continuous DOFs drive the predicted one."""
+    aid_stub, pb2 = aid
+    control_stub, _ = v2
+    movements = aid_stub.GetTrainingState(
+        pb2.GetTrainingStateRequest(), timeout=10.0
+    ).available_movements
+    aid_stub.StartTrainingProgram(
+        pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
+    )
+    ack = control_stub.SetControl(
+        pb2.SetControlRequest(continuous={"index.flexion": 0.5}), timeout=10.0
+    )
+    assert ack.applied, dict(ack.rejected)

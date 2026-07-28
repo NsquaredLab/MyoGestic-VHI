@@ -224,6 +224,18 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 			}
 			foreach ((string name, string state) in request.Discrete)
 			{
+				if (controlHand.TrainingProgramActive)
+				{
+					// The recording aid owns the control hand while a program runs. Refuse
+					// rather than let a control command interrupt the trajectory a
+					// recording is being aligned against — and refuse *visibly*, so the
+					// caller learns why instead of watching a state quietly not apply.
+					ack.Rejected[name] =
+						$"a training program is running ('{controlHand.TrainingProgramMovement}') "
+						+ "— stop it before commanding discrete DOFs";
+					ack.Applied = false;
+					continue;
+				}
 				string movement = ResolveMovement(state);
 				if (movement == null)
 				{

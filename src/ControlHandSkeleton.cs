@@ -444,6 +444,61 @@ public partial class ControlHandSkeleton : Node3D
 	/// <c>VhiControlService.SetSessionActive</c> RPC.</summary>
 	public bool SessionActive { get; set; } = false;
 
+	// --- training programs (v2 recording aid) ------------------------------------
+	//
+	// A training program is a *recording* concern, not a control one: it deliberately
+	// keeps the control hand moving so the VHI_Control stream sweeps a continuous
+	// kinematic range for EMG windows to be aligned against. It is built out of the
+	// existing movement machinery (SetSpeed + a cycling SetMovement) rather than a
+	// second animation path, so there is only ever one thing driving these bones.
+
+	/// <summary>Whether a v2 training program is cycling this hand right now.</summary>
+	/// <remarks>
+	/// Tracked here rather than in the gRPC service because the service is constructed
+	/// per call — grpc-dotnet's activator gives every RPC a fresh instance, so a flag
+	/// held there would always read false. The hand is the thing that is running a
+	/// program, so the hand is where the fact belongs.
+	/// </remarks>
+	public bool TrainingProgramActive { get; private set; }
+
+	/// <summary>The movement a running training program is cycling, or empty.</summary>
+	public string TrainingProgramMovement { get; private set; } = "";
+
+	/// <summary>
+	/// Begin cycling <paramref name="movement"/> to generate a training trajectory.
+	/// </summary>
+	/// <remarks>
+	/// Non-positive <paramref name="frequencyHz"/> and negative hold/rest times leave
+	/// VHI's current timing alone, matching <see cref="SetSpeed"/>.
+	/// </remarks>
+	/// <returns><see langword="false"/> if the hand is not in Movement mode or the
+	/// movement name is unknown — in which case nothing was started.</returns>
+	public bool StartTrainingProgram(string movement, float frequencyHz, float holdTimeS, float restTimeS)
+	{
+		SetSpeed(frequencyHz, holdTimeS, restTimeS);
+		// cycle:true is the whole difference from a discrete control command: the hand
+		// sweeps rest -> flex -> hold -> release repeatedly instead of snapping and
+		// holding, which is what makes the recorded stream a continuous range.
+		if (!SetMovement(movement, true))
+			return false;
+		TrainingProgramActive = true;
+		TrainingProgramMovement = movement;
+		GD.Print($"Training program started: {movement} (freq={Frequency} hold={HoldTime} rest={RestTime})");
+		return true;
+	}
+
+	/// <summary>Stop any training program and return the hand to rest. Idempotent.</summary>
+	public void StopTrainingProgram()
+	{
+		TrainingProgramActive = false;
+		TrainingProgramMovement = "";
+		// Rest explicitly rather than just clearing the flag: a program that stops
+		// mid-cycle would otherwise leave the hand holding a half-flexed pose, and the
+		// recording that follows would start from somewhere arbitrary.
+		SetMovement("Rest", false);
+		GD.Print("Training program stopped");
+	}
+
 	/// <summary>Movement names valid for the current mode.</summary>
 	public string[] GetAvailableMovements() => availableMovements ?? [];
 
