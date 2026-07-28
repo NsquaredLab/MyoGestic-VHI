@@ -12,35 +12,50 @@ is live.
 | **`Stream`** | a continuous pose on the `MyoGestic_ControlPose` LSL inlet | **rejected** |
 | **`Idle`** | nothing - holds the rest pose | **rejected** |
 
-The default is `Movement`, so **nothing changes** unless a client explicitly
-switches the mode. Switching is a gRPC call:
+The default is `Movement`, so **nothing changes** unless a client asks for
+something else.
+
+There is no mode RPC in v2. `Stream` mode is requested **by declaring the
+stream** — `DeclareRequest.control_pose_encoding` — because an inlet nobody
+reads is indistinguishable from a stream that is not arriving, so declaring
+that you will send one *is* the request:
 
 ```python
-client.set_control_mode("STREAM")   # "MOVEMENT" | "STREAM" | "IDLE"
+# MyoGestic
+vhi.canonical_client().declare(controls, control_pose="canonical")
 ```
 
-While the hand is in `Stream` or `Idle` mode, discrete DOFs and
-`SetSpeed` are rejected - the `CommandAck` comes back with `applied = false`
-and a message naming the mode it is actually in. This keeps
-ownership of the hand unambiguous.
+See [Stream a custom pose](../how-to/stream-a-custom-pose.md) for the whole
+flow, and [the LSL reference](../reference/lsl-reference.md#myogestic_controlpose-is-negotiated-not-fixed)
+for the conventions.
 
-`GetState` reports the current mode in its `control_mode` field, so a client
-can show it and gate its own UI accordingly.
+While the hand is in `Stream` or `Idle` mode, discrete DOFs are rejected — the
+`ControlAck` names the DOF in its `rejected` map with the mode it is actually
+in. This keeps ownership of the hand unambiguous, and it is also why declaring
+a control-pose stream *together with* a discrete DOF is refused at the
+handshake rather than per command.
 
-!!! tip "Switching back to Movement resets the hand"
+`GetTrainingState` reports the control hand's current movement and whether a
+training program is running, so a client can show that and gate its own UI.
+
+!!! tip "Leaving Stream mode resets the hand"
     Switching *to* `Movement` returns the hand to its resting state; switching
     to `Idle` also resets to rest; switching to `Stream` leaves the hand where
     it is until the next streamed sample arrives.
 
-## `cycle`: hold the end pose, or play the movement
+## Held state, or a swept trajectory
 
-Within `Movement` mode, a training program decides *how*
-the movement is shown:
+Within `Movement` mode there are two ways the hand can show a movement, and in
+v2 they are reached through two different services — deliberately, because they
+are two different kinds of thing:
 
-| `cycle` | Behaviour | Use it for |
+| What you want | How | Use it for |
 |---|---|---|
-| `false` *(default)* | snap to the movement's **end pose** and hold it | a **classifier** output, or a manual one-shot command |
-| `true` | play the open/close **cycle** - `rest → flex → hold → release`, looping | recording **regression** data, so `VHI_Control` sweeps a continuous kinematic range |
+| snap to the movement's **end pose** and hold it | a canonical **discrete DOF** (`SetControl`) | a **classifier** output, or a manual one-shot command |
+| play the open/close **cycle** — `rest → flex → hold → release`, looping | a **training program** (`VhiTrainingAid.StartTrainingProgram`) | recording **regression** data, so `VHI_Control` sweeps a continuous kinematic range |
+
+A discrete DOF is a *held state*; sweeping is a *recording aid*. Keeping them
+apart is what stops data collection from changing what "grip" means.
 
 The distinction matters because the two ML workflows want different things
 from the control hand:

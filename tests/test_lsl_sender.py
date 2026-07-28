@@ -119,7 +119,10 @@ def generate_test_pattern(t, pattern="wave"):
             phase = 2 * np.pi * t * (0.1 + i * 0.05)
             data[i] = (np.sin(phase + i) + 1) / 2
 
-    return -data
+    # Canonical values as of VHI 2.0: +1 is the direction the channel's name denotes,
+    # so a positive value flexes. This used to `return -data` for the pre-2.0 inlet,
+    # where flexion was negative — sending that now would render extension.
+    return data
 
 
 def main():

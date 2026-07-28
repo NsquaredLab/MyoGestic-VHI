@@ -132,10 +132,9 @@ reader for archived kinematics.
     conventions and silently inverted on the other. Call `Declare` and honour
     `continuous_channel_order` and `continuous_encoding`; treat
     `ENCODING_UNSPECIFIED` as "cannot negotiate" rather than guessing. MyoGestic's
-    `VhiTarget` does all of that.
-
-    `MyoGestic_ControlPose` is the one stream with no handshake — it is opt-in, outside
-    the v2 negotiation, and still expects renderer units.
+    `VhiTarget` does all of that — pass `stream="control_pose"` when it is driving the
+    control hand, so it reads *that* stream's order and encoding rather than the
+    output stream's.
 
 ## Minimal producer
 

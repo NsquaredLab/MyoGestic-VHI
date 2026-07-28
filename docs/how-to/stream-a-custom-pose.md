@@ -15,19 +15,32 @@ stream.
 
 ## The two steps
 
-### 1. Switch the control hand to `Stream` mode
+### 1. Declare the stream
+
+There is no mode RPC in v2. You ask for `Stream` mode **by declaring the stream**,
+which is also where you say which convention you will send on it:
 
 ```python
-from myogestic.interfaces import virtual_hand
+from myogestic.controls import load_dofs
+from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
-client = vhi.control_client()
-client.set_control_mode("STREAM")
+client = vhi.canonical_client()
+controls = load_dofs({"dofs": {"index.flexion": "continuous"}})
+
+reply = client.declare(controls, control_pose="canonical")   # or "legacy"
+assert reply is not None and reply.accepted
+print(reply.control_pose_stream_name, list(reply.control_pose_channel_order))
 ```
 
-In `Stream` mode the control hand reads its pose from the
-`MyoGestic_ControlPose` LSL inlet. a discrete DOF / `Freeze` / `SetSpeed` are
-rejected until you switch back with `client.set_control_mode("MOVEMENT")`.
+`"canonical"` means `+1` is the direction each channel's name denotes. `"legacy"`
+keeps the pre-2.0 renderer units (`-1` flexes) — the migration path for an existing
+producer that wants the handshake without changing its numbers yet. Read
+`reply.control_pose_encoding` rather than assuming your request won.
+
+In `Stream` mode the control hand reads its pose from the `MyoGestic_ControlPose`
+inlet, and discrete DOFs are rejected — which is why declaring a control-pose stream
+*together with* a discrete DOF is refused at the handshake rather than per command.
 
 ### 2. Push poses to the `control_outlet`
 
@@ -69,19 +82,23 @@ that no single named movement covers. The pattern is:
 import time
 from itertools import product
 import numpy as np
-from myogestic.interfaces import virtual_hand
+from myogestic.controls import load_dofs
+from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
-client = vhi.control_client()
+client = vhi.canonical_client()
+training_aid = vhi.training_client()
 pose_outlet = vhi.control_outlet()
+controls = load_dofs({"dofs": {"index.flexion": "continuous"}})
 
 # 1. Orchestration over gRPC.
-client.set_session_active(True)       # gate VHI's keyboard - MyoGestic owns the hand
-client.set_control_mode("STREAM")     # control hand reads from MyoGestic_ControlPose
-assert client.get_state().control_mode == "STREAM"   # sanity-check
+training_aid.set_recording_session(True)   # gate VHI's keyboard - MyoGestic owns the hand
+reply = client.declare(controls, control_pose="canonical")   # asks for Stream mode too
+assert reply is not None and reply.accepted                  # sanity-check
 
 # 2. Continuous pose injection over LSL.
 LEVELS = [0.0, 0.5, 1.0]                # rest / half / full flexion per DOF
+                                        # (canonical: +1 flexes, as declared above)
 DOFS = 6                                # 6 finger DOFs; wrist held at 0
 SETTLE_S = 0.5
 
@@ -93,8 +110,8 @@ for combo in product(LEVELS, repeat=DOFS):           # 3^6 = 729 multi-DOF poses
     # outlet; line it up with VHI_Control post-hoc via XDF timestamps.
 
 # 3. Tear down.
-client.set_control_mode("MOVEMENT")
-client.set_session_active(False)
+training_aid.stop_program()                 # no-op unless one was started
+training_aid.set_recording_session(False)
 ```
 
 Two planes, two roles - this is the whole design:
