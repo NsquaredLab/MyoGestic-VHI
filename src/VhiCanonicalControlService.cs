@@ -74,6 +74,40 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		["vhi.prediction.little.flexion"] = (5, 13, Axis.X),
 	};
 
+	/// <summary>
+	/// Control-hand pose addresses, and the <c>MyoGestic_ControlPose</c> channel each
+	/// occupies.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// A deliberately separate namespace from <c>vhi.prediction.*</c>, because these are a
+	/// separate <b>hand</b> on a separate stream serving a separate purpose. The prediction
+	/// controls carry model output; these drive the control hand an operator sets up and
+	/// records against. Sharing one namespace would let a configuration route a model's
+	/// output into the thing that hand is supposed to be the ground truth *for*.
+	/// </para>
+	/// <para>
+	/// The channels below index <c>MyoGestic_ControlPose</c>, not
+	/// <c>MyoGestic_Output</c> — which is why every capability publishes its
+	/// <c>stream_name</c> alongside its channel. A client must match both; a channel
+	/// number alone is meaningless across two streams.
+	/// </para>
+	/// </remarks>
+	private static readonly Dictionary<string, int> ControlPoseRenderable = new()
+	{
+		["vhi.control.pose.thumb"] = 0,
+		["vhi.control.pose.thumb.flexion"] = 0,
+		["vhi.control.pose.thumb.abduction"] = 1,
+		["vhi.control.pose.index"] = 2,
+		["vhi.control.pose.index.flexion"] = 2,
+		["vhi.control.pose.middle"] = 3,
+		["vhi.control.pose.middle.flexion"] = 3,
+		["vhi.control.pose.ring"] = 4,
+		["vhi.control.pose.ring.flexion"] = 4,
+		["vhi.control.pose.little"] = 5,
+		["vhi.control.pose.little.flexion"] = 5,
+	};
+
 	/// <summary>What each address renders, for the manifest's description field.</summary>
 	private static readonly Dictionary<string, string> Describes = new()
 	{
@@ -182,7 +216,7 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 	/// one of two axes is exactly the guesswork the manifest exists to remove.</description></item>
 	/// </list>
 	/// </remarks>
-	private static List<ControlCapability> BuildPredictionCapabilities()
+	private static List<ControlCapability> BuildCapabilities(bool controlPoseCanonical)
 	{
 		var caps = new List<ControlCapability>();
 		foreach ((string address, (int channel, int _, Axis _)) in Renderable)
@@ -200,6 +234,29 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				Description = Describes.TryGetValue(address, out string what) ? what : "",
 			});
 		}
+		foreach ((string address, int channel) in ControlPoseRenderable)
+		{
+			caps.Add(new ControlCapability
+			{
+				Address = address,
+				Kind = Kind.Continuous,
+				Lo = -1.0f,
+				Hi = 1.0f,
+				Rest = 0.0f,
+				// The control-pose inlet's convention is negotiated per client and defaults
+				// to the renderer's own units, so the manifest reports what an
+				// un-negotiated client would need to send. Declaring a control_pose
+				// encoding in Declare changes what this inlet accepts.
+				Encoding = controlPoseCanonical
+					? ContinuousEncoding.Canonical
+					: ContinuousEncoding.LegacyNegated,
+				StreamName = "MyoGestic_ControlPose",
+				Channel = channel,
+				Description = "control-hand pose, driven by an operator or a setup script "
+					+ "rather than by a model. Requires the control hand in Stream mode, "
+					+ "which declaring a control_pose_encoding requests.",
+			});
+		}
 		return caps;
 	}
 
@@ -213,7 +270,7 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				TargetName = "Virtual Hand Interface",
 				VocabularyVersion = VocabularyVersion,
 			};
-			manifest.Capabilities.AddRange(BuildPredictionCapabilities());
+			manifest.Capabilities.AddRange(BuildCapabilities(controlHand.ControlPoseCanonical));
 
 			// The higher-level preset: one discrete control whose states are whatever
 			// movements this build actually offers, discovered rather than hard-coded
@@ -314,8 +371,22 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				{
 					verdict.Renderable = true;
 					verdict.RendersAs =
-						$"{predictedHand.BoneNameForJoint(slot.Joint)} {slot.Axis} axis "
-						+ $"(channel {slot.Channel})";
+						$"predicted hand: {predictedHand.BoneNameForJoint(slot.Joint)} "
+						+ $"{slot.Axis} axis (MyoGestic_Output channel {slot.Channel})";
+				}
+				else if (ControlPoseRenderable.TryGetValue(address, out int poseChannel))
+				{
+					// The control hand's own namespace. Declarable so a client can route to
+					// it, but note what it needs that the prediction stream does not: the
+					// hand has to be in Stream mode, which declaring control_pose_encoding
+					// requests. Without that the inlet is read by nobody, and an inlet
+					// nobody reads is indistinguishable from a stream that is not arriving.
+					verdict.Renderable = true;
+					verdict.RendersAs =
+						$"control hand: MyoGestic_ControlPose channel {poseChannel}"
+						+ (request.ControlPoseEncoding == ContinuousEncoding.EncodingUnspecified
+							? " — declare control_pose_encoding, or nothing will read it"
+							: "");
 				}
 				else
 				{
