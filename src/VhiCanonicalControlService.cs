@@ -120,6 +120,122 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		this.server = server;
 	}
 
+	/// <summary>The vocabulary version, bumped when addresses or their semantics change.</summary>
+	private const string VocabularyVersion = "1";
+
+	/// <summary>
+	/// Every control this build exports, with the semantics VHI itself declares.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// This is the target-owned half of the contract. A client maps its own arbitrary
+	/// model-output names onto these addresses; it does not invent addresses and it does
+	/// not hard-code what they mean. Everything needed to send a value correctly is
+	/// declared here, by the side that renders it.
+	/// </para>
+	/// <para>
+	/// Two absences are deliberate and worth stating, because both would otherwise be
+	/// discovered as a joint that silently does nothing:
+	/// </para>
+	/// <list type="bullet">
+	/// <item><description>There is <b>no wrist prediction control</b>. This rig has no
+	/// wrist: legacy channels 6-8 are read by no consumer and are always zero, confirmed
+	/// against the source, recorded sessions and live sweeps. A client asking for one gets
+	/// told so by name rather than getting a channel that renders nothing. Wrist
+	/// *movements* do exist as gesture presets — see
+	/// <c>vhi.control.gesture</c>.</description></item>
+	/// <item><description>There is no bare <c>vhi.prediction.thumb</c> beyond flexion: the
+	/// thumb has two axes, so the short address is declared to mean flexion (its primary
+	/// axis, and legacy channel 0) and abduction is addressed explicitly. Silently picking
+	/// one of two axes is exactly the guesswork the manifest exists to remove.</description></item>
+	/// </list>
+	/// </remarks>
+	private static List<ControlCapability> BuildPredictionCapabilities()
+	{
+		var caps = new List<ControlCapability>();
+
+		// One entry per renderable prediction control. The short form is offered for the
+		// four single-axis fingers and for the thumb's primary axis, because that is what
+		// a configuration reads most naturally; the explicit axis form is always offered.
+		(string Short, string Axis, string What)[] digits =
+		[
+			("vhi.prediction.thumb", "vhi.prediction.thumb.flexion", "thumb flexion (bones 1-3, X axis)"),
+			("vhi.prediction.index", "vhi.prediction.index.flexion", "index flexion (bones 4-6)"),
+			("vhi.prediction.middle", "vhi.prediction.middle.flexion", "middle flexion (bones 7-9)"),
+			("vhi.prediction.ring", "vhi.prediction.ring.flexion", "ring flexion (bones 10-12)"),
+			("vhi.prediction.little", "vhi.prediction.little.flexion", "little flexion (bones 13-15)"),
+		];
+
+		foreach ((string shortName, string axisName, string what) in digits)
+		{
+			foreach (string address in new[] { shortName, axisName })
+			{
+				caps.Add(new ControlCapability
+				{
+					Address = address,
+					Kind = Kind.Continuous,
+					Lo = -1.0f,
+					Hi = 1.0f,
+					Rest = 0.0f,
+					Encoding = ContinuousEncoding.Canonical,
+					StreamName = "MyoGestic_Output",
+					Description = address == shortName
+						? $"{what} — the primary axis, and what the short address means"
+						: what,
+				});
+			}
+		}
+
+		caps.Add(new ControlCapability
+		{
+			Address = "vhi.prediction.thumb.abduction",
+			Kind = Kind.Continuous,
+			Lo = -1.0f,
+			Hi = 1.0f,
+			Rest = 0.0f,
+			Encoding = ContinuousEncoding.Canonical,
+			StreamName = "MyoGestic_Output",
+			Description = "thumb abduction (bones 1-3, Z axis). The distal bone's Z gain is 0, "
+				+ "so two of the three thumb bones move.",
+		});
+
+		return caps;
+	}
+
+	/// <summary>Report every control this build exports, and how to send each one.</summary>
+	public override Task<ControlManifest> GetControlManifest(
+		GetControlManifestRequest request, ServerCallContext context) =>
+		server.InvokeOnMainThread(() =>
+		{
+			var manifest = new ControlManifest
+			{
+				TargetName = "Virtual Hand Interface",
+				VocabularyVersion = VocabularyVersion,
+			};
+			manifest.Capabilities.AddRange(BuildPredictionCapabilities());
+
+			// The higher-level preset: one discrete control whose states are whatever
+			// movements this build actually offers, discovered rather than hard-coded
+			// because the movement set changes with the movement mode. This is where
+			// "fist" lives as a gesture — it does not replace the individually
+			// addressable prediction controls above.
+			var gesture = new ControlCapability
+			{
+				Address = "vhi.control.gesture",
+				Kind = Kind.Discrete,
+				RestState = "Rest",
+				Description = "a control-hand movement preset, held until changed. Includes "
+					+ "whole-hand gestures (Fist, pinches, Pointing) and the wrist movements "
+					+ "this rig can render, which the prediction controls cannot.",
+			};
+			gesture.States.AddRange(controlHand.GetAvailableMovements());
+			manifest.Capabilities.Add(gesture);
+
+			GD.Print($"  v2 manifest: {manifest.Capabilities.Count} capabilities, "
+				+ $"vocabulary {VocabularyVersion}");
+			return manifest;
+		});
+
 	/// <summary>Negotiate a control space: per-DOF verdicts plus the channel layout.</summary>
 	public override Task<DeclareReply> Declare(DeclareRequest request, ServerCallContext context) =>
 		server.InvokeOnMainThread(() =>
