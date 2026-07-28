@@ -286,6 +286,9 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 					+ "whole-hand gestures (Fist, pinches, Pointing) and the wrist movements "
 					+ "this rig can render, which the prediction controls cannot.",
 			};
+			// This hand animates to a movement over ~a second, so a client thresholding a
+			// probability into a state should want more than a coin flip before committing.
+			gesture.ActivationThreshold = 0.6f;
 			gesture.States.AddRange(controlHand.GetAvailableMovements());
 			manifest.Capabilities.Add(gesture);
 
