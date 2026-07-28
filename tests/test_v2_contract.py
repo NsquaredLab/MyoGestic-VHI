@@ -450,3 +450,53 @@ def test_continuous_control_is_unaffected_by_a_running_program(aid, v2):
         pb2.SetControlRequest(continuous={"index.flexion": 0.5}), timeout=10.0
     )
     assert ack.applied, dict(ack.rejected)
+
+
+# --- layer 3: presentation blending, and what it must NOT be ---------------------
+
+
+def test_presentation_blending_can_be_configured(v2):
+    stub, pb2 = v2
+    assert stub.SetPresentation(
+        pb2.SetPresentationRequest(blend=True, blend_speed=8.0), timeout=10.0
+    ).applied
+    assert _declare(stub, pb2, "index.flexion").blends_presentation
+    assert stub.SetPresentation(pb2.SetPresentationRequest(blend=False), timeout=10.0).applied
+    assert not _declare(stub, pb2, "index.flexion").blends_presentation
+
+
+def test_blending_does_not_change_the_commanded_value(v2):
+    """Layer 3 is cosmetic. If it altered the value it would be layer 1 in disguise.
+
+    A sweep reads the rig back after each excursion, so if blending changed *what* was
+    commanded rather than only how it is approached, the reported degrees would differ
+    between blend on and blend off.
+    """
+    stub, pb2 = v2
+    readings = {}
+    for blend in (False, True):
+        stub.SetPresentation(
+            pb2.SetPresentationRequest(blend=blend, blend_speed=25.0), timeout=10.0
+        )
+        reply = stub.SweepControl(
+            pb2.SweepControlRequest(name="index.flexion", duration_s=1.5, both_directions=True),
+            timeout=25.0,
+        )
+        assert reply.completed, reply.message
+        readings[blend] = {o.element: o.degrees_at_hi for o in reply.observed}
+    stub.SetPresentation(pb2.SetPresentationRequest(blend=False), timeout=10.0)
+    assert readings[False].keys() == readings[True].keys()
+    for element, degrees in readings[False].items():
+        assert readings[True][element] == pytest.approx(degrees, abs=0.5), element
+
+
+def test_the_training_state_reports_the_current_movement(v2, aid, movements):
+    """The palette highlights it, and must not need the v1 control service to."""
+    aid_stub, pb2 = aid
+    control_stub, _ = v2
+    target = movements[1]
+    assert control_stub.SetControl(
+        pb2.SetControlRequest(discrete={"hand.grasp": target}), timeout=10.0
+    ).applied
+    state = aid_stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0)
+    assert state.current_movement == target

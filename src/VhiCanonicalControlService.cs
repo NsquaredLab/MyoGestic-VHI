@@ -136,6 +136,9 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				// because the handshake agreed on names and left units implied. This
 				// becomes CANONICAL when the legacy decoder is removed.
 				ContinuousEncoding = ContinuousEncoding.LegacyNegated,
+				// Layer 3 of three, reported so a client can see it — never so it can
+				// mistake it for chatter protection. See SetPresentation.
+				BlendsPresentation = predictedHand.EnableSmoothing,
 			};
 			reply.ContinuousChannelOrder.AddRange(ChannelOrder);
 
@@ -255,6 +258,38 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				}
 			}
 			return ack;
+		});
+
+	/// <summary>Configure how the renderer blends between commanded values.</summary>
+	/// <remarks>
+	/// <para>
+	/// Appearance only. This is the third of three separate layers and the one most
+	/// easily misused:
+	/// </para>
+	/// <list type="number">
+	/// <item><description>Continuous smoothing, on the MyoGestic side inside its
+	/// ControlBus, before any target sees a frame — that layer decides what value is
+	/// actually commanded.</description></item>
+	/// <item><description>Discrete debounce and hysteresis, also MyoGestic-side and
+	/// declared on the DOF, which gates a noisy classifier before its state becomes a
+	/// transition. A discrete control is never numerically filtered like an axis: that
+	/// would interpolate through states nobody selected.</description></item>
+	/// <item><description>This — purely visual interpolation, so the hand does not
+	/// snap jarringly between poses.</description></item>
+	/// </list>
+	/// <para>
+	/// It changes only how a commanded value <i>looks</i> on the way to being reached.
+	/// It cannot make an unstable prediction stable, and a build with blending on but
+	/// no debounce still jumps between states — just smoothly.
+	/// </para>
+	/// </remarks>
+	public override Task<ControlAck> SetPresentation(
+		SetPresentationRequest request, ServerCallContext context) =>
+		server.InvokeOnMainThread(() =>
+		{
+			predictedHand.SetSmoothing(request.Blend, request.BlendSpeed);
+			GD.Print($"  v2 presentation: blend={request.Blend} speed={request.BlendSpeed}");
+			return new ControlAck { Applied = true };
 		});
 
 	/// <summary>

@@ -50,6 +50,28 @@ speaks by calling v2's `Declare` — an older VHI answers `UNIMPLEMENTED`, which
 how the client knows to fall back rather than guess. v1 is removed only once
 nothing speaks it.
 
+### Smoothing is three layers, not one
+
+`SetPresentation` (on `VhiCanonicalControl`) configures the renderer's visual
+blending. It is deliberately the *third* of three separate mechanisms, and treating
+any two as interchangeable is a bug:
+
+| Layer | Where | Applies to | Authoritative? |
+|---|---|---|---|
+| 1. Continuous smoothing | MyoGestic's `ControlBus`, before any target | continuous DOFs | **yes** — sets the commanded value |
+| 2. Debounce + hysteresis | MyoGestic, declared on the DOF | discrete DOFs | **yes** — sets *when* a state changes |
+| 3. Presentation blending | **here**, in the renderer | how a value looks | no — appearance only |
+
+A discrete control is never numerically low-pass filtered as though it were an axis:
+averaging "rest" and "fist" interpolates through states nobody selected. A noisy
+classifier needs a stability gate, which is layer 2 and lives on the MyoGestic side.
+
+Layer 3 is worth having — a hand that snaps between poses looks wrong — but it cannot
+make an unstable prediction stable. A build with blending on and no debounce still
+jumps between states; it just does so smoothly, which is arguably worse because it
+looks deliberate. `DeclareReply.blends_presentation` reports whether blending is on so
+a client can *see* layer 3, never so it can rely on it.
+
 ### `VhiTrainingAid` — recording, not control
 
 A separate service, and the separation is the point. A canonical discrete DOF is a

@@ -108,6 +108,7 @@ public class VhiTrainingAidService : VhiTrainingAid.VhiTrainingAidBase
 				ProgramRunning = controlHand.TrainingProgramActive,
 				ProgramMovement = controlHand.TrainingProgramMovement,
 				AnimationState = controlHand.GetAnimationState(),
+				CurrentMovement = controlHand.GetCurrentMovementName(),
 			};
 			state.AvailableMovements.AddRange(controlHand.GetAvailableMovements());
 			return state;
