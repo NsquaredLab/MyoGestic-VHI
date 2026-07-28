@@ -37,9 +37,9 @@ The export needs an active **.NET 8 SDK**. If your default `dotnet` is a newer
 major version, pin .NET 8 with a `global.json` - see
 [Build and export](how-to/build-and-export.md#prerequisite-an-active-net-8-sdk).
 
-## The control hand ignores `SetMovement`
+## The control hand ignores a discrete DOF
 
-**Symptom** - `SetMovement` returns `applied = false`.
+**Symptom** - `SetControl` comes back with the DOF named in `rejected`.
 
 Check the `message` in the `CommandAck`:
 
@@ -47,7 +47,8 @@ Check the `message` in the `CommandAck`:
   `GetState` and use a name from `available_movements`; remember the set
   depends on `Mode` (`AI` vs `Classifier`).
 - *"control hand is in Stream/Idle mode"* - movement commands only apply in
-  `Movement` mode. Call `SetControlMode("MOVEMENT")` first. See
+  `Movement` mode, or a training program owns the hand — the rejection message says
+  which. See
   [Control-hand modes](concepts/control-modes.md).
 
 ## The predicted hand isn't moving
@@ -71,7 +72,7 @@ Check the `message` in the `CommandAck`:
 
 ## The control hand cycles when you wanted it held (or vice versa)
 
-That's the `cycle` flag on `SetMovement`:
+That's a training program, from the recording aid:
 
 - `cycle = false` (default) → snap to the end pose and hold - for classifier
   outputs.

@@ -92,4 +92,4 @@ A CI runner needs the **.NET 8 SDK** (as for export), `uv`, and Python 3
 (used by the API-doc post-process scripts under `tools/`). For local
 authoring `uv run --group docs properdocs serve` watches `docs/` and the
 generated API tree both - re-run `./tools/gen_api_docs.sh` whenever a `///`
-comment in `src/` or a comment in `proto/myogestic_vhi.proto` changes.
+comment in `src/` or a comment in `proto/myogestic_vhi_v2.proto` changes.

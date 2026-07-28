@@ -8,7 +8,7 @@ is live.
 
 | Mode | Driven by | Movement commands |
 |---|---|---|
-| **`Movement`** *(default)* | the predefined-movement state machine - gRPC `SetMovement` + the keyboard | accepted |
+| **`Movement`** *(default)* | the predefined-movement state machine - canonical discrete DOFs + the keyboard | accepted |
 | **`Stream`** | a continuous pose on the `MyoGestic_ControlPose` LSL inlet | **rejected** |
 | **`Idle`** | nothing - holds the rest pose | **rejected** |
 
@@ -19,9 +19,9 @@ switches the mode. Switching is a gRPC call:
 client.set_control_mode("STREAM")   # "MOVEMENT" | "STREAM" | "IDLE"
 ```
 
-While the hand is in `Stream` or `Idle` mode, `SetMovement`, `Freeze` and
+While the hand is in `Stream` or `Idle` mode, discrete DOFs and
 `SetSpeed` are rejected - the `CommandAck` comes back with `applied = false`
-and a message telling you to call `SetControlMode(MOVEMENT)` first. This keeps
+and a message naming the mode it is actually in. This keeps
 ownership of the hand unambiguous.
 
 `GetState` reports the current mode in its `control_mode` field, so a client
@@ -34,7 +34,7 @@ can show it and gate its own UI accordingly.
 
 ## `cycle`: hold the end pose, or play the movement
 
-Within `Movement` mode, `SetMovement` takes a `cycle` flag that decides *how*
+Within `Movement` mode, a training program decides *how*
 the movement is shown:
 
 | `cycle` | Behaviour | Use it for |

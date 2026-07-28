@@ -28,7 +28,7 @@ modes** (see [Control-hand modes](control-modes.md)):
 - **`Movement`** *(default)* - a predefined-movement state machine. It selects
   a named movement from the [movement set](movements.md) and either snaps to
   the movement's end pose or plays the open/close cycle (`waiting → closing →
-  holding → opening → resting`). Driven by [gRPC `SetMovement`](grpc-control.md)
+  holding → opening → resting`). Driven by [canonical discrete DOFs](grpc-control.md)
   or the keyboard.
 - **`Stream`** - driven by a continuous pose on the `MyoGestic_ControlPose` LSL
   inlet, exactly like the predicted hand. For custom poses that aren't in the
@@ -36,15 +36,15 @@ modes** (see [Control-hand modes](control-modes.md)):
 - **`Idle`** - holds the rest pose; ignores keyboard, stream and commands.
 
 Only one driver is active at a time - the mode decides which, so they never
-fight over the bones. Movement commands (`SetMovement`, `Freeze`, `SetSpeed`)
+fight over the bones. Discrete DOFs and training programs
 are **rejected** unless the hand is in `Movement` mode.
 
 ### Sessions and keyboard authority
 
 While a MyoGestic recording session is active, VHI's local keyboard control of
-the control hand is **disabled** - set via the gRPC `SetSessionActive(true)`
+the control hand is **disabled** - set via the recording aid's `SetRecordingSession(true)`
 call - so MyoGestic is the sole movement source for the recording. This is
-orthogonal to the driver mode: `SetSessionActive` only gates the keyboard.
+orthogonal to the driver mode: the session gate only gates the keyboard.
 
 ## Why two hands and not one
 

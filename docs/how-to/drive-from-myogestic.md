@@ -43,8 +43,8 @@ process_launcher(vhi.launcher())
 client = vhi.control_client()
 
 # 3. Command the control hand.
-client.set_movement("Fist")              # snap to the Fist end pose, hold it
-client.set_movement("Index", cycle=True) # play the open/close cycle instead
+bus.select("hand.gesture", "fist")       # a held state: snap to the pose, hold it
+training_aid.start_program("Index")      # a trajectory, for recording data
 client.freeze(True)                      # freeze at the current pose
 client.set_session_active(True)          # recording live - VHI ignores its keyboard
 ```
@@ -62,7 +62,7 @@ explicit refresh, not every frame:
 state = client.get_state()
 if state is not None:                    # None == VHI not reachable
     print(state.mode)                    # "AI" | "Classifier"
-    print(list(state.available_movements))  # valid SetMovement names
+    print(list(state.available_movements))  # names a discrete state may resolve to
     print(state.control_mode)            # MOVEMENT | STREAM | IDLE
 ```
 
@@ -80,7 +80,7 @@ client.stop()      # stop the worker thread, close the channel
 Two runnable examples in the MyoGestic repo wire this into a full GUI:
 
 - `examples/synthetic/emg_classification_grpc.py` - a classifier whose output
-  drives the control hand with discrete `SetMovement` commands, plus a live
+  drives the control hand with canonical discrete DOFs, plus a live
   **movement palette** of every VHI movement.
 - `examples/synthetic/emg_regression.py` - uses `cycle=True` so the control
   hand sweeps a continuous range for the regression target.

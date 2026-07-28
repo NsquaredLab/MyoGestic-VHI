@@ -26,7 +26,7 @@ client.set_control_mode("STREAM")
 ```
 
 In `Stream` mode the control hand reads its pose from the
-`MyoGestic_ControlPose` LSL inlet. `SetMovement` / `Freeze` / `SetSpeed` are
+`MyoGestic_ControlPose` LSL inlet. a discrete DOF / `Freeze` / `SetSpeed` are
 rejected until you switch back with `client.set_control_mode("MOVEMENT")`.
 
 ### 2. Push poses to the `control_outlet`
@@ -101,7 +101,7 @@ Two planes, two roles - this is the whole design:
 
 | Plane | What it carries here | Role |
 |---|---|---|
-| **gRPC** | `SetControlMode`, `SetSessionActive`, `GetState` | discrete setup / assertions |
+| **gRPC** | the driver mode, `SetRecordingSession`, `GetState` | discrete setup / assertions |
 | **LSL** (`MyoGestic_ControlPose`) | the 9-DOF test poses themselves | continuous data |
 
 Two LSL records line everything up offline:

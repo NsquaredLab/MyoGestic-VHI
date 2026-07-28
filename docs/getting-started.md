@@ -56,7 +56,7 @@ ways to get motion:
     | :material-arrow-up: | stop, return to rest |
     | ++space++ | freeze / unfreeze at the current pose |
 
-    Cycling is the keyboard equivalent of gRPC `SetMovement` - both pick a
+    Cycling is the keyboard equivalent of a canonical discrete DOF - both pick a
     movement by name from the same `available_movements` list. The
     programmatic path is `client.set_movement(name)` (see
     [gRPC control](concepts/grpc-control.md)).

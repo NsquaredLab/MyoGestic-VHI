@@ -23,7 +23,7 @@ and leave the control hand in `Movement` mode.)
 The inlet rate is **whatever the producer pushes**. MyoGestic's default
 prediction loop runs at ~32 Hz, but VHI itself doesn't impose or assume a
 rate - it consumes whatever arrives, smooths between samples (see
-[`SetSmoothing`](grpc-control.md)), and renders at its own physics tick.
+[`SetPresentation`](grpc-control.md)), and renders at its own physics tick.
 
 ## Outlets - what VHI publishes
 
@@ -53,7 +53,7 @@ switched off with the `EnableOutlets` flag.
     no LSL timestamps and don't show up in an XDF recording. The *effect*
     of a command (a movement starts, a freeze is engaged) becomes visible
     on `VHI_Control` at the next physics tick - but rejected commands
-    (`applied=false`) and exact `SetMovement`-issued instants are not in
+    (`applied=false`) and exact a discrete DOF-issued instants are not in
     the LSL record. If experiment integrity requires that timeline, log
     enqueue and ack timestamps client-side (see the
     [`VhiControlClient` reference](../reference/grpc-api.md)).

@@ -24,7 +24,7 @@ Each piece is one `Node` with one job:
 | Node | Responsibility |
 |---|---|
 | `LSLCommunicationController` | Resolves the LSL inlets, pulls samples, publishes the `VHI_Control` / `VHI_Predict` outlets. See [LSL streams](lsl-streams.md). |
-| `GrpcControlServer` | Hosts the `VhiControl` gRPC service in-process. See [gRPC control plane](grpc-control.md). |
+| `GrpcControlServer` | Hosts the `VhiCanonicalControl` gRPC service in-process. See [gRPC control plane](grpc-control.md). |
 | `ControlHandSkeleton` | Drives the control hand - predefined movements, streamed pose, or idle. See [The two hands](hands.md). |
 | `PredictedHandSkeleton` | Drives the predicted hand from the `MyoGestic_Output` stream, with optional smoothing. |
 | `ControlPanelUI` | Runtime sliders/toggles for speed, hold/rest times, smoothing, plus buttons to load or open the movement-config TOML. |
@@ -107,9 +107,10 @@ hardened-runtime note there.
 
 ## gRPC code generation
 
-The C# gRPC types - `VhiControl.VhiControlBase` and the request/reply
+The C# gRPC types - the `VhiCanonicalControl` / `VhiTrainingAid` server stubs and
+the request/reply
 messages - are **generated at build time** by `Grpc.Tools` from
-`proto/myogestic_vhi.proto` (see the `<Protobuf>` item in `VHI_godot.csproj`).
+`proto/myogestic_vhi_v2.proto` (see the `<Protobuf>` item in `VHI_godot.csproj`).
 The `.proto` is the canonical contract; there are no hand-written stub files in
 the repo. Edit the `.proto` and rebuild to regenerate them. MyoGestic vendors
 its own copy of the same `.proto` and regenerates its Python stubs separately.

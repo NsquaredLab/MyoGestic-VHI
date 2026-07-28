@@ -3,7 +3,7 @@
 Exhaustive, lookup-oriented detail. For the *why*, see [Concepts](../concepts/index.md);
 for *recipes*, see [How-to](../how-to/index.md).
 
-- **[gRPC API](grpc-api.md)** - every RPC and message of the `VhiControl`
+- **[gRPC API](grpc-api.md)** - every RPC and message of the `VhiCanonicalControl`
   service, plus the full `.proto` contract.
 - **[LSL streams](lsl-reference.md)** - every inlet and outlet, with stream
   type, channel count, rate, and the 9-DOF channel layout.

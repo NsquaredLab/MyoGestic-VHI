@@ -24,7 +24,7 @@ The in-process [gRPC server](../concepts/grpc-control.md).
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `GrpcPort` | `int` | `50051` | TCP port the `VhiControl` server listens on (`127.0.0.1`). |
+| `GrpcPort` | `int` | `50051` | TCP port the `VhiCanonicalControl` server listens on (`127.0.0.1`). |
 
 ## `ControlHandSkeleton`
 
@@ -53,6 +53,6 @@ The [predicted hand](../concepts/hands.md).
 
 !!! tip "Set at runtime, too"
     `Frequency`, `HoldTime`, `RestTime` and smoothing can also be changed live
-    from the in-app control panel, or over gRPC (`SetSpeed`, `SetSmoothing`).
+    from the in-app control panel, or over gRPC (`SetSpeed`, `SetPresentation`).
     The driver mode has no control-panel toggle - it is set in the Inspector or
-    over gRPC (`SetControlMode`).
+    over gRPC (the driver mode).

@@ -51,15 +51,17 @@ index_proximal = [-40, 0, 0]
 
 Once the movement is in the config:
 
-- it appears in `GetState().available_movements`, so any gRPC client can
-  discover it;
-- `SetMovement("MyGesture")` plays it (hold the end pose, or `cycle=True` for
-  the loop - see [Control-hand modes](../concepts/control-modes.md));
+- it appears in `GetTrainingState().available_movements`, so a client can discover
+  it without hard-coding anything;
+- a canonical discrete DOF declaring `"mygesture"` as one of its states resolves to
+  it and holds its end pose, and a
+  [training program](../concepts/grpc-control.md) cycles it when you want a
+  trajectory for recording;
 - the keyboard ++arrow-left++ / ++arrow-right++ cycle through it;
 - it shows up in MyoGestic's movement palette.
 
 !!! tip "Keep names in sync"
-    `SetMovement` matches by name. If MyoGestic sends class labels straight
-    through to `SetMovement`, the classifier's class names and the movement
+    a discrete DOF matches by name. If MyoGestic sends class labels straight
+    through to a discrete DOF, the classifier's class names and the movement
     names in this TOML need to agree - unknown names are rejected with
     `applied = false`.

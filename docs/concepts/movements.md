@@ -45,9 +45,9 @@ returns. Cycling is **circular**: pressing ++arrow-right++ at the end of the
 list wraps to index 0, and ++arrow-left++ at index 0 wraps to the last entry.
 No "end of list" stop state, no error, no `applied=false`.
 
-The programmatic equivalent is gRPC `SetMovement` with the desired name -
+The programmatic equivalent is a canonical discrete DOF with the desired name -
 which is also how a client *programmatically cycles* (it iterates over
-`available_movements` itself and issues a `SetMovement` for each). There is
+`available_movements` itself and issues a a discrete DOF for each). There is
 no "cycle by index" RPC by design: the client owns the iteration order so it
 can do something other than wrap-forward if needed (skip Rest, randomise,
 follow a predicted-class trajectory, etc.).
