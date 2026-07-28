@@ -127,7 +127,7 @@ Two planes, two roles - this is the whole design:
 
 | Plane | What it carries here | Role |
 |---|---|---|
-| **gRPC** | the driver mode, `SetRecordingSession`, `GetState` | discrete setup / assertions |
+| **gRPC** | `Declare` (which also selects the driver mode), `SetRecordingSession`, `GetTrainingState` | discrete setup / assertions |
 | **LSL** (`MyoGestic_ControlPose`) | the 9-DOF test poses themselves | continuous data |
 
 Two LSL records line everything up offline:

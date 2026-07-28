@@ -56,7 +56,7 @@ switched off with the `EnableOutlets` flag.
     (`applied=false`) and exact a discrete DOF-issued instants are not in
     the LSL record. If experiment integrity requires that timeline, log
     enqueue and ack timestamps client-side (see the
-    [`VhiControlClient` reference](../reference/grpc-api.md)).
+    [gRPC API reference](../reference/grpc-api.md)).
 
 !!! note "Dropped streams"
     Earlier versions also published `VHI_MovementState` and `VHI_MenuState`.

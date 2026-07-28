@@ -44,7 +44,7 @@ major version, pin .NET 8 with a `global.json` - see
 Check the `message` in the `CommandAck`:
 
 - *"unknown movement"* - the name isn't in the current movement set. Call
-  `GetState` and use a name from `available_movements`; remember the set
+  `GetTrainingState` and use a name from `available_movements`; remember the set
   depends on `Mode` (`AI` vs `Classifier`).
 - *"control hand is in Stream/Idle mode"* - movement commands only apply in
   `Movement` mode, or a training program owns the hand — the rejection message says

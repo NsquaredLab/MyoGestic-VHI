@@ -30,40 +30,76 @@ variables → defaults.
 ## Launch VHI and command it
 
 ```python
-from myogestic.interfaces import virtual_hand
-from myogestic.widgets import process_launcher
+import pathlib
+import tomllib
+
+from myogestic.controls import ControlBus, load_control_map, resolve
+from myogestic.vhi import VhiTarget, virtual_hand
+from myogestic.widgets import ProcessLauncher
 
 vhi = virtual_hand()
 
 # 1. Launch VHI as a managed subprocess (godot --path ...).
-#    In an app, wire vhi.launcher() into a process_launcher widget.
-process_launcher(vhi.launcher())
+processes = ProcessLauncher([*vhi.launcher()])       # call .ui() each frame
 
-# 2. Open the gRPC control client (fire-and-forget; never blocks the GUI).
-client = vhi.control_client()
+# 2. Open the control client. Fire-and-forget; never blocks the GUI.
+client = vhi.canonical_client()
+training_aid = vhi.training_client()
 
-# 3. Command the control hand.
+# 3. Say what you control, in your own names, pointed at addresses VHI publishes.
+control_map = load_control_map({
+    "dofs": {
+        "my_index": "vhi.prediction.index",
+        "gesture": {"target": "vhi.control.gesture", "debounce_s": 0.1},
+    }
+})
+
+# 4. Resolve against what VHI reports — this is where the semantics arrive, so it
+#    needs VHI *running*. An app that launches it from a button resolves in the
+#    handler, not at import.
+controls = resolve(control_map, client.capabilities())
+bus = ControlBus(controls, targets=[VhiTarget(vhi.outlet(), client=client)], hz=32)
+
+# 5. Command by your own names.
+bus.push({"my_index": 0.8})              # a number, onto the predicted hand
 bus.select("gesture", "Fist")            # a held state: snap to the pose, hold it
 training_aid.start_program("Index")      # a trajectory, for recording data
-client.freeze(True)                      # freeze at the current pose
-client.set_session_active(True)          # recording live - VHI ignores its keyboard
+training_aid.set_recording_session(True) # recording live — VHI ignores its keyboard
 ```
 
 Commands are **fire-and-forget**: each call enqueues onto a daemon thread and
 returns immediately, so a 60 fps GUI never stalls on the network. The worker
 issues the unary RPC and logs the acknowledgement.
 
-## Query state
+!!! warning "VHI 2.0 or newer"
+    There is no fallback. `VhiTarget` asks the renderer which controls it exports and
+    refuses to guess, so a pre-2.0 build — which has no manifest — is reported as
+    unsupported rather than driven. MyoGestic's installer and launcher both check the
+    version; run a checkout from source with `$VHI_PATH` and `$GODOT_BIN` if you have
+    no 2.x release.
 
-`get_state()` is the one **synchronous** call - use it on connect or an
+## Discover what VHI exports
+
+`capabilities()` is the whole vocabulary, and it is VHI's to declare: every address,
+its kind, its range, its states. Nothing on the MyoGestic side hard-codes any of it,
+so a build that grows a control needs no client change.
+
+```python
+for cap in client.capabilities() or ():
+    print(cap.address, cap.kind, cap.lo, cap.hi, cap.channel)
+```
+
+## Query control-hand state
+
+`training_aid.state()` is the one **synchronous** call — use it on connect or an
 explicit refresh, not every frame:
 
 ```python
-state = client.get_state()
-if state is not None:                    # None == VHI not reachable
-    print(state.mode)                    # "AI" | "Classifier"
+state = training_aid.state()
+if state is not None:                       # None == VHI not reachable
     print(list(state.available_movements))  # names a discrete state may resolve to
-    print(state.control_mode)            # MOVEMENT | STREAM | IDLE
+    print(state.current_movement)
+    print(state.program_running)
 ```
 
 Discovering `available_movements` this way means you never hard-code the
@@ -72,6 +108,7 @@ movement set - see [Movements](../concepts/movements.md).
 ## Clean up
 
 ```python
+bus.stop()         # rest the controls and flush, so the hand releases
 client.stop()      # stop the worker thread, close the channel
 ```
 
@@ -79,14 +116,15 @@ client.stop()      # stop the worker thread, close the channel
 
 Two runnable examples in the MyoGestic repo wire this into a full GUI:
 
-- `examples/synthetic/emg_classification_grpc.py` - a classifier whose output
-  drives the control hand with canonical discrete DOFs, plus a live
-  **movement palette** of every VHI movement.
-- `examples/synthetic/emg_regression.py` - uses `cycle=True` so the control
-  hand sweeps a continuous range for the regression target.
+- `examples/synthetic/vhi_playground.py` - **start here.** A slider per control in a
+  TOML map, straight to the hand, next to an editor for the file. No model, no EMG.
+- `examples/synthetic/emg_classification_grpc.py` - a classifier whose output drives
+  the control hand with a discrete DOF, plus a live **movement palette**.
+- `examples/synthetic/emg_regression.py` - continuous regression onto the predicted
+  hand, with a training program driving the control hand for data collection.
 
 Run one with:
 
 ```bash
-uv run --extra examples --extra grpc python examples/synthetic/emg_classification_grpc.py
+uv run --extra grpc python examples/synthetic/vhi_playground.py
 ```

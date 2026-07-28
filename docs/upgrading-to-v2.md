@@ -95,7 +95,6 @@ controls = resolve(CONTROL_MAP, client.capabilities())
 target = VhiTarget(
     vhi.outlet(),
     client=client,                       # negotiates v2
-    legacy_client=vhi.control_client(),  # renders discrete DOFs on VHI 1.x
 )
 bus = ControlBus(controls, targets=[target], hz=32)
 training_aid = vhi.training_client()
@@ -121,7 +120,7 @@ target.negotiate()      # settles the contract; cheap and idempotent
 2. **Replace `set_session_active`** with `training_aid.set_recording_session(...)`. It
    returns `False` when the aid is unavailable rather than raising, so you can decide
    whether an ungated recording is acceptable.
-3. **Replace `set_movement(..., cycle=True)`** with
+3. **Replace cycling `set_movement`** with
    `training_aid.start_program(movement, frequency_hz=...)`. Call `stop_program()` in
    teardown — it is idempotent.
 4. **Replace `set_smoothing`** with `canonical_client().set_presentation(blend=...)`.

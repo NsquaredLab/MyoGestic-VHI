@@ -56,10 +56,9 @@ ways to get motion:
     | :material-arrow-up: | stop, return to rest |
     | ++space++ | freeze / unfreeze at the current pose |
 
-    Cycling is the keyboard equivalent of a canonical discrete DOF - both pick a
-    movement by name from the same `available_movements` list. The
-    programmatic path is `client.set_movement(name)` (see
-    [gRPC control](concepts/grpc-control.md)).
+    Cycling is the keyboard equivalent of a discrete DOF - both pick a movement by
+    name from the same `available_movements` list. The programmatic path is a discrete
+    control, commanded by name (see [gRPC control](concepts/grpc-control.md)).
 
 === "LSL stream (predicted hand)"
 
@@ -74,16 +73,26 @@ ways to get motion:
 
 === "gRPC (control hand)"
 
-    Command the control hand directly. From any gRPC client (here, via
-    MyoGestic's generated stubs):
+    Command the control hand by name. VHI declares `vhi.control.gesture` as a
+    discrete control, so you map a name of your own onto it and select a state:
 
     ```python
-    from myogestic.interfaces import virtual_hand
-    client = virtual_hand().control_client()
-    client.set_movement("Fist")     # control hand snaps to the Fist pose
+    from myogestic.controls import ControlBus, load_control_map, resolve
+    from myogestic.vhi import VhiTarget, virtual_hand
+
+    vhi = virtual_hand()
+    client = vhi.canonical_client()
+    controls = resolve(
+        load_control_map({"dofs": {"gesture": "vhi.control.gesture"}}),
+        client.capabilities(),          # needs VHI running
+    )
+    bus = ControlBus(controls, targets=[VhiTarget(vhi.outlet(), client=client)])
+    bus.select("gesture", "Fist")       # control hand snaps to the Fist pose
     ```
 
-    See [Drive VHI from MyoGestic](how-to/drive-from-myogestic.md).
+    The states come from VHI's own manifest, so `"Fist"` is a name it reported rather
+    than one hard-coded here. See
+    [Drive VHI from MyoGestic](how-to/drive-from-myogestic.md).
 
 ## Next steps
 

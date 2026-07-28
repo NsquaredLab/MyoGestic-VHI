@@ -33,14 +33,19 @@ exclusively to the other mode - so the standard config yields exactly the 17
 or 15 above, while a fully custom TOML (movement names in neither set) is
 exposed in full regardless of mode.
 
-A gRPC client doesn't have to hard-code these - `GetState` returns
-`available_movements` (the valid names for the current mode) and `mode`
-(`"AI"` or `"Classifier"`). Discover, don't guess.
+A gRPC client doesn't have to hard-code these - `GetTrainingState` returns
+`available_movements`, which is already the valid set *for the current mode*.
+Discover, don't guess.
+
+The mode itself is not on the wire: nothing published it after the v1 service was
+removed, and the movement list answers the only question a client actually asks. If you
+need the mode as such, note the list length - the standard config yields 17 names in AI
+mode and 15 in Classifier mode.
 
 ## Cycling through the set
 
 The keyboard (++arrow-left++ / ++arrow-right++) walks the *currently
-available* movement list - the same list `GetState.available_movements`
+available* movement list - the same list `GetTrainingState.available_movements`
 returns. Cycling is **circular**: pressing ++arrow-right++ at the end of the
 list wraps to index 0, and ++arrow-left++ at index 0 wraps to the last entry.
 No "end of list" stop state, no error, no `applied=false`.
