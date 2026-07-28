@@ -128,14 +128,18 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 			{
 				StandardVersion = StandardVersion,
 				ContinuousStreamName = "MyoGestic_Output",
-				// The continuous inlet is still decoded by the pre-v2 path in
-				// PredictedHandSkeleton._Process, which multiplies by a negative joint
-				// gain — so a canonical value must arrive negated. SetControl does that
-				// negation itself; a client streaming over LSL has to do it. Saying so
-				// explicitly is the whole point: the first v2 run inverted every joint
-				// because the handshake agreed on names and left units implied. This
-				// becomes CANONICAL when the legacy decoder is removed.
-				ContinuousEncoding = ContinuousEncoding.LegacyNegated,
+				// The continuous inlet takes canonical values: PredictedHandSkeleton
+				// negates once on ingest, so +1 means the direction the DOF name denotes.
+				// Announcing it is not decoration — the first end-to-end v2 run inverted
+				// every joint precisely because the handshake agreed on names and left
+				// units implied, and a client reading ENCODING_UNSPECIFIED is required to
+				// fall back rather than guess.
+				//
+				// VHI's own *outlets* (VHI_Control / VHI_Predict) deliberately stay in the
+				// rig's units, so sessions recorded before this switch remain readable by
+				// the same decoder. Changing those is a separate decision about recorded
+				// data, not part of this one.
+				ContinuousEncoding = ContinuousEncoding.Canonical,
 				// Layer 3 of three, reported so a client can see it — never so it can
 				// mistake it for chatter protection. See SetPresentation.
 				BlendsPresentation = predictedHand.EnableSmoothing,

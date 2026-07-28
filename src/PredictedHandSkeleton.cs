@@ -181,6 +181,18 @@ public partial class PredictedHandSkeleton : Node3D
 		{
 			currentData = communicationController.GetReceivedDataPredicted();
 
+			// The inlet carries CANONICAL values: +1 means the direction the DOF name
+			// denotes. This hand's gains are negative, so a canonical value is negated
+			// once here, on ingest, and everything downstream keeps working in the rig's
+			// own units — including the VHI_Predict read-back, which stays in those units
+			// so sessions recorded before this switch remain readable by the same decoder.
+			//
+			// This is the removal-stage switch announced by
+			// DeclareReply.continuous_encoding == CANONICAL. A client still sending the old
+			// convention renders inverted, which is why it is gated behind the handshake.
+			for (int i = 0; i < currentData.Count; i++)
+				currentData[i] = -currentData[i];
+
 			if (currentData.Count >= 9 && skeleton != null && boneMap.Count > 0)
 			{
 				// Update input FPS tracking
