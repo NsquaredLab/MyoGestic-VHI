@@ -33,12 +33,12 @@ import pytest
 #: Thumb abduction has only two entries on purpose: it drives all three thumb bones
 #: through channel 1, but the distal bone's Z gain is 0, so it cannot move.
 EXPECTED = {
-    "thumb.flexion": {"WaveBone_3": 45.0, "WaveBone_4": 55.0, "WaveBone_5": 80.0},
-    "thumb.abduction": {"WaveBone_3": -30.0, "WaveBone_4": 35.0},
-    "index.flexion": {"WaveBone_7": 85.0, "WaveBone_8": 75.0, "WaveBone_9": 60.0},
-    "middle.flexion": {"WaveBone_12": 85.0, "WaveBone_13": 85.0, "WaveBone_14": 60.0},
-    "ring.flexion": {"WaveBone_17": 85.0, "WaveBone_18": 85.0, "WaveBone_19": 60.0},
-    "little.flexion": {"WaveBone_22": 85.0, "WaveBone_23": 85.0, "WaveBone_24": 60.0},
+    "vhi.prediction.thumb.flexion": {"WaveBone_3": 45.0, "WaveBone_4": 55.0, "WaveBone_5": 80.0},
+    "vhi.prediction.thumb.abduction": {"WaveBone_3": -30.0, "WaveBone_4": 35.0},
+    "vhi.prediction.index.flexion": {"WaveBone_7": 85.0, "WaveBone_8": 75.0, "WaveBone_9": 60.0},
+    "vhi.prediction.middle.flexion": {"WaveBone_12": 85.0, "WaveBone_13": 85.0, "WaveBone_14": 60.0},
+    "vhi.prediction.ring.flexion": {"WaveBone_17": 85.0, "WaveBone_18": 85.0, "WaveBone_19": 60.0},
+    "vhi.prediction.little.flexion": {"WaveBone_22": 85.0, "WaveBone_23": 85.0, "WaveBone_24": 60.0},
 }
 
 CANONICAL_DOFS = tuple(EXPECTED)
@@ -80,7 +80,7 @@ def test_declare_reports_the_channel_order_and_stream(v2):
 def test_declare_states_how_to_encode_the_stream(v2):
     """An unspecified encoding is what made the first v2 build invert every joint."""
     stub, pb2 = v2
-    reply = _declare(stub, pb2, "index.flexion")
+    reply = _declare(stub, pb2, "vhi.prediction.index.flexion")
     assert reply.continuous_encoding != pb2.ENCODING_UNSPECIFIED
     assert reply.continuous_encoding in (pb2.CANONICAL, pb2.LEGACY_NEGATED)
 
@@ -99,13 +99,13 @@ def test_a_dof_this_hand_lacks_is_refused_with_what_it_has(v2):
     assert not reply.accepted
     verdict = reply.verdicts[0]
     assert not verdict.renderable
-    assert "index.flexion" in verdict.message, "a refusal must be actionable"
+    assert "vhi.prediction" in verdict.message, "a refusal must be actionable"
 
 
 def test_one_unrenderable_dof_fails_the_whole_declaration(v2):
     """All-or-nothing: a client must not half-render and believe it succeeded."""
     stub, pb2 = v2
-    reply = _declare(stub, pb2, "index.flexion", "wrist.rotation")
+    reply = _declare(stub, pb2, "vhi.prediction.index.flexion", "wrist.rotation")
     assert not reply.accepted
     assert [v.renderable for v in reply.verdicts] == [True, False]
 
@@ -122,14 +122,14 @@ def test_a_discrete_dof_renders_as_movements(v2, movements):
     """The point of the discrete work: no v1 SetMovement needed to command a state."""
     stub, pb2 = v2
     states = [m.lower() for m in movements[:3]]
-    reply = _declare(stub, pb2, "hand.grasp", kind=pb2.DISCRETE, states=states)
+    reply = _declare(stub, pb2, "vhi.control.gesture", kind=pb2.DISCRETE, states=states)
     assert reply.accepted, reply.verdicts[0].message
     assert "control-hand movements" in reply.verdicts[0].renders_as
 
 
 def test_discrete_states_resolve_case_insensitively(v2, movements):
     stub, pb2 = v2
-    reply = _declare(stub, pb2, "hand.grasp", kind=pb2.DISCRETE, states=[movements[0].upper()])
+    reply = _declare(stub, pb2, "vhi.control.gesture", kind=pb2.DISCRETE, states=[movements[0].upper()])
     assert reply.accepted, reply.verdicts[0].message
 
 
@@ -137,7 +137,7 @@ def test_a_discrete_dof_with_an_unknown_state_is_refused(v2, movements):
     """Partly-resolvable is not partly-renderable — it silently does nothing."""
     stub, pb2 = v2
     reply = _declare(
-        stub, pb2, "hand.grasp", kind=pb2.DISCRETE, states=[movements[0], "no-such-movement"]
+        stub, pb2, "vhi.control.gesture", kind=pb2.DISCRETE, states=[movements[0], "no-such-movement"]
     )
     assert not reply.accepted
     verdict = reply.verdicts[0]
@@ -147,14 +147,14 @@ def test_a_discrete_dof_with_an_unknown_state_is_refused(v2, movements):
 
 def test_a_discrete_dof_with_no_states_is_refused(v2):
     stub, pb2 = v2
-    reply = _declare(stub, pb2, "hand.grasp", kind=pb2.DISCRETE, states=[])
+    reply = _declare(stub, pb2, "vhi.control.gesture", kind=pb2.DISCRETE, states=[])
     assert not reply.accepted
 
 
 def test_setcontrol_applies_a_discrete_state(v2, movements):
     stub, pb2 = v2
     ack = stub.SetControl(
-        pb2.SetControlRequest(discrete={"hand.grasp": movements[0]}), timeout=10.0
+        pb2.SetControlRequest(discrete={"vhi.control.gesture": movements[0]}), timeout=10.0
     )
     assert ack.applied, dict(ack.rejected)
 
@@ -162,10 +162,10 @@ def test_setcontrol_applies_a_discrete_state(v2, movements):
 def test_setcontrol_rejects_an_unresolvable_state(v2):
     stub, pb2 = v2
     ack = stub.SetControl(
-        pb2.SetControlRequest(discrete={"hand.grasp": "no-such-movement"}), timeout=10.0
+        pb2.SetControlRequest(discrete={"vhi.control.gesture": "no-such-movement"}), timeout=10.0
     )
     assert not ack.applied
-    assert "hand.grasp" in ack.rejected
+    assert "vhi.control.gesture" in ack.rejected
 
 
 # --- SetControl, continuous ----------------------------------------------------
@@ -190,9 +190,9 @@ def test_setcontrol_rejects_an_unknown_name(v2):
 def test_setcontrol_rejects_a_non_finite_value(v2, bad):
     """A non-finite value becomes a full-scale deflection once multiplied by a gain."""
     stub, pb2 = v2
-    ack = stub.SetControl(pb2.SetControlRequest(continuous={"index.flexion": bad}), timeout=10.0)
+    ack = stub.SetControl(pb2.SetControlRequest(continuous={"vhi.prediction.index.flexion": bad}), timeout=10.0)
     assert not ack.applied
-    assert "index.flexion" in ack.rejected
+    assert "vhi.prediction.index.flexion" in ack.rejected
 
 
 # --- SweepControl: the rig itself ----------------------------------------------
@@ -245,7 +245,7 @@ def test_the_extension_half_is_the_exact_mirror(v2, name):
 def test_a_one_directional_sweep_leaves_the_other_half_alone(v2):
     stub, pb2 = v2
     reply = stub.SweepControl(
-        pb2.SweepControlRequest(name="index.flexion", duration_s=1.0, both_directions=False),
+        pb2.SweepControlRequest(name="vhi.prediction.index.flexion", duration_s=1.0, both_directions=False),
         timeout=25.0,
     )
     assert reply.completed, reply.message
@@ -268,16 +268,16 @@ def test_the_hand_is_left_at_rest_after_a_sweep(v2):
     """A verification tool must not leave a limb deflected."""
     stub, pb2 = v2
     stub.SweepControl(
-        pb2.SweepControlRequest(name="index.flexion", duration_s=1.0, both_directions=True),
+        pb2.SweepControlRequest(name="vhi.prediction.index.flexion", duration_s=1.0, both_directions=True),
         timeout=25.0,
     )
     after = stub.SweepControl(
-        pb2.SweepControlRequest(name="thumb.flexion", duration_s=1.0, both_directions=False),
+        pb2.SweepControlRequest(name="vhi.prediction.thumb.flexion", duration_s=1.0, both_directions=False),
         timeout=25.0,
     )
     # thumb.flexion's sweep only reports thumb bones; had the index sweep left the
     # hand flexed, index bones would show up in this unrelated sweep's scan.
-    assert {o.element for o in after.observed} <= set(EXPECTED["thumb.flexion"])
+    assert {o.element for o in after.observed} <= set(EXPECTED["vhi.prediction.thumb.flexion"])
 
 
 # --- v1 must be gone ----------------------------------------------------------
@@ -407,10 +407,10 @@ def test_a_running_program_owns_the_control_hand(aid, v2):
     ).applied
 
     ack = control_stub.SetControl(
-        pb2.SetControlRequest(discrete={"hand.grasp": movements[2]}), timeout=10.0
+        pb2.SetControlRequest(discrete={"vhi.control.gesture": movements[2]}), timeout=10.0
     )
     assert not ack.applied
-    assert "training program is running" in ack.rejected["hand.grasp"]
+    assert "training program is running" in ack.rejected["vhi.control.gesture"]
 
 
 def test_discrete_control_works_again_once_the_program_stops(aid, v2):
@@ -424,7 +424,7 @@ def test_discrete_control_works_again_once_the_program_stops(aid, v2):
     )
     aid_stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0)
     ack = control_stub.SetControl(
-        pb2.SetControlRequest(discrete={"hand.grasp": movements[2]}), timeout=10.0
+        pb2.SetControlRequest(discrete={"vhi.control.gesture": movements[2]}), timeout=10.0
     )
     assert ack.applied, dict(ack.rejected)
 
@@ -440,7 +440,7 @@ def test_continuous_control_is_unaffected_by_a_running_program(aid, v2):
         pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
     )
     ack = control_stub.SetControl(
-        pb2.SetControlRequest(continuous={"index.flexion": 0.5}), timeout=10.0
+        pb2.SetControlRequest(continuous={"vhi.prediction.index.flexion": 0.5}), timeout=10.0
     )
     assert ack.applied, dict(ack.rejected)
 
@@ -453,9 +453,9 @@ def test_presentation_blending_can_be_configured(v2):
     assert stub.SetPresentation(
         pb2.SetPresentationRequest(blend=True, blend_speed=8.0), timeout=10.0
     ).applied
-    assert _declare(stub, pb2, "index.flexion").blends_presentation
+    assert _declare(stub, pb2, "vhi.prediction.index.flexion").blends_presentation
     assert stub.SetPresentation(pb2.SetPresentationRequest(blend=False), timeout=10.0).applied
-    assert not _declare(stub, pb2, "index.flexion").blends_presentation
+    assert not _declare(stub, pb2, "vhi.prediction.index.flexion").blends_presentation
 
 
 def test_blending_does_not_change_the_commanded_value(v2):
@@ -472,7 +472,7 @@ def test_blending_does_not_change_the_commanded_value(v2):
             pb2.SetPresentationRequest(blend=blend, blend_speed=25.0), timeout=10.0
         )
         reply = stub.SweepControl(
-            pb2.SweepControlRequest(name="index.flexion", duration_s=1.5, both_directions=True),
+            pb2.SweepControlRequest(name="vhi.prediction.index.flexion", duration_s=1.5, both_directions=True),
             timeout=25.0,
         )
         assert reply.completed, reply.message
@@ -490,7 +490,7 @@ def test_the_training_state_reports_the_current_movement(v2, aid, movements):
     control_stub, _ = v2
     target = movements[1]
     assert control_stub.SetControl(
-        pb2.SetControlRequest(discrete={"hand.grasp": target}), timeout=10.0
+        pb2.SetControlRequest(discrete={"vhi.control.gesture": target}), timeout=10.0
     ).applied
     state = aid_stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0)
     assert state.current_movement == target
@@ -522,7 +522,7 @@ def rest_control_hand(v2, aid):
     aid_stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0)
 
 
-def _declare_pose(stub, pb2, encoding, dofs=("index.flexion",), kind=None):
+def _declare_pose(stub, pb2, encoding, dofs=("vhi.prediction.index.flexion",), kind=None):
     kind = kind if kind is not None else pb2.CONTINUOUS
     return stub.Declare(
         pb2.DeclareRequest(
@@ -545,7 +545,7 @@ def test_not_declaring_a_control_pose_leaves_the_stream_unmentioned(v2):
     must see exactly what it saw before — no stream name, no order, no mode change.
     """
     stub, pb2 = v2
-    reply = _declare(stub, pb2, "index.flexion")
+    reply = _declare(stub, pb2, "vhi.prediction.index.flexion")
     assert reply.accepted
     assert reply.control_pose_stream_name == ""
     assert list(reply.control_pose_channel_order) == []
@@ -589,18 +589,18 @@ def test_a_control_pose_and_a_discrete_dof_are_refused_together(v2, rest_control
             standard_version="1",
             control_pose_encoding=pb2.CANONICAL,
             dofs=[
-                pb2.DofDeclaration(name="index.flexion", kind=pb2.CONTINUOUS, lo=-1.0, hi=1.0),
-                pb2.DofDeclaration(name="hand.grasp", kind=pb2.DISCRETE, states=["rest", "fist"]),
+                pb2.DofDeclaration(name="vhi.prediction.index.flexion", kind=pb2.CONTINUOUS, lo=-1.0, hi=1.0),
+                pb2.DofDeclaration(name="vhi.control.gesture", kind=pb2.DISCRETE, states=["rest", "fist"]),
             ],
         ),
         timeout=10.0,
     )
     assert not reply.accepted
-    grasp = next(v for v in reply.verdicts if v.name == "hand.grasp")
+    grasp = next(v for v in reply.verdicts if v.name == "vhi.control.gesture")
     assert not grasp.renderable
     assert "control-pose stream" in grasp.message
     # The continuous DOF is still fine — the refusal is specific, not a blanket no.
-    assert next(v for v in reply.verdicts if v.name == "index.flexion").renderable
+    assert next(v for v in reply.verdicts if v.name == "vhi.prediction.index.flexion").renderable
 
 
 def test_a_control_pose_may_be_declared_with_no_dofs_at_all(v2, rest_control_hand):

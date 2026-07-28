@@ -54,32 +54,64 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 	/// </remarks>
 	private static readonly Dictionary<string, (int Channel, int Joint, Axis Axis)> Renderable = new()
 	{
-		["thumb.flexion"] = (0, 1, Axis.X),
-		["thumb.abduction"] = (1, 1, Axis.Z),
-		["index.flexion"] = (2, 4, Axis.X),
-		["middle.flexion"] = (3, 7, Axis.X),
-		["ring.flexion"] = (4, 10, Axis.X),
-		["little.flexion"] = (5, 13, Axis.X),
+		// Short forms: what a configuration reads most naturally. For the thumb the short
+		// address is DECLARED to mean flexion (its primary axis, legacy channel 0);
+		// abduction is addressed explicitly, because silently picking one of two axes is
+		// the guesswork a manifest exists to remove.
+		["vhi.prediction.thumb"] = (0, 1, Axis.X),
+		["vhi.prediction.index"] = (2, 4, Axis.X),
+		["vhi.prediction.middle"] = (3, 7, Axis.X),
+		["vhi.prediction.ring"] = (4, 10, Axis.X),
+		["vhi.prediction.little"] = (5, 13, Axis.X),
+
+		// Explicit axis forms. Same channels — two addresses naming one control is why
+		// the channel is published per capability rather than inferred from a list.
+		["vhi.prediction.thumb.flexion"] = (0, 1, Axis.X),
+		["vhi.prediction.thumb.abduction"] = (1, 1, Axis.Z),
+		["vhi.prediction.index.flexion"] = (2, 4, Axis.X),
+		["vhi.prediction.middle.flexion"] = (3, 7, Axis.X),
+		["vhi.prediction.ring.flexion"] = (4, 10, Axis.X),
+		["vhi.prediction.little.flexion"] = (5, 13, Axis.X),
+	};
+
+	/// <summary>What each address renders, for the manifest's description field.</summary>
+	private static readonly Dictionary<string, string> Describes = new()
+	{
+		["vhi.prediction.thumb"] = "thumb flexion (bones 1-3, X axis) — the primary axis, and what the short address means",
+		["vhi.prediction.index"] = "index flexion (bones 4-6)",
+		["vhi.prediction.middle"] = "middle flexion (bones 7-9)",
+		["vhi.prediction.ring"] = "ring flexion (bones 10-12)",
+		["vhi.prediction.little"] = "little flexion (bones 13-15)",
+		["vhi.prediction.thumb.flexion"] = "thumb flexion (bones 1-3, X axis)",
+		["vhi.prediction.thumb.abduction"] = "thumb abduction (bones 1-3, Z axis). The distal bone's Z gain is 0, so two of the three thumb bones move.",
+		["vhi.prediction.index.flexion"] = "index flexion (bones 4-6)",
+		["vhi.prediction.middle.flexion"] = "middle flexion (bones 7-9)",
+		["vhi.prediction.ring.flexion"] = "ring flexion (bones 10-12)",
+		["vhi.prediction.little.flexion"] = "little flexion (bones 13-15)",
 	};
 
 	/// <summary>
-	/// The continuous channel order VHI reports from <see cref="Declare"/>: index i of
-	/// this array is channel i of the LSL stream.
+	/// The continuous channel order VHI reports from <see cref="Declare"/>: index i is
+	/// channel i of the LSL stream, named by its ADDRESS.
 	/// </summary>
 	/// <remarks>
-	/// Six entries, not nine. The stream is wider than this because the legacy
-	/// transport is nine floats, and a client may leave the tail at rest — but VHI
-	/// will not name a channel it does not read, because naming a dead channel is how
-	/// the four wrong pose tables in MyoGestic came to exist.
+	/// Addresses rather than bare names, so a client can resolve its own alias to an
+	/// address and the address to a channel without inventing a convention. The explicit
+	/// axis form is used here because it is unambiguous; the short forms name the same
+	/// channels and are found through the manifest.
+	/// <para>
+	/// Six entries, not nine. Channels 6-8 are read by no consumer, so no address claims
+	/// them — naming a dead channel is how the wrong maps spread in the first place.
+	/// </para>
 	/// </remarks>
 	private static readonly string[] ChannelOrder =
 	[
-		"thumb.flexion",
-		"thumb.abduction",
-		"index.flexion",
-		"middle.flexion",
-		"ring.flexion",
-		"little.flexion",
+		"vhi.prediction.thumb.flexion",
+		"vhi.prediction.thumb.abduction",
+		"vhi.prediction.index.flexion",
+		"vhi.prediction.middle.flexion",
+		"vhi.prediction.ring.flexion",
+		"vhi.prediction.little.flexion",
 	];
 
 	/// <summary>The standard vocabulary version this build implements.</summary>
@@ -153,52 +185,21 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 	private static List<ControlCapability> BuildPredictionCapabilities()
 	{
 		var caps = new List<ControlCapability>();
-
-		// One entry per renderable prediction control. The short form is offered for the
-		// four single-axis fingers and for the thumb's primary axis, because that is what
-		// a configuration reads most naturally; the explicit axis form is always offered.
-		(string Short, string Axis, string What)[] digits =
-		[
-			("vhi.prediction.thumb", "vhi.prediction.thumb.flexion", "thumb flexion (bones 1-3, X axis)"),
-			("vhi.prediction.index", "vhi.prediction.index.flexion", "index flexion (bones 4-6)"),
-			("vhi.prediction.middle", "vhi.prediction.middle.flexion", "middle flexion (bones 7-9)"),
-			("vhi.prediction.ring", "vhi.prediction.ring.flexion", "ring flexion (bones 10-12)"),
-			("vhi.prediction.little", "vhi.prediction.little.flexion", "little flexion (bones 13-15)"),
-		];
-
-		foreach ((string shortName, string axisName, string what) in digits)
+		foreach ((string address, (int channel, int _, Axis _)) in Renderable)
 		{
-			foreach (string address in new[] { shortName, axisName })
+			caps.Add(new ControlCapability
 			{
-				caps.Add(new ControlCapability
-				{
-					Address = address,
-					Kind = Kind.Continuous,
-					Lo = -1.0f,
-					Hi = 1.0f,
-					Rest = 0.0f,
-					Encoding = ContinuousEncoding.Canonical,
-					StreamName = "MyoGestic_Output",
-					Description = address == shortName
-						? $"{what} — the primary axis, and what the short address means"
-						: what,
-				});
-			}
+				Address = address,
+				Kind = Kind.Continuous,
+				Lo = -1.0f,
+				Hi = 1.0f,
+				Rest = 0.0f,
+				Encoding = ContinuousEncoding.Canonical,
+				StreamName = "MyoGestic_Output",
+				Channel = channel,
+				Description = Describes.TryGetValue(address, out string what) ? what : "",
+			});
 		}
-
-		caps.Add(new ControlCapability
-		{
-			Address = "vhi.prediction.thumb.abduction",
-			Kind = Kind.Continuous,
-			Lo = -1.0f,
-			Hi = 1.0f,
-			Rest = 0.0f,
-			Encoding = ContinuousEncoding.Canonical,
-			StreamName = "MyoGestic_Output",
-			Description = "thumb abduction (bones 1-3, Z axis). The distal bone's Z gain is 0, "
-				+ "so two of the three thumb bones move.",
-		});
-
 		return caps;
 	}
 
@@ -270,7 +271,11 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				|| request.ControlPoseEncoding != ContinuousEncoding.EncodingUnspecified;
 			foreach (DofDeclaration dof in request.Dofs)
 			{
-				var verdict = new DofVerdict { Name = dof.Name };
+				// The alias is the client's; the address is ours. An empty address means a
+				// client written before the manifest existed, which sent the address as
+				// the name — honour that rather than breaking it.
+				string address = string.IsNullOrEmpty(dof.Address) ? dof.Name : dof.Address;
+				var verdict = new DofVerdict { Name = dof.Name, Address = address };
 				if (dof.Kind == Kind.Discrete)
 				{
 					// A discrete DOF renders as a control-hand movement. Every declared
@@ -305,17 +310,19 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 						verdict.RendersAs = $"control-hand movements: {string.Join(", ", mapping)}";
 					}
 				}
-				else if (Renderable.TryGetValue(dof.Name, out var slot))
+				else if (Renderable.TryGetValue(address, out var slot))
 				{
 					verdict.Renderable = true;
-					verdict.RendersAs = $"{predictedHand.BoneNameForJoint(slot.Joint)} {slot.Axis} axis";
+					verdict.RendersAs =
+						$"{predictedHand.BoneNameForJoint(slot.Joint)} {slot.Axis} axis "
+						+ $"(channel {slot.Channel})";
 				}
 				else
 				{
 					verdict.Renderable = false;
 					verdict.Message =
-						$"this hand has no {dof.Name} — it renders exactly "
-						+ $"[{string.Join(", ", ChannelOrder)}]";
+						$"this target does not export '{address}' — call GetControlManifest "
+						+ $"for the full list. It renders: [{string.Join(", ", ChannelOrder)}]";
 				}
 				all &= verdict.Renderable;
 				reply.Verdicts.Add(verdict);
@@ -393,6 +400,8 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 			var ack = new ControlAck { Applied = true };
 			foreach ((string name, float value) in request.Continuous)
 			{
+				// Keyed by address: SetControl carries target addresses, exactly as the
+				// manifest publishes them.
 				if (!Renderable.TryGetValue(name, out var slot))
 				{
 					ack.Rejected[name] = "not renderable — see Declare";
