@@ -210,7 +210,15 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 			// it per command: two drivers for one hand is exactly what v1's ControlMode
 			// existed to referee, and a client told "no" at handshake time can fix its
 			// configuration, where one told "no" per command just sees things not happen.
-			if (request.ControlPoseEncoding != ContinuousEncoding.EncodingUnspecified)
+			if (request.ControlPoseEncoding == ContinuousEncoding.EncodingUnspecified)
+			{
+				// Not declaring the stream releases it. Symmetry matters here: declaring a
+				// control pose is what puts this hand into Stream mode, so re-declaring
+				// without one is how a client gets back to commanding discrete DOFs. Without
+				// it that switch would be a one-way door for the life of the process.
+				controlHand.ReleaseControlPoseStream();
+			}
+			else
 			{
 				bool anyDiscrete = false;
 				foreach (DofDeclaration dof in request.Dofs)

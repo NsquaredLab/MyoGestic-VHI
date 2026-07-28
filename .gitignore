@@ -29,3 +29,4 @@ docs/**/*.import
 
 # Local export output
 /dist/
+/publish/

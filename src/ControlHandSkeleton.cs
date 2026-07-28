@@ -38,7 +38,7 @@ public partial class ControlHandSkeleton : Node3D
 	/// <see cref="ControlHandDriverMode.Movement"/>,
 	/// <see cref="ControlHandDriverMode.Stream"/>, or
 	/// <see cref="ControlHandDriverMode.Idle"/>. Change at runtime with
-	/// <see cref="SetDriverMode"/> or the gRPC <c>SetControlMode</c> RPC.</summary>
+	/// <see cref="SetDriverMode"/>, itself driven by the v2 Declare handshake.</summary>
 	[Export] public ControlHandDriverMode DriverMode = ControlHandDriverMode.Movement;
 
 	/// <summary>Enable the predefined-movement state machine. When
@@ -523,6 +523,24 @@ public partial class ControlHandSkeleton : Node3D
 		return true;
 	}
 
+	/// <summary>
+	/// Stop reading a streamed control pose and return to the movement state machine.
+	/// </summary>
+	/// <remarks>
+	/// The counterpart to <see cref="AcceptControlPoseStream"/>, and the reason it
+	/// exists: declaring a control-pose stream switches this hand to
+	/// <see cref="ControlHandDriverMode.Stream"/>, and without a way back that would be
+	/// a one-way door — discrete DOFs render as movements, which are rejected outside
+	/// Movement mode, so a client that streamed once could never command a held state
+	/// again for the lifetime of the process. Idempotent.
+	/// </remarks>
+	public void ReleaseControlPoseStream()
+	{
+		ControlPoseCanonical = false;
+		if (DriverMode == ControlHandDriverMode.Stream)
+			SetDriverMode(ControlHandDriverMode.Movement);
+	}
+
 	/// <summary>Stop any training program and return the hand to rest. Idempotent.</summary>
 	public void StopTrainingProgram()
 	{
@@ -697,7 +715,7 @@ public partial class ControlHandSkeleton : Node3D
 	/// <summary>
 	/// Set how the control hand is driven. Switching to Movement resets to the
 	/// resting state; Idle holds the rest pose; Stream lets the next streamed
-	/// sample take over. Used by the gRPC SetControlMode RPC.
+	/// sample take over. Driven by the v2 Declare handshake.
 	/// </summary>
 	/// <param name="mode">The target driver mode -
 	/// <see cref="ControlHandDriverMode.Movement"/>,

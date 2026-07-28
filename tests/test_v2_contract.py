@@ -218,6 +218,7 @@ def test_a_sweep_turns_each_bone_the_documented_amount(v2, name):
         pb2.SweepControlRequest(name=name, duration_s=1.2, both_directions=True), timeout=25.0
     )
     assert reply.completed, reply.message
+    assert reply.observed, f"{name} moved nothing — an empty sweep must not pass"
     for observation in reply.observed:
         expected = EXPECTED[name][observation.element]
         assert observation.degrees_at_hi == pytest.approx(expected, abs=0.5), observation.element
@@ -235,6 +236,7 @@ def test_the_extension_half_is_the_exact_mirror(v2, name):
         pb2.SweepControlRequest(name=name, duration_s=1.2, both_directions=True), timeout=25.0
     )
     assert reply.completed, reply.message
+    assert reply.observed, f"{name} moved nothing — an empty sweep must not pass"
     for o in reply.observed:
         assert o.degrees_at_lo == pytest.approx(-o.degrees_at_hi, abs=0.5), o.element
         assert not math.isclose(o.degrees_at_hi, 0.0, abs_tol=0.5)
@@ -476,6 +478,7 @@ def test_blending_does_not_change_the_commanded_value(v2):
         assert reply.completed, reply.message
         readings[blend] = {o.element: o.degrees_at_hi for o in reply.observed}
     stub.SetPresentation(pb2.SetPresentationRequest(blend=False), timeout=10.0)
+    assert readings[False], "a blend comparison over no observations proves nothing"
     assert readings[False].keys() == readings[True].keys()
     for element, degrees in readings[False].items():
         assert readings[True][element] == pytest.approx(degrees, abs=0.5), element
