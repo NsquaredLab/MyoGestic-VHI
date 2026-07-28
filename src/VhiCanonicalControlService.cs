@@ -19,6 +19,16 @@ namespace Vhi;
 /// both vocabularies, and it exists so that nothing outside this file has to.
 /// </para>
 /// <para>
+/// <b>Which hand renders what.</b> Continuous DOFs drive the <i>predicted</i> hand;
+/// discrete DOFs drive the <i>control</i> hand's movements. That split is what
+/// dissolves v1's mutual exclusivity rather than working around it: v1's
+/// <c>ControlMode</c> forced a choice because a streamed pose and a movement both
+/// drove the <i>same</i> hand. Here they never contend, so an application can hold a
+/// continuous grip and a discrete grasp state at once — the thing v1 could not
+/// express. A client that wants a discrete DOF rendered still needs the control hand
+/// in Movement mode, and gets told so by name when it is not.
+/// </para>
+/// <para>
 /// Threading follows v1 exactly: every RPC body is a closure handed to
 /// <see cref="GrpcControlServer.InvokeOnMainThread{T}"/>, so scene mutation happens on
 /// Godot's main thread. <see cref="SweepControl"/> is the one exception and the one
@@ -75,6 +85,27 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 	/// <summary>The standard vocabulary version this build implements.</summary>
 	private const string StandardVersion = "1";
 
+	/// <summary>
+	/// Resolve a canonical discrete state to one of this hand's movement names, or
+	/// <see langword="null"/> when it has none.
+	/// </summary>
+	/// <remarks>
+	/// Matched case-insensitively against <see cref="ControlHandSkeleton.GetAvailableMovements"/>
+	/// rather than against a table baked in here: the movement set changes with VHI's
+	/// movement mode, and a hard-coded vocabulary would be wrong for half of them. This
+	/// is deliberately recomputed per call so the service stays stateless — grpc-dotnet
+	/// constructs it per request, and a cached negotiation would silently go stale.
+	/// </remarks>
+	private string ResolveMovement(string state)
+	{
+		foreach (string movement in controlHand.GetAvailableMovements())
+		{
+			if (string.Equals(movement, state, StringComparison.OrdinalIgnoreCase))
+				return movement;
+		}
+		return null;
+	}
+
 	private readonly ControlHandSkeleton controlHand;
 	private readonly PredictedHandSkeleton predictedHand;
 	private readonly GrpcControlServer server;
@@ -114,13 +145,37 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				var verdict = new DofVerdict { Name = dof.Name };
 				if (dof.Kind == Kind.Discrete)
 				{
-					// Honest rather than convenient: VHI's movements are not yet
-					// addressable as canonical discrete DOFs, and claiming otherwise
-					// would have the client believe a grasp state was being rendered.
-					verdict.Renderable = false;
-					verdict.Message =
-						"no discrete DOF is renderable yet — VHI's movements are still "
-						+ "commanded through the v1 SetMovement RPC";
+					// A discrete DOF renders as a control-hand movement. Every declared
+					// state must resolve to one: a DOF where three of four states work
+					// is not partially renderable, it is a DOF that silently does
+					// nothing a quarter of the time.
+					var unresolved = new List<string>();
+					var mapping = new List<string>();
+					foreach (string state in dof.States)
+					{
+						string movement = ResolveMovement(state);
+						if (movement == null)
+							unresolved.Add(state);
+						else
+							mapping.Add($"{state}->{movement}");
+					}
+					if (dof.States.Count == 0)
+					{
+						verdict.Renderable = false;
+						verdict.Message = "a discrete DOF must declare at least one state";
+					}
+					else if (unresolved.Count > 0)
+					{
+						verdict.Renderable = false;
+						verdict.Message =
+							$"no movement matches [{string.Join(", ", unresolved)}] — this "
+							+ $"hand offers [{string.Join(", ", controlHand.GetAvailableMovements())}]";
+					}
+					else
+					{
+						verdict.Renderable = true;
+						verdict.RendersAs = $"control-hand movements: {string.Join(", ", mapping)}";
+					}
 				}
 				else if (Renderable.TryGetValue(dof.Name, out var slot))
 				{
@@ -167,10 +222,25 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				}
 				predictedHand.SetCanonicalValue(slot.Channel, Math.Clamp(value, -1f, 1f));
 			}
-			foreach (string name in request.Discrete.Keys)
+			foreach ((string name, string state) in request.Discrete)
 			{
-				ack.Rejected[name] = "discrete DOFs are not renderable yet — use v1 SetMovement";
-				ack.Applied = false;
+				string movement = ResolveMovement(state);
+				if (movement == null)
+				{
+					ack.Rejected[name] = $"no movement matches state '{state}' — see Declare";
+					ack.Applied = false;
+					continue;
+				}
+				// cycle:false — snap to the movement's end pose and hold it. A canonical
+				// discrete DOF is a *held state*, so looping an open/close animation
+				// would render something the client never asked for.
+				if (!controlHand.SetMovement(movement, false))
+				{
+					ack.Rejected[name] =
+						$"'{movement}' was refused — the control hand is in "
+						+ $"{controlHand.DriverMode} mode, not Movement";
+					ack.Applied = false;
+				}
 			}
 			return ack;
 		});
@@ -272,9 +342,12 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		}
 
 		reply.Observed.AddRange(observed.Values);
-		// The joints this DOF is supposed to drive are the ones sharing its channel in
-		// MoveBonesDirectly; expectation holds when exactly those moved.
-		int[] expected = predictedHand.JointsForChannel(slot.Channel);
+		// Expectation is the joints this DOF can move on *its own axis*, not every joint
+		// sharing its channel: thumb abduction drives all three thumb bones through
+		// channel 1, but the distal one's Z gain is 0, so a channel-wide expectation
+		// would call a correct sweep a mismatch.
+		int[] expected = predictedHand.JointsMovableOnAxis(
+			slot.Channel, slot.Axis == Axis.Z ? 2 : 0);
 		reply.MatchedExpectation =
 			observed.Count == expected.Length && Array.TrueForAll(expected, observed.ContainsKey);
 		var moved = new List<string>();

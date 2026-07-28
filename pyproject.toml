@@ -17,6 +17,14 @@ requires-python = ">=3.12"
 package = false
 
 [dependency-groups]
+# The automated contract test (tests/test_v2_contract.py) launches VHI and drives it
+# over gRPC. Stubs are generated at session start rather than committed, so the test
+# can never drift from proto/. The other files in tests/ are interactive monitors.
+test = [
+    "pytest>=8.0",
+    "grpcio>=1.60",
+    "grpcio-tools>=1.60",
+]
 docs = [
     "properdocs",
     "mkdocs-material>=9.5",

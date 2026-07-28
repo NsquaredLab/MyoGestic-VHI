@@ -399,6 +399,32 @@ public partial class PredictedHandSkeleton : Node3D
 	public int[] JointsForChannel(int channel) =>
 		jointsByChannel.TryGetValue(channel, out int[] joints) ? joints : [];
 
+	/// <summary>
+	/// The joints a channel can actually move on one axis: those whose gain on that
+	/// axis is non-zero.
+	/// </summary>
+	/// <remarks>
+	/// Not the same as <see cref="JointsForChannel"/>, and the difference is real.
+	/// Thumb abduction drives all three thumb bones through channel 1, but the distal
+	/// one has a Z gain of 0 — so only two of them can move, and an expectation built
+	/// from the channel alone would report a correct sweep as a mismatch.
+	/// </remarks>
+	/// <param name="axisIndex">0 for X, 2 for Z — an index into the gain triple.</param>
+	public int[] JointsMovableOnAxis(int channel, int axisIndex)
+	{
+		var movable = new List<int>();
+		foreach (int joint in JointsForChannel(channel))
+		{
+			if (jointMovements.TryGetValue(joint, out float[] gains)
+				&& axisIndex < gains.Length
+				&& gains[axisIndex] != 0f)
+			{
+				movable.Add(joint);
+			}
+		}
+		return [.. movable];
+	}
+
 	/// <summary>The model's own name for a joint — the rig's identity claim, not a label.</summary>
 	public string BoneNameForJoint(int jointIndex) =>
 		jointIndex >= 0 && jointIndex < boneNames.Length ? boneNames[jointIndex] : $"joint {jointIndex}";
