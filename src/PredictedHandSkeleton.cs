@@ -409,6 +409,7 @@ public partial class PredictedHandSkeleton : Node3D
 	/// one has a Z gain of 0 — so only two of them can move, and an expectation built
 	/// from the channel alone would report a correct sweep as a mismatch.
 	/// </remarks>
+	/// <param name="channel">The legacy pose channel, 0-5.</param>
 	/// <param name="axisIndex">0 for X, 2 for Z — an index into the gain triple.</param>
 	public int[] JointsMovableOnAxis(int channel, int axisIndex)
 	{
