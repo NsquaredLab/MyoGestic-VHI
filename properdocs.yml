@@ -84,6 +84,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Upgrading to 2.0: upgrading-to-v2.md
   - Concepts:
       - concepts/index.md
       - Architecture: concepts/architecture.md
