@@ -64,25 +64,31 @@ switched off with the `EnableOutlets` flag.
     to MyoGestic directly (it issues the commands), and the actual kinematics
     are already in `VHI_Control`.
 
-## The 9-DOF channel layout
+## The channel layout
 
-Every VHI pose vector - in or out - is 9 `float32` channels:
+Every VHI pose vector — in or out — is 9 `float32` channels, of which **six are read**:
+thumb flexion, thumb abduction, and one flexion channel per finger. Channels 6-8 are
+labelled as a wrist for wire-compatibility but are read by no consumer and are always
+`0`; there is no wrist on this rig.
 
-| # | Channel | Notes |
-|---|---|---|
-| 0 | Thumb flexion | normalised, roughly −1 … +1 |
-| 1 | Thumb abduction | |
-| 2 | Index flexion | |
-| 3 | Middle flexion | |
-| 4 | Ring flexion | |
-| 5 | Pinky flexion | |
-| 6 | Wrist flexion | usually 0 - wrist is not animated by default |
-| 7 | Wrist abduction | usually 0 |
-| 8 | Wrist rotation | usually 0 |
+Values are normalised against per-joint maximum-flexion limits, and VHI expands the six
+DOFs across the 16 animated joints internally (see [Architecture](architecture.md)).
 
-Values are normalised against per-joint maximum-flexion limits, so `1.0` means
-"fully flexed" for that finger. VHI expands these 6 finger DOFs across the 16
-animated joints internally (see [Architecture](architecture.md)).
+!!! important "One authoritative map, and it is not on this page"
+    The exact channel-to-bone mapping and — critically — **which sign convention each
+    stream uses** live in
+    [the LSL reference](../reference/lsl-reference.md#the-channel-layout). This page
+    deliberately does not restate them.
+
+    That is not tidiness. This map was previously written out in several places and they
+    disagreed: one described channel 0 as thumb *rotation*, another had channel 1 as `0`
+    in a fist where recordings show `-1.0`. Duplicating it is how it drifts, so there is
+    now one copy.
+
+    The convention also differs *per stream* as of 2.0: `MyoGestic_Output` takes canonical
+    values (`+1` flexes) while VHI's outlets stay in renderer units (`-1` flexes). Anything
+    that hard-codes a sign is right on one stream and inverted on another — call `Declare`
+    and honour what it reports.
 
 See the [LSL reference](../reference/lsl-reference.md) for stream types,
 source IDs and exact metadata.

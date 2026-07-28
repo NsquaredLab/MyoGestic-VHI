@@ -1,25 +1,64 @@
 # Build and export
 
-Running VHI from the Godot editor (or `godot --path .`) needs nothing special.
-Producing a **standalone export** has two real gotchas - both covered here.
+Building VHI's C# needs a **.NET 8 SDK** (below). Producing a **standalone export**
+has two further gotchas — all three are covered here.
 
-## Prerequisite: an active .NET 8 SDK
+## Prerequisite: a .NET 8 SDK
 
-VHI targets `net8.0`. Godot's editor-integrated publish (`GodotTools`) needs a
-discoverable **.NET 8 SDK** - if your `dotnet` on `PATH` is a newer major
-version, the export fails with a `System.Runtime` load error before it even
-starts.
-
-Make .NET 8 the active SDK for the export - either put it first on `PATH`, or
-pin it with a `global.json` in the repo:
+VHI targets `net8.0`, and `global.json` **is already committed** pinning that:
 
 ```json
 {
-  "sdk": { "version": "8.0.0", "rollForward": "latestMinor" }
+  "sdk": { "version": "8.0.0", "rollForward": "latestFeature" }
 }
 ```
 
-`dotnet --version` run in the repo should report an `8.0.x`.
+`latestFeature` rolls forward within the `8.0.x` feature band only — deliberately, so
+the build cannot drift onto a newer major without someone deciding to. You do not need
+to create this file, and you should not edit it.
+
+The consequence is worth being explicit about: **a machine with only a newer SDK cannot
+build this project at all** — not just the export. `dotnet build` fails during SDK
+resolution, before compiling anything:
+
+```
+A compatible .NET SDK was not found.
+Requested SDK version: 8.0.0
+global.json file: …/Virtual-Hand-Interface/global.json
+```
+
+### Installing .NET 8 side by side
+
+Install it *alongside* whatever you already have rather than relaxing the pin. The
+official installer places a self-contained SDK under `~/.dotnet` and needs no
+administrator rights:
+
+```bash
+curl -fsSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+bash dotnet-install.sh --channel 8.0          # installs into ~/.dotnet
+```
+
+`~/.dotnet` is not added to `PATH`, so invoke that muxer explicitly — a `dotnet` from a
+package manager resolves only its own SDKs and will still fail:
+
+```bash
+export DOTNET_ROOT="$HOME/.dotnet"
+"$HOME/.dotnet/dotnet" --version                        # → 8.0.x, run inside the repo
+"$HOME/.dotnet/dotnet" build VHI_godot.csproj           # compile without the editor
+```
+
+Verify by running `dotnet --version` **inside the repo**: it should report an `8.0.x`,
+because that is `global.json` being honoured. Outside the repo the same command may
+legitimately report something newer.
+
+!!! warning "Do not relax the pin to work around a missing SDK"
+    Setting `rollForward: latestMajor` makes the build succeed on a newer SDK, and it
+    will appear to work. It also changes the toolchain for everyone and for CI, where
+    `.github/workflows/release.yml` provisions `8.0.x` explicitly. A newer compiler also
+    reports different diagnostics — building under the pinned SDK caught a
+    partially-documented parameter list that a newer one had let through silently.
+
+    Install the SDK the project asks for instead.
 
 ## Export
 
