@@ -138,6 +138,43 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 	/// them — naming a dead channel is how the wrong maps spread in the first place.
 	/// </para>
 	/// </remarks>
+	/// <summary>Names that are <b>accepted but not advertised</b>.</summary>
+	/// <remarks>
+	/// <para>
+	/// Every control here is already reachable under a shorter address on the same channel:
+	/// <c>vhi.prediction.index.flexion</c> is <c>vhi.prediction.index</c>. Publishing both put
+	/// eleven capabilities in the manifest for six controls, which forced every client that
+	/// lists them to explain the duplication — MyoGestic's map editor had to print a channel
+	/// number in each row so a reader could tell which two rows meant one finger.
+	/// </para>
+	/// <para>
+	/// So the manifest names each control once. <see cref="Renderable"/> still resolves these,
+	/// because <c>Declare</c>, <c>SetControl</c> and <c>SweepControl</c> read that table
+	/// directly: a client that already sends an axis form keeps working on the wire.
+	/// </para>
+	/// <para>
+	/// <b>Extension is not in here, and is not missing.</b> A continuous control is signed —
+	/// <c>+1</c> flexes and <c>-1</c> extends the same control — so there is no separate
+	/// extension address to advertise or hide. The <c>ThumbExtension</c> that exists is a
+	/// <i>movement preset</i> on <c>vhi.control.gesture</c>, which is a held state rather than
+	/// a number. <c>thumb.abduction</c> stays advertised because it is a genuinely different
+	/// control: its own channel, its own axis.
+	/// </para>
+	/// </remarks>
+	private static readonly HashSet<string> Aliases =
+	[
+		"vhi.prediction.thumb.flexion",
+		"vhi.prediction.index.flexion",
+		"vhi.prediction.middle.flexion",
+		"vhi.prediction.ring.flexion",
+		"vhi.prediction.little.flexion",
+		"vhi.control.pose.thumb.flexion",
+		"vhi.control.pose.index.flexion",
+		"vhi.control.pose.middle.flexion",
+		"vhi.control.pose.ring.flexion",
+		"vhi.control.pose.little.flexion",
+	];
+
 	private static readonly string[] ChannelOrder =
 	[
 		"vhi.prediction.thumb.flexion",
@@ -221,6 +258,10 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		var caps = new List<ControlCapability>();
 		foreach ((string address, (int channel, int _, Axis _)) in Renderable)
 		{
+			if (Aliases.Contains(address))
+			{
+				continue;   // accepted, not advertised — see Aliases
+			}
 			caps.Add(new ControlCapability
 			{
 				Address = address,
@@ -236,6 +277,10 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		}
 		foreach ((string address, int channel) in ControlPoseRenderable)
 		{
+			if (Aliases.Contains(address))
+			{
+				continue;   // accepted, not advertised — see Aliases
+			}
 			caps.Add(new ControlCapability
 			{
 				Address = address,
