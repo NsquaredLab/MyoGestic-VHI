@@ -281,6 +281,10 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 			{
 				Address = "vhi.control.gesture",
 				Kind = Kind.Discrete,
+				// -1, not left at proto3's default of 0: a held state travels over gRPC and
+				// occupies no pose channel, and an unset 0 is indistinguishable from
+				// channel 0 — which read as "the same control as the thumb" on the client.
+				Channel = -1,
 				RestState = "Rest",
 				Description = "a control-hand movement preset, held until changed. Includes "
 					+ "whole-hand gestures (Fist, pinches, Pointing) and the wrist movements "
