@@ -101,8 +101,8 @@ public class VhiControlService : VhiControl.VhiControlBase
 		["vhi.prediction.ring.flexion"] = (4, 10, Axis.X),
 		["vhi.prediction.little.flexion"] = (5, 13, Axis.X),
 
-		// The wrist: one joint, two axes, so both are named for the same reason the thumb's
-		// are. Channel 8 would be rotation and is absent because nothing renders it.
+		// The wrist: one joint, three axes, so all three are named for the same reason the
+		// thumb's two are.
 		["vhi.prediction.wrist.flexion"] = (6, 0, Axis.X),
 		["vhi.prediction.wrist.abduction"] = (7, 0, Axis.Z),
 		["vhi.prediction.wrist.rotation"] = (8, 0, Axis.Y),

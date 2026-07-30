@@ -406,7 +406,7 @@ public partial class PredictedHandSkeleton : Node3D
 		[3] = [7, 8, 9],
 		[4] = [10, 11, 12],
 		[5] = [13, 14, 15],
-		// The wrist drives one joint on two axes, the way the thumb's two channels do.
+		// The wrist drives one joint on three axes — flexion, abduction, rotation.
 		[6] = [0],
 		[7] = [0],
 		[8] = [0],
