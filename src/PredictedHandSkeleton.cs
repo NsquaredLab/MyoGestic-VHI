@@ -148,18 +148,18 @@ public partial class PredictedHandSkeleton : Node3D
 		}
 	}
 
-	/// <summary>Rendered degrees → the canonical value that would produce them.</summary>
-	/// <remarks>The inverse of <see cref="CanonicalPose.ToRig(int, float)"/> for in-range
+	/// <summary>Rendered degrees → the standard value that would produce them.</summary>
+	/// <remarks>The inverse of <see cref="StandardPose.ToRig(int, float)"/> for in-range
 	/// values, which is what makes the VHI_Predict read-back comparable with what was sent:
 	/// a round-trip through this renderer is the identity, not a sign flip.</remarks>
-	private static float ToCanonical(int channel, float degrees, float gain) =>
-		gain == 0f ? 0f : degrees / gain * CanonicalPose.Sign[channel];
+	private static float ToStandard(int channel, float degrees, float gain) =>
+		gain == 0f ? 0f : degrees / gain * StandardPose.Sign[channel];
 
 	private void InitializeJointMovements()
 	{
 		// Wrist — joint 0 turns every digit with it. X is flexion, Z abduction; see
-		// CanonicalPose.Wrist for where the two numbers come from and which one is a choice.
-		jointMovements[0] = CanonicalPose.Wrist;
+		// StandardPose.Wrist for where the two numbers come from and which one is a choice.
+		jointMovements[0] = StandardPose.Wrist;
 
 		// Thumb
 		jointMovements[1] = [-45, 0, 30];
@@ -193,12 +193,12 @@ public partial class PredictedHandSkeleton : Node3D
 		{
 			currentData = communicationController.GetReceivedDataPredicted();
 
-			// The inlet carries CANONICAL values: +1 means the direction the DOF name
+			// The inlet carries STANDARD values: +1 means the direction the DOF name
 			// denotes. Convert them to this rig's multipliers the same way every other
 			// entry point does — see ToRig. Unconditionally: the conversion is not gated
 			// behind the Declare handshake, because it must not be possible to render a
-			// canonical +1 in two different directions depending on what a client said.
-			CanonicalPose.ToRig(currentData);
+			// standard +1 in two different directions depending on what a client said.
+			StandardPose.ToRig(currentData);
 
 			if (currentData.Count >= 9 && skeleton != null && boneMap.Count > 0)
 			{
@@ -341,23 +341,23 @@ public partial class PredictedHandSkeleton : Node3D
 
 		List<float> outputData = [];
 
-		// Canonical, not rig units: dividing by the gain recovers the multiplier, and the
+		// Standard, not rig units: dividing by the gain recovers the multiplier, and the
 		// channel's sign turns that back into the value a client would have had to send to
 		// produce this pose. So VHI_Predict speaks the same language as the inlet, and a
 		// round-trip through the renderer is the identity rather than a sign flip.
 		var thumb2Rot = GetBoneRotationDegrees(1);
-		outputData.Add(ToCanonical(0, thumb2Rot.X, jointMovements[1][0])); // Thumb Flexion
-		outputData.Add(ToCanonical(1, thumb2Rot.Z, jointMovements[1][2])); // Thumb Abduction
-		outputData.Add(ToCanonical(2, GetBoneRotationDegrees(4).X, jointMovements[4][0]));
-		outputData.Add(ToCanonical(3, GetBoneRotationDegrees(7).X, jointMovements[7][0]));
-		outputData.Add(ToCanonical(4, GetBoneRotationDegrees(10).X, jointMovements[10][0]));
-		outputData.Add(ToCanonical(5, GetBoneRotationDegrees(13).X, jointMovements[13][0]));
+		outputData.Add(ToStandard(0, thumb2Rot.X, jointMovements[1][0])); // Thumb Flexion
+		outputData.Add(ToStandard(1, thumb2Rot.Z, jointMovements[1][2])); // Thumb Abduction
+		outputData.Add(ToStandard(2, GetBoneRotationDegrees(4).X, jointMovements[4][0]));
+		outputData.Add(ToStandard(3, GetBoneRotationDegrees(7).X, jointMovements[7][0]));
+		outputData.Add(ToStandard(4, GetBoneRotationDegrees(10).X, jointMovements[10][0]));
+		outputData.Add(ToStandard(5, GetBoneRotationDegrees(13).X, jointMovements[13][0]));
 
 		// Wrist: all three axes of bone 0, which parents every digit.
 		var wristRot = GetBoneRotationDegrees(0);
-		outputData.Add(ToCanonical(6, wristRot.X, jointMovements[0][0]));
-		outputData.Add(ToCanonical(7, wristRot.Z, jointMovements[0][2]));
-		outputData.Add(ToCanonical(8, wristRot.Y, jointMovements[0][1]));
+		outputData.Add(ToStandard(6, wristRot.X, jointMovements[0][0]));
+		outputData.Add(ToStandard(7, wristRot.Z, jointMovements[0][2]));
+		outputData.Add(ToStandard(8, wristRot.Y, jointMovements[0][1]));
 
 		communicationController.SendPredictedData(outputData);
 	}
@@ -388,7 +388,7 @@ public partial class PredictedHandSkeleton : Node3D
 		GD.Print("Predicted hand bones reset");
 	}
 
-	// --- canonical control (v2) --------------------------------------------------
+	// --- standard control (v2) --------------------------------------------------
 	//
 	// The v2 service addresses DOFs by name and needs three things this class did not
 	// expose: set ONE channel without disturbing the rest of the pose, read a joint's
@@ -451,28 +451,28 @@ public partial class PredictedHandSkeleton : Node3D
 	/// Set one channel of the pose and render it, leaving every other channel alone.
 	/// </summary>
 	/// <remarks>
-	/// <paramref name="canonical"/> is a canonical value: <c>+1</c> means the direction
+	/// <paramref name="standard"/> is a standard value: <c>+1</c> means the direction
 	/// the DOF's name denotes. The negation into this hand's wire convention (its
-	/// flexion gains are negative) happens here, so the canonical standard never has to
-	/// carry a sign that belongs to one renderer.
+	/// flexion gains are negative) happens here, so the standard vocabulary never has
+	/// to carry a sign that belongs to one renderer.
 	/// <para>
 	/// Bones stay where they are put: <c>_Process</c> only re-poses them when a fresh
 	/// LSL sample arrives, so a value set here persists until the next one does. A
 	/// client streaming poses over LSL while calling this will fight it.
 	/// </para>
 	/// </remarks>
-	public void SetCanonicalValue(int channel, float canonical)
+	public void SetStandardValue(int channel, float standard)
 	{
 		if (skeleton == null || boneMap.Count == 0 || !jointsByChannel.ContainsKey(channel))
 			return;
 		while (currentData.Count < 9)
 			currentData.Add(0f);
-		currentData[channel] = CanonicalPose.ToRig(channel, canonical);
+		currentData[channel] = StandardPose.ToRig(channel, standard);
 		MoveBonesDirectly();
 	}
 
-	/// <summary>Every animated channel back to canonical rest, rendered immediately.</summary>
-	public void RestCanonicalPose()
+	/// <summary>Every animated channel back to standard rest, rendered immediately.</summary>
+	public void RestStandardPose()
 	{
 		if (skeleton == null || boneMap.Count == 0)
 			return;
