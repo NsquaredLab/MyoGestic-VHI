@@ -1,45 +1,73 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using Grpc.Core;
-using Myogestic.Vhi.V2;
+using Myogestic.Vhi;
 
 namespace Vhi;
 
 /// <summary>
-/// The canonical control service (v2), served alongside <see cref="VhiTrainingAidService"/>.
+/// The one gRPC service VHI serves: control-space negotiation and per-frame commands
+/// for the predicted and control hands, plus the recording-session coordination a
+/// capture pipeline drives them through.
 /// </summary>
 /// <remarks>
 /// <para>
-/// v1 speaks in movement names and in a nine-float pose whose channel meaning lives
-/// nowhere. This service speaks the canonical control standard instead: a client
-/// declares which of VHI's <b>addresses</b> it drives ("vhi.prediction.index"), under
-/// whatever names its own configuration uses, and VHI answers with what it can render. <see cref="Renderable"/> is the only table in VHI that knows
-/// both vocabularies, and it exists so that nothing outside this file has to.
+/// A client declares which of VHI's <b>addresses</b> it drives ("vhi.prediction.index"),
+/// under whatever names its own configuration uses, and VHI answers with what it can
+/// render. <see cref="Renderable"/> is the only table in VHI that knows both
+/// vocabularies, and it exists so that nothing outside this file has to.
 /// </para>
 /// <para>
 /// <b>Which hand renders what.</b> Continuous DOFs drive the <i>predicted</i> hand;
-/// discrete DOFs drive the <i>control</i> hand's movements. That split is what
-/// dissolves v1's mutual exclusivity rather than working around it: v1's
-/// <c>ControlMode</c> forced a choice because a streamed pose and a movement both
-/// drove the <i>same</i> hand. Here they never contend, so an application can hold a
-/// continuous grip and a discrete grasp state at once — the thing v1 could not
-/// express. A client that wants a discrete DOF rendered still needs the control hand
-/// in Movement mode, and gets told so by name when it is not.
+/// discrete DOFs drive the <i>control</i> hand's movements. The two never contend, so
+/// an application can hold a continuous grip and a discrete grasp state at once. A
+/// client that wants a discrete DOF rendered still needs the control hand in Movement
+/// mode, and gets told so by name when it is not.
 /// </para>
 /// <para>
-/// Threading follows v1 exactly: every RPC body is a closure handed to
+/// <b>Recording-session coordination.</b> <see cref="SetRecordingSession"/>,
+/// <see cref="StartRecordingTrajectory"/>, <see cref="StopRecordingTrajectory"/> and
+/// <see cref="GetRecordingSessionState"/> are a second, unrelated concern that lives
+/// here because both drive the same control hand through the same state machine —
+/// splitting them into a second service implied an independence the renderer does not
+/// have. Nothing here is a canonical DOF and none of it may change what one means: a
+/// canonical discrete DOF is a held state, while a recording trajectory keeps the
+/// control hand cycling so the recorded pose stream sweeps a continuous range for EMG
+/// windows to be aligned against. A trajectory names a VHI movement, which is fine
+/// precisely because this is not canonical — a recording aid is allowed to be
+/// application-specific.
+/// </para>
+/// <para>
+/// Threading: every RPC body is a closure handed to
 /// <see cref="GrpcControlServer.InvokeOnMainThread{T}"/>, so scene mutation happens on
 /// Godot's main thread. <see cref="SweepControl"/> is the one exception and the one
 /// <c>async</c> method in src/ — it has to span frames, because a pose set inside a
 /// single main-thread closure is never rendered before the closure returns.
 /// </para>
 /// </remarks>
-public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalControlBase
+public class VhiControlService : VhiControl.VhiControlBase
 {
 	/// <summary>Which rotation axis of a joint a canonical DOF drives.</summary>
-	private enum Axis { X, Z }
+	private enum Axis { X, Y, Z }
+
+	/// <summary>The component index a rotation axis reads out of a Vector3.</summary>
+	private static int ComponentOf(Axis axis) => axis switch
+	{
+		Axis.X => 0,
+		Axis.Y => 1,
+		_ => 2,
+	};
+
+	/// <summary>One component of a joint's rotation, by axis.</summary>
+	private static float Component(Vector3 degrees, Axis axis) => axis switch
+	{
+		Axis.X => degrees.X,
+		Axis.Y => degrees.Y,
+		_ => degrees.Z,
+	};
 
 	/// <summary>
 	/// Canonical DOF name -> the legacy channel that renders it, the joint whose
@@ -72,6 +100,12 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		["vhi.prediction.middle.flexion"] = (3, 7, Axis.X),
 		["vhi.prediction.ring.flexion"] = (4, 10, Axis.X),
 		["vhi.prediction.little.flexion"] = (5, 13, Axis.X),
+
+		// The wrist: one joint, two axes, so both are named for the same reason the thumb's
+		// are. Channel 8 would be rotation and is absent because nothing renders it.
+		["vhi.prediction.wrist.flexion"] = (6, 0, Axis.X),
+		["vhi.prediction.wrist.abduction"] = (7, 0, Axis.Z),
+		["vhi.prediction.wrist.rotation"] = (8, 0, Axis.Y),
 	};
 
 	/// <summary>
@@ -106,6 +140,9 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		["vhi.control.pose.ring.flexion"] = 4,
 		["vhi.control.pose.little"] = 5,
 		["vhi.control.pose.little.flexion"] = 5,
+		["vhi.control.pose.wrist.flexion"] = 6,
+		["vhi.control.pose.wrist.abduction"] = 7,
+		["vhi.control.pose.wrist.rotation"] = 8,
 	};
 
 	/// <summary>What each address renders, for the manifest's description field.</summary>
@@ -122,6 +159,9 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		["vhi.prediction.middle.flexion"] = "middle flexion (bones 7-9)",
 		["vhi.prediction.ring.flexion"] = "ring flexion (bones 10-12)",
 		["vhi.prediction.little.flexion"] = "little flexion (bones 13-15)",
+		["vhi.prediction.wrist.flexion"] = "wrist flexion (bone 0, X axis). Bone 0 parents every digit, so the whole hand turns with it.",
+		["vhi.prediction.wrist.abduction"] = "wrist abduction (bone 0, Z axis). Bone 0 parents every digit, so the whole hand turns with it.",
+		["vhi.prediction.wrist.rotation"] = "wrist rotation \u2014 pronation/supination (bone 0, Y axis). The hand twists about its own long axis; there is no forearm to carry the motion.",
 	};
 
 	/// <summary>
@@ -161,29 +201,67 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 	/// control: its own channel, its own axis.
 	/// </para>
 	/// </remarks>
+	/// <remarks>
+	/// <para>The thumb is the exception in the other direction: <c>thumb</c> alone is the
+	/// alias and <c>thumb.flexion</c> is advertised. A digit with one axis needs no suffix —
+	/// <c>index</c> cannot mean anything but flexion — but the thumb has two, and a bare
+	/// <c>thumb</c> does not say which. The suffix appears exactly where it carries
+	/// information.</para>
+	/// </remarks>
 	private static readonly HashSet<string> Aliases =
 	[
-		"vhi.prediction.thumb.flexion",
+		"vhi.prediction.thumb",
 		"vhi.prediction.index.flexion",
 		"vhi.prediction.middle.flexion",
 		"vhi.prediction.ring.flexion",
 		"vhi.prediction.little.flexion",
-		"vhi.control.pose.thumb.flexion",
+		"vhi.control.pose.thumb",
 		"vhi.control.pose.index.flexion",
 		"vhi.control.pose.middle.flexion",
 		"vhi.control.pose.ring.flexion",
 		"vhi.control.pose.little.flexion",
 	];
 
-	private static readonly string[] ChannelOrder =
-	[
-		"vhi.prediction.thumb.flexion",
-		"vhi.prediction.thumb.abduction",
-		"vhi.prediction.index.flexion",
-		"vhi.prediction.middle.flexion",
-		"vhi.prediction.ring.flexion",
-		"vhi.prediction.little.flexion",
-	];
+	/// <summary>The pose channel an address occupies on one stream, or <c>-1</c>.</summary>
+	/// <remarks>
+	/// Exposed for <see cref="LSLCommunicationController"/>, which reads a producer's channel
+	/// labels and needs to know where each labelled address belongs in this renderer's own
+	/// pose order. That is the same address table <c>Declare</c>, <c>SetControl</c> and
+	/// <c>SweepControl</c> resolve against, so a labelled stream and a declaration cannot
+	/// disagree about where a control lives — there is one table.
+	/// </remarks>
+	public static int ChannelForAddress(string address, bool controlPose)
+	{
+		if (address == null)
+			return -1;
+		if (controlPose)
+			return ControlPoseRenderable.TryGetValue(address, out int channel) ? channel : -1;
+		return Renderable.TryGetValue(address, out var slot) ? slot.Channel : -1;
+	}
+
+	/// <summary>Advertised addresses in pose-channel order, for one stream.</summary>
+	/// <remarks>
+	/// <para>Derived from the same tables the manifest is built from, minus
+	/// <see cref="Aliases"/>, rather than restated as a literal. It was a literal, and it
+	/// drifted: after the aliases were trimmed the reply still named five controls the
+	/// manifest no longer advertised, so a client that resolved what <c>Declare</c> told it
+	/// would have been refused by its own loader.</para>
+	/// <para>Per stream, too. Both orders used to come from the prediction table, so a client
+	/// declaring a control-pose stream was handed <c>vhi.prediction.*</c> names for it.</para>
+	/// </remarks>
+	private static string[] AdvertisedOrder(bool controlPose)
+	{
+		var pairs = controlPose
+			? ControlPoseRenderable.Select(e => (e.Key, Channel: e.Value))
+			: Renderable.Select(e => (e.Key, e.Value.Channel));
+		return [.. pairs
+			.Where(e => e.Channel >= 0 && !Aliases.Contains(e.Key))
+			.OrderBy(e => e.Channel)
+			.Select(e => e.Key)];
+	}
+
+	private static readonly string[] PredictionOrder = AdvertisedOrder(controlPose: false);
+	private static readonly string[] ControlPoseOrder = AdvertisedOrder(controlPose: true);
 
 	/// <summary>The standard vocabulary version this build implements.</summary>
 	private const string StandardVersion = "1";
@@ -213,7 +291,7 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 	private readonly PredictedHandSkeleton predictedHand;
 	private readonly GrpcControlServer server;
 
-	public VhiCanonicalControlService(
+	public VhiControlService(
 		ControlHandSkeleton controlHand,
 		PredictedHandSkeleton predictedHand,
 		GrpcControlServer server)
@@ -371,7 +449,7 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 				BlendsPresentation = predictedHand.EnableSmoothing,
 				Accepted = true,
 			};
-			reply.ContinuousChannelOrder.AddRange(ChannelOrder);
+			reply.ContinuousChannelOrder.AddRange(PredictionOrder);
 
 			// A declaration is accepted when everything in it is renderable. "Nothing in
 			// it" is not acceptance — except when the client declared a control-pose
@@ -445,7 +523,7 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 					verdict.Renderable = false;
 					verdict.Message =
 						$"this target does not export '{address}' — call GetControlManifest "
-						+ $"for the full list. It renders: [{string.Join(", ", ChannelOrder)}]";
+						+ $"for the full list. It renders: [{string.Join(", ", PredictionOrder)}]";
 				}
 				all &= verdict.Renderable;
 				reply.Verdicts.Add(verdict);
@@ -489,7 +567,7 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 					bool canonical = request.ControlPoseEncoding == ContinuousEncoding.Canonical;
 					controlHand.AcceptControlPoseStream(canonical);
 					reply.ControlPoseStreamName = "MyoGestic_ControlPose";
-					reply.ControlPoseChannelOrder.AddRange(ChannelOrder);
+					reply.ControlPoseChannelOrder.AddRange(ControlPoseOrder);
 					// Echo what was actually applied, not what was asked for.
 					reply.ControlPoseEncoding = canonical
 						? ContinuousEncoding.Canonical
@@ -677,8 +755,9 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 					() => predictedHand.AnimatedJointDegrees());
 				foreach ((int joint, Vector3 degrees) in pose)
 				{
-					float value = slot.Axis == Axis.Z ? degrees.Z : degrees.X;
-					if (Math.Abs(value) < 0.5f && Math.Abs(degrees.X) < 0.5f && Math.Abs(degrees.Z) < 0.5f)
+					float value = Component(degrees, slot.Axis);
+					if (Math.Abs(value) < 0.5f && Math.Abs(degrees.X) < 0.5f
+						&& Math.Abs(degrees.Y) < 0.5f && Math.Abs(degrees.Z) < 0.5f)
 						continue;
 					if (!observed.TryGetValue(joint, out SweepObservation entry))
 					{
@@ -688,7 +767,7 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 						};
 						observed[joint] = entry;
 					}
-					float signed = slot.Axis == Axis.Z ? degrees.Z : degrees.X;
+					float signed = Component(degrees, slot.Axis);
 					if (canonical > 0f)
 						entry.DegreesAtHi = signed;
 					else
@@ -710,7 +789,7 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 		// channel 1, but the distal one's Z gain is 0, so a channel-wide expectation
 		// would call a correct sweep a mismatch.
 		int[] expected = predictedHand.JointsMovableOnAxis(
-			slot.Channel, slot.Axis == Axis.Z ? 2 : 0);
+			slot.Channel, ComponentOf(slot.Axis));
 		reply.MatchedExpectation =
 			observed.Count == expected.Length && Array.TrueForAll(expected, observed.ContainsKey);
 		var moved = new List<string>();
@@ -720,4 +799,75 @@ public class VhiCanonicalControlService : VhiCanonicalControl.VhiCanonicalContro
 			+ $"matched={reply.MatchedExpectation}");
 		return reply;
 	}
+
+	/// <summary>Mark a recording session active or finished.</summary>
+	public override Task<RecordingAck> SetRecordingSession(
+		SetRecordingSessionRequest request, ServerCallContext context) =>
+		server.InvokeOnMainThread(() =>
+		{
+			controlHand.SessionActive = request.Active;
+			GD.Print($"  v2 recording session active={request.Active}");
+			return new RecordingAck { Applied = true };
+		});
+
+	/// <summary>Start cycling the control hand to generate a recording trajectory.</summary>
+	public override Task<RecordingAck> StartRecordingTrajectory(
+		StartRecordingTrajectoryRequest request, ServerCallContext context) =>
+		server.InvokeOnMainThread(() =>
+		{
+			if (controlHand.TrainingProgramActive)
+			{
+				// Refuse rather than silently switch: a recording in progress is being
+				// aligned against this trajectory, and changing it underneath would
+				// corrupt the labels for everything already captured.
+				return new RecordingAck
+				{
+					Applied = false,
+					Message =
+						$"a trajectory is already running ('{controlHand.TrainingProgramMovement}') "
+						+ "— stop it before starting another",
+				};
+			}
+			if (!controlHand.StartTrainingProgram(
+					request.Movement, request.FrequencyHz, request.HoldTimeS, request.RestTimeS))
+			{
+				return new RecordingAck
+				{
+					Applied = false,
+					Message =
+						$"could not start '{request.Movement}' — the control hand is in "
+						+ $"{controlHand.DriverMode} mode, or that movement does not exist "
+						+ $"(offers [{string.Join(", ", controlHand.GetAvailableMovements())}])",
+				};
+			}
+			return new RecordingAck { Applied = true };
+		});
+
+	/// <summary>Stop the trajectory and rest the hand. Succeeds even if none was running.</summary>
+	public override Task<RecordingAck> StopRecordingTrajectory(
+		StopRecordingTrajectoryRequest request, ServerCallContext context) =>
+		server.InvokeOnMainThread(() =>
+		{
+			// Idempotent by design: teardown paths call this without knowing whether a
+			// trajectory is running, and a failure there would mask the real exit.
+			controlHand.StopTrainingProgram();
+			return new RecordingAck { Applied = true };
+		});
+
+	/// <summary>Report the recording session's state and the movements a trajectory may name.</summary>
+	public override Task<RecordingSessionState> GetRecordingSessionState(
+		GetRecordingSessionStateRequest request, ServerCallContext context) =>
+		server.InvokeOnMainThread(() =>
+		{
+			var state = new RecordingSessionState
+			{
+				RecordingSessionActive = controlHand.SessionActive,
+				TrajectoryRunning = controlHand.TrainingProgramActive,
+				TrajectoryMovement = controlHand.TrainingProgramMovement,
+				AnimationState = controlHand.GetAnimationState(),
+				CurrentMovement = controlHand.GetCurrentMovementName(),
+			};
+			state.AvailableMovements.AddRange(controlHand.GetAvailableMovements());
+			return state;
+		});
 }

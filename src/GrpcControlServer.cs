@@ -48,14 +48,10 @@ public partial class GrpcControlServer : Node
             builder.Services.AddSingleton(this);
 
             app = builder.Build();
-            // Two services, both v2. The legacy VhiControl service is gone: a client
-            // that still speaks it now gets UNIMPLEMENTED, which is exactly the signal
-            // v2's Declare handshake was built to interpret.
-            app.MapGrpcService<VhiCanonicalControlService>();
-            // The recording aid is its own service rather than extra RPCs on the
-            // canonical one, so that "this is not a control plane" is structural
-            // instead of a comment someone can ignore.
-            app.MapGrpcService<VhiTrainingAidService>();
+            // One service. A client that still speaks the legacy VhiControl RPC set
+            // now gets UNIMPLEMENTED, which is exactly the signal the Declare
+            // handshake was built to interpret.
+            app.MapGrpcService<VhiControlService>();
             app.StartAsync().Wait(5000);
 
             GD.Print($"✅ gRPC control server listening on 127.0.0.1:{GrpcPort}");
