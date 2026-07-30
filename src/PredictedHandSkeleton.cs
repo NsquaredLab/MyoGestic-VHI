@@ -102,6 +102,7 @@ public partial class PredictedHandSkeleton : Node3D
 		// Set up joint movement limits
 		InitializeJointMovements();
 
+
 		lastInputTime = DateTime.Now;
 		GD.Print("=== Predicted Hand Skeleton Controller _Ready() COMPLETE ===");
 	}
@@ -147,8 +148,19 @@ public partial class PredictedHandSkeleton : Node3D
 		}
 	}
 
+	/// <summary>Rendered degrees → the canonical value that would produce them.</summary>
+	/// <remarks>The inverse of <see cref="CanonicalPose.ToRig(int, float)"/> for in-range
+	/// values, which is what makes the VHI_Predict read-back comparable with what was sent:
+	/// a round-trip through this renderer is the identity, not a sign flip.</remarks>
+	private static float ToCanonical(int channel, float degrees, float gain) =>
+		gain == 0f ? 0f : degrees / gain * CanonicalPose.Sign[channel];
+
 	private void InitializeJointMovements()
 	{
+		// Wrist — joint 0 turns every digit with it. X is flexion, Z abduction; see
+		// CanonicalPose.Wrist for where the two numbers come from and which one is a choice.
+		jointMovements[0] = CanonicalPose.Wrist;
+
 		// Thumb
 		jointMovements[1] = [-45, 0, 30];
 		jointMovements[2] = [-55, 0, -35];
@@ -182,16 +194,11 @@ public partial class PredictedHandSkeleton : Node3D
 			currentData = communicationController.GetReceivedDataPredicted();
 
 			// The inlet carries CANONICAL values: +1 means the direction the DOF name
-			// denotes. This hand's gains are negative, so a canonical value is negated
-			// once here, on ingest, and everything downstream keeps working in the rig's
-			// own units — including the VHI_Predict read-back, which stays in those units
-			// so sessions recorded before this switch remain readable by the same decoder.
-			//
-			// This is the removal-stage switch announced by
-			// DeclareReply.continuous_encoding == CANONICAL. A client still sending the old
-			// convention renders inverted, which is why it is gated behind the handshake.
-			for (int i = 0; i < currentData.Count; i++)
-				currentData[i] = -currentData[i];
+			// denotes. Convert them to this rig's multipliers the same way every other
+			// entry point does — see ToRig. Unconditionally: the conversion is not gated
+			// behind the Declare handshake, because it must not be possible to render a
+			// canonical +1 in two different directions depending on what a client said.
+			CanonicalPose.ToRig(currentData);
 
 			if (currentData.Count >= 9 && skeleton != null && boneMap.Count > 0)
 			{
@@ -226,6 +233,8 @@ public partial class PredictedHandSkeleton : Node3D
 	private void MoveBonesDirectly()
 	{
 		// Thumb (indices 0 and 1: flexion and abduction)
+		SetBoneRotation(0, currentData[6] * jointMovements[0][0], currentData[8] * jointMovements[0][1], currentData[7] * jointMovements[0][2]);
+
 		SetBoneRotation(1, currentData[0] * jointMovements[1][0], 0, currentData[1] * jointMovements[1][2]);
 		SetBoneRotation(2, currentData[0] * jointMovements[2][0], 0, currentData[1] * jointMovements[2][2]);
 		SetBoneRotation(3, currentData[0] * jointMovements[3][0], 0, currentData[1] * jointMovements[3][2]);
@@ -256,6 +265,8 @@ public partial class PredictedHandSkeleton : Node3D
 		float lerpFactor = (float)(SmoothingSpeed * delta);
 
 		// Thumb
+		SmoothBoneRotation(0, currentData[6] * jointMovements[0][0], currentData[8] * jointMovements[0][1], currentData[7] * jointMovements[0][2], lerpFactor);
+
 		SmoothBoneRotation(1, currentData[0] * jointMovements[1][0], 0, currentData[1] * jointMovements[1][2], lerpFactor);
 		SmoothBoneRotation(2, currentData[0] * jointMovements[2][0], 0, currentData[1] * jointMovements[2][2], lerpFactor);
 		SmoothBoneRotation(3, currentData[0] * jointMovements[3][0], 0, currentData[1] * jointMovements[3][2], lerpFactor);
@@ -330,33 +341,23 @@ public partial class PredictedHandSkeleton : Node3D
 
 		List<float> outputData = [];
 
-		// Thumb Flexion
+		// Canonical, not rig units: dividing by the gain recovers the multiplier, and the
+		// channel's sign turns that back into the value a client would have had to send to
+		// produce this pose. So VHI_Predict speaks the same language as the inlet, and a
+		// round-trip through the renderer is the identity rather than a sign flip.
 		var thumb2Rot = GetBoneRotationDegrees(1);
-		outputData.Add(thumb2Rot.X / jointMovements[1][0]);
+		outputData.Add(ToCanonical(0, thumb2Rot.X, jointMovements[1][0])); // Thumb Flexion
+		outputData.Add(ToCanonical(1, thumb2Rot.Z, jointMovements[1][2])); // Thumb Abduction
+		outputData.Add(ToCanonical(2, GetBoneRotationDegrees(4).X, jointMovements[4][0]));
+		outputData.Add(ToCanonical(3, GetBoneRotationDegrees(7).X, jointMovements[7][0]));
+		outputData.Add(ToCanonical(4, GetBoneRotationDegrees(10).X, jointMovements[10][0]));
+		outputData.Add(ToCanonical(5, GetBoneRotationDegrees(13).X, jointMovements[13][0]));
 
-		// Thumb Abduction
-		outputData.Add(thumb2Rot.Z / jointMovements[1][2]);
-
-		// Index Flexion
-		var index2Rot = GetBoneRotationDegrees(4);
-		outputData.Add(index2Rot.X / jointMovements[4][0]);
-
-		// Middle Flexion
-		var middle2Rot = GetBoneRotationDegrees(7);
-		outputData.Add(middle2Rot.X / jointMovements[7][0]);
-
-		// Ring Flexion
-		var ring2Rot = GetBoneRotationDegrees(10);
-		outputData.Add(ring2Rot.X / jointMovements[10][0]);
-
-		// Pinky Flexion
-		var pinky2Rot = GetBoneRotationDegrees(13);
-		outputData.Add(pinky2Rot.X / jointMovements[13][0]);
-
-		// Wrist (not used, but needed for compatibility)
-		outputData.Add(0); // Wrist Flexion
-		outputData.Add(0); // Wrist Abduction
-		outputData.Add(0); // Wrist Rotation
+		// Wrist: all three axes of bone 0, which parents every digit.
+		var wristRot = GetBoneRotationDegrees(0);
+		outputData.Add(ToCanonical(6, wristRot.X, jointMovements[0][0]));
+		outputData.Add(ToCanonical(7, wristRot.Z, jointMovements[0][2]));
+		outputData.Add(ToCanonical(8, wristRot.Y, jointMovements[0][1]));
 
 		communicationController.SendPredictedData(outputData);
 	}
@@ -392,7 +393,7 @@ public partial class PredictedHandSkeleton : Node3D
 	// The v2 service addresses DOFs by name and needs three things this class did not
 	// expose: set ONE channel without disturbing the rest of the pose, read a joint's
 	// signed rotation back, and know which joints a channel drives. All three are
-	// deliberately thin — the name/channel mapping stays in VhiCanonicalControlService,
+	// deliberately thin — the name/channel mapping stays in VhiControlService,
 	// because a skeleton should not know the wire vocabulary.
 
 	/// <summary>Which joints each legacy channel drives, mirroring
@@ -405,6 +406,10 @@ public partial class PredictedHandSkeleton : Node3D
 		[3] = [7, 8, 9],
 		[4] = [10, 11, 12],
 		[5] = [13, 14, 15],
+		// The wrist drives one joint on two axes, the way the thumb's two channels do.
+		[6] = [0],
+		[7] = [0],
+		[8] = [0],
 	};
 
 	/// <summary>The joints a legacy channel drives, or an empty array for a dead one.</summary>
@@ -462,7 +467,7 @@ public partial class PredictedHandSkeleton : Node3D
 			return;
 		while (currentData.Count < 9)
 			currentData.Add(0f);
-		currentData[channel] = -canonical;
+		currentData[channel] = CanonicalPose.ToRig(channel, canonical);
 		MoveBonesDirectly();
 	}
 

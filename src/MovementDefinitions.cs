@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Vhi;
@@ -355,5 +356,79 @@ public static class MovementPoses
 
 		// Extended hand (all fingers extended)
 		// Already at rest position, no changes needed
+	}
+}
+
+/// <summary>
+/// Canonical values (<c>+1</c> is the direction a DOF's name denotes) to this rig's pose
+/// multipliers, and back.
+/// </summary>
+/// <remarks>
+/// <para>Both hands multiply a 9-channel pose by <see cref="MovementPoses"/>'s
+/// <see cref="Movements.Fist"/> row — the fully-closed hand. So a multiplier of <c>+1</c>
+/// puts a digit at max flexion: bone 7 at <c>-85°</c>, where
+/// <see cref="Movements.IndexExtension"/> puts it at <c>+20°</c>. Negative degrees are
+/// flexion, and the negative gain is what produces them, so the five flexion channels take
+/// <c>+1</c>.</para>
+/// <para>Channel 1 is the exception. It is <i>abduction</i>, and the fist's thumb Z is
+/// <i>adduction</i> — <c>+30</c> on bone 1, <c>-35</c> on bone 2, and no movement in the
+/// library ever goes the other way — so a canonical <c>+1</c> abduction is the negative of
+/// the tabulated pose.</para>
+/// <para>This lives here, beside the pose library that justifies it, because both hands
+/// previously carried their own copy of the opposite rule: a blanket negation of every
+/// channel, which read the negative gains as "the rig is inverted". That rendered all five
+/// flexion DOFs backwards on both hands and got abduction right by accident.</para>
+/// </remarks>
+public static class CanonicalPose
+{
+	/// <summary>Sign that turns a canonical value into a rig multiplier, per pose channel.</summary>
+	/// <remarks>
+	/// Channels 6, 7 and 8 are the wrist, and all three are <c>+1</c> because
+	/// <see cref="Wrist"/> is written as the canonical <c>+1</c> pose directly rather than as
+	/// a named posture that happens to point the other way.
+	/// </remarks>
+	public static readonly float[] Sign = [1, -1, 1, 1, 1, 1, 1, 1, 1];
+
+	/// <summary>Joint 0's rotation at canonical <c>+1</c>, in degrees: (X, Y, Z).</summary>
+	/// <remarks>
+	/// <para>The wrist. Joint 0 is <c>WaveBone_1</c>, the common ancestor of all five digit
+	/// chains, so rotating it turns the whole hand — which is what a wrist does.</para>
+	/// <para><b>X = -30 is derived.</b> <see cref="Movements.WristUpDown"/> defines joint 0's X
+	/// extremes as <c>±30</c>, and negative X is flexion throughout this rig (see
+	/// <see cref="Movements.Fist"/> against <see cref="Movements.IndexExtension"/>), so
+	/// canonical <c>+1</c> flexion is <c>-30°</c>.</para>
+	/// <para><b>Z = -20 is a choice, not a derivation.</b>
+	/// <see cref="Movements.WristLeftRight"/> defines joint 0's Z extremes as <c>±20</c> but
+	/// names neither side: "left/right" says which axis, not which is abduction. Nothing else
+	/// in the library, the rig or the docs settles it. So <c>-20</c> is taken by analogy with
+	/// flexion — the negative half is the direction the name denotes — and it is the one value
+	/// here that should be confirmed by looking at the hand rather than by reading. If it is
+	/// backwards, flip this sign; nothing else needs to change.</para>
+	/// <para><b>Y = -90 is a choice with no rig-side evidence at all.</b> Rotation is
+	/// pronation/supination, and no movement in the library touches joint 0's Y axis, so
+	/// unlike X (magnitude and sign derived) and Z (magnitude derived, sign chosen) this one
+	/// is picked outright: <c>180°</c> each way, and negative
+	/// so that canonical <c>+1</c> is pronation, palm turning down. There is no forearm to
+	/// carry the motion, so what twists is the hand about its own long axis.</para>
+	/// <para>It is here because it was asked for, and it is the value most worth tuning: change
+	/// this number and the range changes; flip its sign and <c>+1</c> becomes supination.</para>
+	/// </remarks>
+	public static readonly float[] Wrist = [-30f, -179f, -20f];
+
+	/// <summary>Canonical value → rig multiplier for one pose channel.</summary>
+	/// <remarks>Clamped to the canonical domain: the multiplier scales a rest-to-pose gain,
+	/// and past <c>±90°</c> the Euler round-trip used to read a bone back wraps and changes
+	/// sign. The gRPC path always clamped; the LSL path did not, which made an over-range
+	/// sample the one remaining way to flip a direction.</remarks>
+	public static float ToRig(int channel, float canonical) =>
+		channel < 0 || channel >= Sign.Length
+			? 0f
+			: Math.Clamp(canonical, -1f, 1f) * Sign[channel];
+
+	/// <summary>Rig multipliers → canonical values, in place, for as many as are present.</summary>
+	public static void ToRig(List<float> pose)
+	{
+		for (int i = 0; i < pose.Count && i < Sign.Length; i++)
+			pose[i] = ToRig(i, pose[i]);
 	}
 }

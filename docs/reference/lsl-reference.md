@@ -69,12 +69,27 @@ channel 0 as thumb *rotation* and channels 6-8 as a wrist, and neither was true.
 | 3 | `MiddleFlexion` | bones 7, 8, 9 |
 | 4 | `RingFlexion` | bones 10, 11, 12 |
 | 5 | `PinkyFlexion` | bones 13, 14, 15 |
-| 6-8 | `WristFlexion`, `WristAbduction`, `WristRotation` | **Read by no consumer.** Always `0`. |
+| 6 | `WristFlexion` | bone 0, X axis |
+| 7 | `WristAbduction` | bone 0, Z axis |
+| 8 | `WristRotation` | bone 0, Y axis - pronation/supination, `±179°` |
 
-!!! danger "Channels 6-8 are dead, not merely idle"
-    They are labelled for wire-compatibility only. Nothing in VHI reads them, and no
-    setting animates them — they are `0` in every reference recording because they can
-    only ever be `0`. There is no wrist on this rig.
+!!! info "All nine channels render"
+    The wrist is bone 0, the common ancestor of all five digit chains, so turning it turns
+    the whole hand. All three of its axes are driven.
+
+    They are `0` in every *reference recording* because nothing wrote them then, which is
+    not the same as being unrenderable — do not read the corpus as evidence about the rig.
+
+!!! warning "Rotation is `±179°`, and the missing degree is deliberate"
+    `GetEuler` returns angles in `(-180°, +180°]`, so `-180` and `+180` are the same
+    orientation and the decode picks the positive one. At exactly `±180` the *pose* is
+    correct and the **read-back inverts**: a commanded `+1` comes back as `-1` on
+    `VHI_Predict` channel 8. One degree short removes the wrap entirely and the round-trip
+    is exact at every value.
+
+    There is no forearm to carry the motion, so what turns is the hand about its own long
+    axis. Unlike flexion and abduction, both the range and the sign of this axis are
+    **chosen** — no movement in the library touches joint 0's Y. See `Vhi.CanonicalPose`.
 
     They are also absent from `DeclareReply.continuous_channel_order`: v2 will not name
     a channel it does not read, because naming a dead channel is how the wrong maps
@@ -148,4 +163,8 @@ outlet.push_sample([0.0] * 9)   # all-rest; VHI's predicted hand follows it
 
 Zeros are rest under either convention, which is why the example uses them. A non-zero
 frame is **canonical** on this stream as of 2.0 — `[1.0, 0, 0, 0, 0, 0, 0, 0, 0]` flexes
-the thumb. Producers that predate 2.0 sent the negation of that.
+the thumb, and `-1.0` extends it. What "flexes" means is not a matter of taste here: the
+gain table the renderer multiplies by is `MovementPoses[Fist]`, the fully-closed hand, so
+a `+1` multiplier reproduces that pose exactly. `Vhi.CanonicalPose` is the one place that
+rule lives, and `tests/test_v2_contract.py` checks the rendered degrees against the
+movement library rather than against a table of its own.

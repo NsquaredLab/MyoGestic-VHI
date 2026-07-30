@@ -101,6 +101,7 @@ nav:
       - Build and export: how-to/build-and-export.md
   - Reference:
       - reference/index.md
+      - Every signal in and out: reference/signals.md
       - gRPC API: reference/grpc-api.md
       - LSL streams: reference/lsl-reference.md
       - Configuration: reference/configuration.md

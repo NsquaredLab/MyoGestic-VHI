@@ -66,10 +66,14 @@ switched off with the `EnableOutlets` flag.
 
 ## The channel layout
 
-Every VHI pose vector — in or out — is 9 `float32` channels, of which **six are read**:
-thumb flexion, thumb abduction, and one flexion channel per finger. Channels 6-8 are
-labelled as a wrist for wire-compatibility but are read by no consumer and are always
-`0`; there is no wrist on this rig.
+Every VHI pose vector — in or out — is 9 `float32` channels, and **all nine are read**:
+thumb flexion and abduction, one flexion channel per finger, then wrist flexion, abduction
+and rotation. The wrist is bone 0, the common ancestor of all five digit chains, so it
+turns the whole hand.
+
+A stream does not have to be nine wide, either. A producer that labels its channels with
+control addresses may send however many it drives, in any order, and VHI places them by
+name; see [the inbound streams](#inlets-consumed-by-vhi).
 
 Values are normalised against per-joint maximum-flexion limits, and VHI expands the six
 DOFs across the 16 animated joints internally (see [Architecture](architecture.md)).
@@ -86,10 +90,12 @@ DOFs across the 16 animated joints internally (see [Architecture](architecture.m
     now one copy.
 
     The convention also differs *per stream* as of 2.0: `MyoGestic_Output` takes canonical
-    values (`+1` flexes), VHI's outlets stay in renderer units (`-1` flexes), and
-    `MyoGestic_ControlPose` is whichever the client negotiated — renderer units by
-    default. Anything that hard-codes a sign is right on one stream and inverted on
-    another; call `Declare` and honour what it reports.
+    values (`+1` flexes) and `VHI_Predict` publishes them, so a round-trip through the
+    predicted hand is the identity. `VHI_Control` stays in raw rig units, deliberately —
+    every session recorded before 2.0 is in those units and stays readable by the same
+    decoder. `MyoGestic_ControlPose` is whichever the client negotiated, rig units by
+    default. Anything that hard-codes a sign is right on one stream and wrong on another;
+    call `Declare` and honour what it reports.
 
 See the [LSL reference](../reference/lsl-reference.md) for stream types,
 source IDs and exact metadata.

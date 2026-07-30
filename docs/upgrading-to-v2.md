@@ -44,8 +44,9 @@ against.
 ### The continuous stream is now canonical
 
 `MyoGestic_Output` carries **canonical** values: `+1` means the direction the DOF name
-denotes, so `+1` on index flexion *flexes*. v1 wanted the renderer's own convention,
-where flexion was negative.
+denotes, so `+1` on index flexion *flexes*. v1 took raw rig units — the pose multipliers
+the renderer applies to its per-bone gains — and named no channel, so what a value meant
+was a matter of matching tables.
 
 `DeclareReply.continuous_encoding` reports which convention is in force, and it is not
 optional: a client that reads `ENCODING_UNSPECIFIED` must fall back rather than guess.
@@ -53,10 +54,15 @@ That field exists because the first end-to-end v2 build got this wrong — the h
 agreed on channel *names* while the decoder still expected the old units, and the hand
 extended when it was told to flex.
 
-!!! info "VHI's own outlets did **not** change"
-    `VHI_Control` and `VHI_Predict` still publish in the renderer's units. That is
-    deliberate: every session recorded before this release stays readable by the same
-    decoder. Only the stream VHI *reads* changed convention.
+!!! info "`VHI_Control` did **not** change; `VHI_Predict` did"
+    `VHI_Control` still publishes raw rig units. That is deliberate and load-bearing:
+    every session recorded before this release is in those units, cannot be re-recorded,
+    and stays readable by the same decoder.
+
+    `VHI_Predict` publishes **canonical** values, so pushing `+1` on
+    `MyoGestic_Output` and reading `VHI_Predict` gives `+1` back — the renderer is the
+    identity rather than a sign flip. Nothing archived depends on that stream, which is
+    what makes the change safe to make.
 
     Nor did the optional `MyoGestic_ControlPose` inlet change. Its convention is
     **negotiated** instead — `DeclareRequest.control_pose_encoding`, defaulting to the

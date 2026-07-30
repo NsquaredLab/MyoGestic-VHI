@@ -78,6 +78,41 @@ public partial class LSLCommunicationController : Node
 	private float[] sampleBuffer;
 	private float[] controlPoseBuffer;
 
+	/// <summary>Wire index -> this renderer's pose channel, or <see langword="null"/>.</summary>
+	/// <remarks>
+	/// <para>Built from the producer's channel labels when it publishes any: each label is a
+	/// control address, and <see cref="VhiControlService.ChannelForAddress"/> says
+	/// where that address lives in the pose. A labelled stream may therefore be any width and
+	/// in any order — two channels carrying index and middle is a complete stream, not a
+	/// truncated nine.</para>
+	/// <para><see langword="null"/> means the producer labelled nothing, which is every
+	/// producer written before labels existed. Then the wire *is* the pose order, read
+	/// positionally exactly as before.</para>
+	/// </remarks>
+	private int[] predictionRouting;
+	private int[] controlPoseRouting;
+
+	/// <summary>When the prediction inlet last delivered a sample.</summary>
+	/// <remarks>
+	/// The only reliable way this renderer learns a producer is gone. liblsl does not say:
+	/// with recovery on it hides the loss, and with recovery off a zero-timeout pull on a
+	/// dead stream still just returns "no samples" rather than raising. Either way the inlet
+	/// looks alive forever, which left the by-name search below unreachable and the hand
+	/// frozen on its last pose.
+	/// </remarks>
+	private DateTime lastPredictionSample = DateTime.Now;
+
+	/// <summary>Silence after which the prediction inlet is assumed dead and dropped.</summary>
+	/// <remarks>
+	/// Generous on purpose. A `ControlBus` outlet sends at its own rate whether or not the
+	/// values changed, so real silence means the producer went away — but a script that
+	/// pushes a frame and then sleeps is also legitimate, and dropping its inlet only costs
+	/// a re-resolve. Long enough not to punish that; short enough that replacing an outlet
+	/// (which the control-map editor does on every save) reconnects while you are still
+	/// looking at the hand.
+	/// </remarks>
+	[Export] public float PredictionStaleAfterSeconds = 5.0f;
+
 	public new bool IsConnected { get; private set; } = false;  // 'new' to hide base class member
 	public int LastInputFPS { get; private set; } = 0;
 	public int LastOutputFPS { get; private set; } = 0;
@@ -102,7 +137,9 @@ public partial class LSLCommunicationController : Node
 		GD.Print("  Initializing LSL wrapper...");
 		LSLWrapper.Initialize();
 
-		// Initialize sample buffers
+		// Sized for an unlabelled producer, which sends this renderer's full pose layout.
+		// A labelled one may be narrower, and each buffer is resized to its stream when the
+		// inlet resolves — liblsl requires the buffer to match the stream's channel count.
 		sampleBuffer = new float[ExpectedChannels];
 		controlPoseBuffer = new float[ExpectedChannels];
 		GD.Print("  Sample buffers initialized");
@@ -167,12 +204,13 @@ public partial class LSLCommunicationController : Node
 				int samplesThisFrame = 0;
 				while (LSLWrapper.PullSample(predictionInlet, sampleBuffer, 0.0) > 0)
 				{
-					receivedDataPredicted = [.. sampleBuffer];
+					receivedDataPredicted = ToPoseFrame(sampleBuffer, predictionRouting);
 					samplesThisFrame++;
 				}
 
 				if (samplesThisFrame > 0)
 				{
+					lastPredictionSample = DateTime.Now;
 					inputFrameCount += samplesThisFrame;
 					var timeSinceLastInput = (DateTime.Now - lastInputTime).TotalSeconds;
 					if (timeSinceLastInput >= 1.0)
@@ -187,9 +225,28 @@ public partial class LSLCommunicationController : Node
 			{
 				GD.PrintErr($"Error pulling LSL prediction sample: {e.Message}");
 				predictionInlet = null;
+				predictionRouting = null;
 				IsConnected = false;
 				receivedDataPredicted.Clear();
 			}
+		}
+
+		// --- Drop a prediction inlet that has gone quiet, so it can be re-resolved ---
+		if (predictionInlet != null && !isShuttingDown
+			&& (DateTime.Now - lastPredictionSample).TotalSeconds >= PredictionStaleAfterSeconds)
+		{
+			GD.Print(
+				$"⏱️ No {PredictionStreamName} samples for "
+				+ $"{PredictionStaleAfterSeconds:F0}s — dropping the inlet and looking again.");
+			lock (connectionLock)
+			{
+				predictionInlet = null;
+				predictionRouting = null;
+				IsConnected = false;
+			}
+			receivedDataPredicted.Clear();
+			// Reset the clock, or the next inlet is judged on this one's silence.
+			lastPredictionSample = DateTime.Now;
 		}
 
 		// --- Pull: control-pose inlet -> receivedDataControl (latest sample only) ---
@@ -198,12 +255,13 @@ public partial class LSLCommunicationController : Node
 			try
 			{
 				while (LSLWrapper.PullSample(controlPoseInlet, controlPoseBuffer, 0.0) > 0)
-					receivedDataControl = [.. controlPoseBuffer];
+					receivedDataControl = ToPoseFrame(controlPoseBuffer, controlPoseRouting);
 			}
 			catch (Exception e)
 			{
 				GD.PrintErr($"Error pulling LSL control-pose sample: {e.Message}");
 				controlPoseInlet = null;
+				controlPoseRouting = null;
 				receivedDataControl.Clear();
 			}
 		}
@@ -220,8 +278,61 @@ public partial class LSLCommunicationController : Node
 
 	// Resolves an LSL stream by name on the calling (background) thread.
 	// Returns the created inlet, or null if not found / shutting down / on error.
-	private object TryResolveInlet(string streamName)
+	/// <summary>Channel labels -> wire-index-to-pose-channel routing, or null.</summary>
+	/// <remarks>
+	/// Returns <see langword="null"/> — meaning "read positionally" — when the producer
+	/// labelled nothing, and also when it labelled channels this renderer does not recognise
+	/// as addresses. The second case matters: labels are a general LSL feature and a producer
+	/// may name its channels for a human ("IndexFlexion") without meaning them as addresses.
+	/// Routing on a partial match would silently drop the channels that did not resolve, so a
+	/// set of labels is taken as a routing table only if <b>every</b> one of them is an
+	/// address this renderer renders.
+	/// </remarks>
+	private int[] BuildRouting(string[] labels, bool controlPose, string streamName)
 	{
+		if (labels == null || labels.Length == 0)
+			return null;
+
+		var routing = new int[labels.Length];
+		for (int i = 0; i < labels.Length; i++)
+		{
+			routing[i] = VhiControlService.ChannelForAddress(labels[i], controlPose);
+			if (routing[i] < 0)
+			{
+				CallDeferred(nameof(LogMessage),
+					$"ℹ️ {streamName} labels channel {i} '{labels[i]}', which is not an address "
+					+ "this hand renders — reading the stream positionally instead.");
+				return null;
+			}
+		}
+		return routing;
+	}
+
+	/// <summary>One wire sample as a full pose frame in this renderer's channel order.</summary>
+	/// <remarks>
+	/// With a routing table the frame is always the renderer's full width, so everything
+	/// downstream keeps indexing the pose by channel and none of it has to know the wire was
+	/// narrower or differently ordered. Channels the producer does not send stay at rest.
+	/// </remarks>
+	private List<float> ToPoseFrame(float[] wire, int[] routing)
+	{
+		if (routing == null)
+			return [.. wire];
+
+		var pose = new List<float>(ExpectedChannels);
+		for (int i = 0; i < ExpectedChannels; i++)
+			pose.Add(0f);
+		for (int i = 0; i < routing.Length && i < wire.Length; i++)
+			if (routing[i] >= 0 && routing[i] < ExpectedChannels)
+				pose[routing[i]] = wire[i];
+		return pose;
+	}
+
+	private object TryResolveInlet(
+		string streamName, bool controlPose, out int[] routing, out int width)
+	{
+		routing = null;
+		width = ExpectedChannels;
 		try
 		{
 			if (isShuttingDown)
@@ -235,9 +346,32 @@ public partial class LSLCommunicationController : Node
 			if (isShuttingDown || streams == null || streams.Length == 0)
 				return null;
 
-			var inlet = LSLWrapper.CreateStreamInlet(streams[0]);
+			// recover: false is load-bearing. With liblsl's recovery on, a producer that
+			// goes away is hidden — the inlet keeps "working", silently delivering nothing,
+			// and the catch below that nulls it and lets the by-name search run again never
+			// fires. Worse, recovery matches on source_id, so it cannot reattach when the
+			// replacement stream has a different channel count: a client that rebuilds its
+			// outlet with a different set of controls (which the control-map editor does on
+			// every save) left this inlet dead for the life of the process.
+			//
+			// Off, a lost producer raises, the inlet is dropped, and the resolve-by-name
+			// loop picks up whatever is publishing that name now. That is the recovery this
+			// renderer actually wants, and it is the one it already had code for.
+			var inlet = LSLWrapper.CreateStreamInlet(streams[0], recover: false);
 			int channelCount = LSLWrapper.GetStreamInfoChannelCount(streams[0]);
-			CallDeferred(nameof(LogMessage), $"✅ Connected to LSL inlet: {streamName} ({channelCount} channels)");
+			width = channelCount > 0 ? channelCount : ExpectedChannels;
+
+			// The resolved StreamInfo carries only the header, so the labels have to be
+			// fetched from the sender. A producer that publishes none is the normal case.
+			routing = BuildRouting(
+				LSLWrapper.GetChannelLabels(LSLWrapper.GetInletStreamInfo(inlet)),
+				controlPose,
+				streamName);
+			string layout = routing == null
+				? "positional"
+				: $"labelled -> pose channels [{string.Join(", ", routing)}]";
+			CallDeferred(nameof(LogMessage),
+				$"✅ Connected to LSL inlet: {streamName} ({channelCount} channels, {layout})");
 			return inlet;
 		}
 		catch (Exception e)
@@ -249,10 +383,16 @@ public partial class LSLCommunicationController : Node
 
 	private void ConnectToInletAsync()
 	{
-		var inlet = TryResolveInlet(PredictionStreamName);
+		var inlet = TryResolveInlet(
+			PredictionStreamName, controlPose: false, out int[] routing, out int width);
 		lock (connectionLock)
 		{
 			predictionInlet = inlet;
+			predictionRouting = inlet != null ? routing : null;
+			if (inlet != null)
+				lastPredictionSample = DateTime.Now;
+			if (inlet != null && sampleBuffer.Length != width)
+				sampleBuffer = new float[width];
 			IsConnected = inlet != null;
 			isConnecting = false;
 		}
@@ -262,10 +402,14 @@ public partial class LSLCommunicationController : Node
 
 	private void ConnectControlPoseInletAsync()
 	{
-		var inlet = TryResolveInlet(ControlPoseStreamName);
+		var inlet = TryResolveInlet(
+			ControlPoseStreamName, controlPose: true, out int[] routing, out int width);
 		lock (connectionLock)
 		{
 			controlPoseInlet = inlet;
+			controlPoseRouting = inlet != null ? routing : null;
+			if (inlet != null && controlPoseBuffer.Length != width)
+				controlPoseBuffer = new float[width];
 			isConnectingControlPose = false;
 		}
 		if (inlet == null)

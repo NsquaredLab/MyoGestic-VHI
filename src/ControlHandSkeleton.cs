@@ -231,6 +231,9 @@ public partial class ControlHandSkeleton : Node3D
 		}
 
 		// Thumb (joints 1-3)
+		// Wrist — joint 0 turns every digit with it. See CanonicalPose.Wrist.
+		jointMaximumMovement[0][0] = CanonicalPose.Wrist;
+
 		jointMaximumMovement[1][0] = [-45, 0, 30];
 		jointMaximumMovement[2][0] = [-55, 0, -35];
 		jointMaximumMovement[3][0] = [-80, 0, 0];
@@ -274,16 +277,18 @@ public partial class ControlHandSkeleton : Node3D
 				if (communicationController != null)
 				{
 					currentData = communicationController.GetReceivedDataControl();
-					// Canonical values mean +1 is the direction the channel's name denotes,
-					// and this rig's gains are negative — so negate once on ingest and
-					// everything downstream keeps working in the rig's own units, including
-					// the VHI_Control read-back. Off unless a client negotiated it, which is
-					// what keeps existing renderer-unit producers working untouched.
+					// Canonical values mean +1 is the direction the channel's name denotes.
+					// Converting them is CanonicalPose's job, so both hands agree on what
+					// +1 does — this used to be a local blanket negation, which made a
+					// canonical +1 extend the digit instead of flexing it. Off unless a
+					// client negotiated it, which is what keeps existing renderer-unit
+					// producers working untouched.
+					//
+					// The VHI_Control read-back below is deliberately left in the rig's own
+					// units: the archived reference sessions are permanently in them and
+					// their reader (MyoGestic's `vhi.legacy.decode_pose`) is pinned to that.
 					if (ControlPoseCanonical)
-					{
-						for (int i = 0; i < currentData.Count; i++)
-							currentData[i] = -currentData[i];
-					}
+						CanonicalPose.ToRig(currentData);
 					if (currentData.Count >= 9 && skeleton != null)
 						MoveBonesFromStream();
 				}
@@ -305,32 +310,34 @@ public partial class ControlHandSkeleton : Node3D
 		if (skeleton == null || boneMap.Count == 0)
 			return;
 
-		int shift = 0;
+
+		// Wrist (indices 6, 7, 8: flexion, abduction, rotation)
+		SetBoneRotation(0, currentData[6] * jointMaximumMovement[0][0][0], currentData[8] * jointMaximumMovement[0][0][1], currentData[7] * jointMaximumMovement[0][0][2]);
 
 		// Thumb (uses indices 0 and 1: flexion and abduction)
-		SetBoneRotation(1, currentData[0 + shift] * jointMaximumMovement[1][0][0], 0, currentData[1 + shift] * jointMaximumMovement[1][0][2]);
-		SetBoneRotation(2, currentData[0 + shift] * jointMaximumMovement[2][0][0], 0, currentData[1 + shift] * jointMaximumMovement[2][0][2]);
-		SetBoneRotation(3, currentData[0 + shift] * jointMaximumMovement[3][0][0], 0, currentData[1 + shift] * jointMaximumMovement[3][0][2]);
+		SetBoneRotation(1, currentData[0] * jointMaximumMovement[1][0][0], 0, currentData[1] * jointMaximumMovement[1][0][2]);
+		SetBoneRotation(2, currentData[0] * jointMaximumMovement[2][0][0], 0, currentData[1] * jointMaximumMovement[2][0][2]);
+		SetBoneRotation(3, currentData[0] * jointMaximumMovement[3][0][0], 0, currentData[1] * jointMaximumMovement[3][0][2]);
 
 		// Index (uses index 2)
-		SetBoneRotation(4, currentData[2 + shift] * jointMaximumMovement[4][0][0], 0, 0);
-		SetBoneRotation(5, currentData[2 + shift] * jointMaximumMovement[5][0][0], 0, 0);
-		SetBoneRotation(6, currentData[2 + shift] * jointMaximumMovement[6][0][0], 0, 0);
+		SetBoneRotation(4, currentData[2] * jointMaximumMovement[4][0][0], 0, 0);
+		SetBoneRotation(5, currentData[2] * jointMaximumMovement[5][0][0], 0, 0);
+		SetBoneRotation(6, currentData[2] * jointMaximumMovement[6][0][0], 0, 0);
 
 		// Middle (uses index 3)
-		SetBoneRotation(7, currentData[3 + shift] * jointMaximumMovement[7][0][0], 0, 0);
-		SetBoneRotation(8, currentData[3 + shift] * jointMaximumMovement[8][0][0], 0, 0);
-		SetBoneRotation(9, currentData[3 + shift] * jointMaximumMovement[9][0][0], 0, 0);
+		SetBoneRotation(7, currentData[3] * jointMaximumMovement[7][0][0], 0, 0);
+		SetBoneRotation(8, currentData[3] * jointMaximumMovement[8][0][0], 0, 0);
+		SetBoneRotation(9, currentData[3] * jointMaximumMovement[9][0][0], 0, 0);
 
 		// Ring (uses index 4)
-		SetBoneRotation(10, currentData[4 + shift] * jointMaximumMovement[10][0][0], 0, 0);
-		SetBoneRotation(11, currentData[4 + shift] * jointMaximumMovement[11][0][0], 0, 0);
-		SetBoneRotation(12, currentData[4 + shift] * jointMaximumMovement[12][0][0], 0, 0);
+		SetBoneRotation(10, currentData[4] * jointMaximumMovement[10][0][0], 0, 0);
+		SetBoneRotation(11, currentData[4] * jointMaximumMovement[11][0][0], 0, 0);
+		SetBoneRotation(12, currentData[4] * jointMaximumMovement[12][0][0], 0, 0);
 
 		// Pinky (uses index 5)
-		SetBoneRotation(13, currentData[5 + shift] * jointMaximumMovement[13][0][0], 0, 0);
-		SetBoneRotation(14, currentData[5 + shift] * jointMaximumMovement[14][0][0], 0, 0);
-		SetBoneRotation(15, currentData[5 + shift] * jointMaximumMovement[15][0][0], 0, 0);
+		SetBoneRotation(13, currentData[5] * jointMaximumMovement[13][0][0], 0, 0);
+		SetBoneRotation(14, currentData[5] * jointMaximumMovement[14][0][0], 0, 0);
+		SetBoneRotation(15, currentData[5] * jointMaximumMovement[15][0][0], 0, 0);
 	}
 
 	private void SetBoneRotation(int jointIndex, float xDeg, float yDeg, float zDeg)
