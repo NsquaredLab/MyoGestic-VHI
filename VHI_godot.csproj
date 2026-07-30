@@ -24,6 +24,6 @@
     <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
-    <Protobuf Include="proto/myogestic_vhi_v2.proto" GrpcServices="Server" />
+    <Protobuf Include="proto/myogestic_vhi.proto" GrpcServices="Server" />
   </ItemGroup>
 </Project>
