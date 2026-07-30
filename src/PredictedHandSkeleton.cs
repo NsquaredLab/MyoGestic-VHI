@@ -397,7 +397,7 @@ public partial class PredictedHandSkeleton : Node3D
 	// because a skeleton should not know the wire vocabulary.
 
 	/// <summary>Which joints each legacy channel drives, mirroring
-	/// <c>MoveBonesDirectly</c>. Channels 6-8 are absent: nothing reads them.</summary>
+	/// <c>MoveBonesDirectly</c>. Channels 6-8 drive the wrist, on joint 0.</summary>
 	private static readonly Dictionary<int, int[]> jointsByChannel = new()
 	{
 		[0] = [1, 2, 3],

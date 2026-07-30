@@ -75,10 +75,10 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// </summary>
 	/// <remarks>
 	/// The channel indices are the legacy nine-float layout, kept because the LSL
-	/// transport still carries that many floats. Channels 6-8 are absent on purpose:
-	/// no consumer in VHI reads them, so no standard name may claim them. A DOF
-	/// missing from this table is reported as not renderable rather than ignored —
-	/// an ignored joint looks exactly like a joint that is working and holding still.
+	/// transport still carries that many floats. Every channel is claimed here: 0-5
+	/// are the five digits and 6-8 are the wrist's three axes. A DOF missing from
+	/// this table is reported as not renderable rather than ignored — an ignored
+	/// joint looks exactly like a joint that is working and holding still.
 	/// </remarks>
 	private static readonly Dictionary<string, (int Channel, int Joint, Axis Axis)> Renderable = new()
 	{
