@@ -225,36 +225,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 		return Renderable.TryGetValue(address, out var slot) ? slot.Channel : -1;
 	}
 
-	/// <summary>Wire index -> pose channel per stream. Null until a client declares.</summary>
-	/// <remarks>
-	/// A narrow stream is renumbered compactly in this renderer's channel order, so the
-	/// declaration already settles the layout and the wire never has to be asked. Asking meant
-	/// calling liblsl's <c>info()</c> — the only thing that starts an <c>info_receiver</c>
-	/// thread, and cancelling one mid-request is what crashed this renderer three times.
-	/// <para>Volatile, not locked: written on the gRPC thread, read on the LSL connect thread.
-	/// A reference assignment is atomic, so a reader sees one declaration or the other.</para>
-	/// </remarks>
-	private static volatile int[] declaredPredictionRouting;
-	private static volatile int[] declaredControlPoseRouting;
-
-	/// <summary>The routing the last accepted declaration implies, or null if none has.</summary>
-	public static int[] DeclaredRouting(bool controlPose) =>
-		controlPose ? declaredControlPoseRouting : declaredPredictionRouting;
-
-	private static void RememberRouting(DeclareRequest request, bool controlPose)
-	{
-		int[] channels = request.Dofs
-			.Where(dof => dof.Kind != Kind.Discrete)
-			.Select(dof => ChannelForAddress(dof.Name, controlPose))
-			.Where(channel => channel >= 0)
-			.OrderBy(channel => channel)
-			.ToArray();
-		if (controlPose)
-			declaredControlPoseRouting = channels.Length > 0 ? channels : null;
-		else
-			declaredPredictionRouting = channels.Length > 0 ? channels : null;
-	}
-
 	/// <summary>Advertised addresses in pose-channel order, for one stream.</summary>
 	/// <remarks>
 	/// <para>Derived from the same tables the manifest is built from, minus
@@ -595,15 +565,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 			}
 
 			reply.Accepted = all && reply.Accepted;
-			if (reply.Accepted)
-			{
-				// Only on acceptance: a refused declaration describes a stream that will
-				// never arrive, and letting it overwrite the routing would misread the one
-				// that is already running.
-				RememberRouting(request, controlPose: false);
-				if (reply.ControlPose)
-					RememberRouting(request, controlPose: true);
-			}
 			GD.Print($"  v2 Declare from {request.ClientName}: accepted={reply.Accepted} "
 				+ $"({request.Dofs.Count} DOFs, standard {request.StandardVersion})");
 			return reply;

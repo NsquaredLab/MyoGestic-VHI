@@ -87,20 +87,6 @@ public partial class LSLCommunicationController : Node
 	private float[] sampleBuffer;
 	private float[] controlPoseBuffer;
 
-	/// <summary>Wire index -> this renderer's pose channel, or <see langword="null"/>.</summary>
-	/// <remarks>
-	/// <para>Built from the producer's channel labels when it publishes any: each label is a
-	/// control address, and <see cref="VhiControlService.ChannelForAddress"/> says
-	/// where that address lives in the pose. A labelled stream may therefore be any width and
-	/// in any order — two channels carrying index and middle is a complete stream, not a
-	/// truncated nine.</para>
-	/// <para><see langword="null"/> means the producer labelled nothing, which is every
-	/// producer written before labels existed. Then the wire *is* the pose order, read
-	/// positionally exactly as before.</para>
-	/// </remarks>
-	private int[] predictionRouting;
-	private int[] controlPoseRouting;
-
 	/// <summary>When the prediction inlet last delivered a sample.</summary>
 	/// <remarks>
 	/// The only reliable way this renderer learns a producer is gone. liblsl does not say:
@@ -213,7 +199,7 @@ public partial class LSLCommunicationController : Node
 				int samplesThisFrame = 0;
 				while (LSLWrapper.PullSample(predictionInlet, sampleBuffer, 0.0) > 0)
 				{
-					receivedDataPredicted = ToPoseFrame(sampleBuffer, predictionRouting);
+					receivedDataPredicted = [.. sampleBuffer];
 					samplesThisFrame++;
 				}
 
@@ -233,7 +219,7 @@ public partial class LSLCommunicationController : Node
 			catch (Exception e)
 			{
 				GD.PrintErr($"Error pulling LSL prediction sample: {e.Message}");
-				DropInlet(ref predictionInlet, ref predictionRouting);
+				DropInlet(ref predictionInlet);
 				IsConnected = false;
 				receivedDataPredicted.Clear();
 			}
@@ -246,7 +232,7 @@ public partial class LSLCommunicationController : Node
 			GD.Print(
 				$"⏱️ No {PredictionStreamName} samples for "
 				+ $"{PredictionStaleAfterSeconds:F0}s — dropping the inlet and looking again.");
-			DropInlet(ref predictionInlet, ref predictionRouting);
+			DropInlet(ref predictionInlet);
 			IsConnected = false;
 			receivedDataPredicted.Clear();
 			// Reset the clock, or the next inlet is judged on this one's silence.
@@ -259,12 +245,12 @@ public partial class LSLCommunicationController : Node
 			try
 			{
 				while (LSLWrapper.PullSample(controlPoseInlet, controlPoseBuffer, 0.0) > 0)
-					receivedDataControl = ToPoseFrame(controlPoseBuffer, controlPoseRouting);
+					receivedDataControl = [.. controlPoseBuffer];
 			}
 			catch (Exception e)
 			{
 				GD.PrintErr($"Error pulling LSL control-pose sample: {e.Message}");
-				DropInlet(ref controlPoseInlet, ref controlPoseRouting);
+				DropInlet(ref controlPoseInlet);
 				receivedDataControl.Clear();
 			}
 		}
@@ -299,14 +285,13 @@ public partial class LSLCommunicationController : Node
 	/// threads, and holding a lock the connect path wants across a network teardown is how
 	/// this renderer used to stall the app it was talking to.</para>
 	/// </remarks>
-	private void DropInlet(ref object inlet, ref int[] routing)
+	private void DropInlet(ref object inlet)
 	{
 		object doomed;
 		lock (connectionLock)
 		{
 			doomed = inlet;
 			inlet = null;
-			routing = null;
 		}
 		if (doomed != null)
 			LSLWrapper.Dispose(doomed);
@@ -314,30 +299,9 @@ public partial class LSLCommunicationController : Node
 
 	// Resolves an LSL stream by name on the calling (background) thread.
 	// Returns the created inlet, or null if not found / shutting down / on error.
-	/// <summary>One wire sample as a full pose frame in this renderer's channel order.</summary>
-	/// <remarks>
-	/// With a routing table the frame is always the renderer's full width, so everything
-	/// downstream keeps indexing the pose by channel and none of it has to know the wire was
-	/// narrower or differently ordered. Channels the producer does not send stay at rest.
-	/// </remarks>
-	private List<float> ToPoseFrame(float[] wire, int[] routing)
-	{
-		if (routing == null)
-			return [.. wire];
-
-		var pose = new List<float>(ExpectedChannels);
-		for (int i = 0; i < ExpectedChannels; i++)
-			pose.Add(0f);
-		for (int i = 0; i < routing.Length && i < wire.Length; i++)
-			if (routing[i] >= 0 && routing[i] < ExpectedChannels)
-				pose[routing[i]] = wire[i];
-		return pose;
-	}
-
 	private object TryResolveInlet(
-		string streamName, bool controlPose, out int[] routing, out int width)
+		string streamName, out int width)
 	{
-		routing = null;
 		width = ExpectedChannels;
 		try
 		{
@@ -366,30 +330,9 @@ public partial class LSLCommunicationController : Node
 			int channelCount = LSLWrapper.GetStreamInfoChannelCount(streams[0]);
 			width = channelCount > 0 ? channelCount : ExpectedChannels;
 
-			// The routing comes from the declaration, not the wire. A client that sends a
-			// narrow frame renumbers it in this renderer's channel order, and it already
-			// named those addresses in Declare — so asking the stream only ever confirmed
-			// what the handshake said. Asking meant liblsl's info(), the only thing that
-			// starts an info_receiver thread; cancelling one mid-request is what crashed
-			// this renderer three times, and it is unfixed in every liblsl release.
-			//
-			// A producer that never declared is read positionally, as an unlabelled one
-			// always was.
-			routing = VhiControlService.DeclaredRouting(controlPose);
-			if (routing != null && routing.Length > width)
-			{
-				CallDeferred(nameof(LogMessage),
-					$"ℹ️ {streamName} declared {routing.Length} channels but carries {width} — "
-					+ "reading it positionally.");
-				routing = null;
-			}
-
 			var inlet = LSLWrapper.CreateStreamInlet(streams[0], recover: false);
-			string layout = routing == null
-				? "positional"
-				: $"labelled -> pose channels [{string.Join(", ", routing)}]";
 			CallDeferred(nameof(LogMessage),
-				$"✅ Connected to LSL inlet: {streamName} ({channelCount} channels, {layout})");
+				$"✅ Connected to LSL inlet: {streamName} ({channelCount} channels)");
 			return inlet;
 		}
 		catch (Exception e)
@@ -402,11 +345,10 @@ public partial class LSLCommunicationController : Node
 	private void ConnectToInletAsync()
 	{
 		var inlet = TryResolveInlet(
-			PredictionStreamName, controlPose: false, out int[] routing, out int width);
+			PredictionStreamName, out int width);
 		lock (connectionLock)
 		{
 			predictionInlet = inlet;
-			predictionRouting = inlet != null ? routing : null;
 			if (inlet != null)
 				lastPredictionSample = DateTime.Now;
 			if (inlet != null && sampleBuffer.Length != width)
@@ -421,11 +363,10 @@ public partial class LSLCommunicationController : Node
 	private void ConnectControlPoseInletAsync()
 	{
 		var inlet = TryResolveInlet(
-			ControlPoseStreamName, controlPose: true, out int[] routing, out int width);
+			ControlPoseStreamName, out int width);
 		lock (connectionLock)
 		{
 			controlPoseInlet = inlet;
-			controlPoseRouting = inlet != null ? routing : null;
 			if (inlet != null && controlPoseBuffer.Length != width)
 				controlPoseBuffer = new float[width];
 			isConnectingControlPose = false;

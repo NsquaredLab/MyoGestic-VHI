@@ -909,33 +909,33 @@ def test_wrist_rotation_pins_a_choice_not_a_derivation(v2):
     assert abs(observed[0].degrees_at_hi) < 180.0
 
 
-# --- narrow streams route by declaration, not by asking the wire -------------------
+# --- a channel is an address ------------------------------------------------------
 
 
-def test_a_narrow_declared_stream_lands_on_the_right_joints(v2, control_inlet):
-    """Declare two fingers, send two channels, and only those two must move.
+def test_a_pose_frame_lands_on_the_channel_the_manifest_names(v2):
+    """Write channel 2 and the index moves. No labels, no routing, no negotiation.
 
-    The routing used to be read back off the stream's channel labels, which meant calling
-    liblsl's `info()` — the only thing that starts an `info_receiver` thread, and cancelling
-    one mid-request is what crashed this renderer three times. It comes from `Declare` now,
-    which already named the addresses. Nothing asserts that mapping but this: send a frame
-    whose two channels mean index and middle, and read back where it landed.
+    `vhi.prediction.index` *is* channel 2 — the manifest says so and both ends read it
+    from that one table. This used to be negotiable: a client could compact its frame and
+    label the channels, and the renderer worked out the mapping by asking the stream for
+    its labels. Asking meant liblsl's `info()`, the only thing that starts an
+    `info_receiver` thread, and cancelling one mid-request is what crashed this renderer
+    three times. The compaction saved three floats a frame.
     """
     pylsl = pytest.importorskip("pylsl")
     stub, pb2 = v2
-    addresses = ["vhi.prediction.index", "vhi.prediction.middle"]
-    assert _declare(stub, pb2, *addresses).accepted
+    assert _declare(stub, pb2, "vhi.prediction.index", "vhi.prediction.middle").accepted
 
-    info = pylsl.StreamInfo("MyoGestic_Output", "Control", 2, 60, "float32", "narrow-route")
-    channels = info.desc().append_child("channels")
-    for address in addresses:
-        channels.append_child("channel").append_child_value("label", address)
+    info = pylsl.StreamInfo("MyoGestic_Output", "Control", 9, 60, "float32", "pose-frame")
     outlet = pylsl.StreamOutlet(info)
-    predict = None
+    frame = [0.0] * 9
+    frame[2] = 1.0   # index
+    frame[3] = 1.0   # middle
+    predict, sample = None, None
     try:
-        deadline = time.time() + 20.0
+        deadline = time.time() + 25.0
         while time.time() < deadline:
-            outlet.push_sample([1.0, 1.0])
+            outlet.push_sample(frame)
             if predict is None:
                 found = [s for s in pylsl.resolve_streams(wait_time=1.0)
                          if s.name() == "VHI_Predict"]
@@ -954,8 +954,6 @@ def test_a_narrow_declared_stream_lands_on_the_right_joints(v2, control_inlet):
             predict.close_stream()
         del outlet
 
-    # Channels 2 and 3 are index and middle; a positional read would have put the two
-    # values on thumb flexion and abduction instead.
     assert sample[2] == pytest.approx(1.0, abs=0.05), f"index not driven: {sample}"
     assert sample[3] == pytest.approx(1.0, abs=0.05), f"middle not driven: {sample}"
     assert abs(sample[0]) < 0.05 and abs(sample[1]) < 0.05, f"thumb moved: {sample}"
