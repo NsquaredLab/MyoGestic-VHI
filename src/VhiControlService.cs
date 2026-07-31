@@ -422,18 +422,19 @@ public class VhiControlService : VhiControl.VhiControlBase
 			{
 				StandardVersion = StandardVersion,
 				ContinuousStreamName = "MyoGestic_Output",
-				// The continuous inlet takes standard values: PredictedHandSkeleton converts
-				// them to rig units via StandardPose.ToRig, whose Sign is +1 on eight of the
-				// nine channels, so +1 means the direction the DOF name denotes. There is one
-				// encoding now — the first end-to-end v2 run inverted every joint precisely
-				// because an earlier handshake agreed on names and left units implied, which
-				// is why this stays documented here rather than assumed.
+				// The continuous inlet takes standard values, and nothing here takes anything
+				// else: both inlets clamp and pass them straight to StandardPose.AtPlusOne.
+				// There is no legacy-signed mode to negotiate into. The first end-to-end v2
+				// run inverted every joint precisely because a handshake agreed on names and
+				// left units implied, which is why this stays documented rather than assumed.
 				//
-				// VHI_Predict publishes standard values too: it runs StandardPose.ToStandard,
-				// the inverse conversion, so the round trip through this hand is the identity.
-				// VHI_Control alone stays in the rig's units — the archived corpus and
-				// myogestic.vhi.legacy.decode_pose are pinned to them, and changing that is a
-				// separate decision about recorded data, not part of this one.
+				// Both outlets publish standard values too — VHI_Predict and, since the
+				// direction fix, VHI_Control. They now agree, which is the whole point: a
+				// model trained on the ground-truth stream can be fed back to the predicted
+				// hand without its weights being flipped by hand. Recordings made before that
+				// are in the rig's old units and stay readable through
+				// myogestic.vhi.legacy.decode_pose; the outlets advertise `pose_convention`
+				// so the two cannot be confused.
 				//
 				// Layer 3 of three, reported so a client can see it — never so it can
 				// mistake it for chatter protection. See SetPresentation.

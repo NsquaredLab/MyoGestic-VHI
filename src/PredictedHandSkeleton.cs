@@ -148,43 +148,13 @@ public partial class PredictedHandSkeleton : Node3D
 		}
 	}
 
-	/// <summary>Rendered degrees → the standard value that would produce them.</summary>
-	/// <remarks>The inverse of <see cref="StandardPose.ToRig(int, float)"/> for in-range
-	/// values, which is what makes the VHI_Predict read-back comparable with what was sent:
-	/// a round-trip through this renderer is the identity, not a sign flip.</remarks>
-	private static float ToStandard(int channel, float degrees, float gain) =>
-		gain == 0f ? 0f : degrees / gain * StandardPose.Sign[channel];
-
 	private void InitializeJointMovements()
 	{
-		// Wrist — joint 0 turns every digit with it. X is flexion, Z abduction; see
-		// StandardPose.Wrist for where the two numbers come from and which one is a choice.
-		jointMovements[0] = StandardPose.Wrist;
-
-		// Thumb
-		jointMovements[1] = [-45, 0, 30];
-		jointMovements[2] = [-55, 0, -35];
-		jointMovements[3] = [-80, 0, 0];
-
-		// Index
-		jointMovements[4] = [-85, 0, 0];
-		jointMovements[5] = [-75, 0, 0];
-		jointMovements[6] = [-60, 0, 0];
-
-		// Middle
-		jointMovements[7] = [-85, 0, 0];
-		jointMovements[8] = [-85, 0, 0];
-		jointMovements[9] = [-60, 0, 0];
-
-		// Ring
-		jointMovements[10] = [-85, 0, 0];
-		jointMovements[11] = [-85, 0, 0];
-		jointMovements[12] = [-60, 0, 0];
-
-		// Pinky
-		jointMovements[13] = [-85, 0, 0];
-		jointMovements[14] = [-85, 0, 0];
-		jointMovements[15] = [-60, 0, 0];
+		// The gains are StandardPose's, not this hand's. Both skeletons kept their own copy
+		// once, and the copies drifted: these were the pose table's raw rows, which are the
+		// negative of what the rig renders, so a standard +1 bent every digit backwards.
+		foreach ((int joint, float[] degrees) in StandardPose.AtPlusOne)
+			jointMovements[joint] = degrees;
 	}
 
 	public override void _Process(double delta)
@@ -194,11 +164,12 @@ public partial class PredictedHandSkeleton : Node3D
 			currentData = communicationController.GetReceivedDataPredicted();
 
 			// The inlet carries STANDARD values: +1 means the direction the DOF name
-			// denotes. Convert them to this rig's multipliers the same way every other
-			// entry point does — see ToRig. Unconditionally: the conversion is not gated
-			// behind the Declare handshake, because it must not be possible to render a
-			// standard +1 in two different directions depending on what a client said.
-			StandardPose.ToRig(currentData);
+			// denotes. They stay standard from here — MoveBones* multiplies by
+			// StandardPose.AtPlusOne, so the domain clamp is the only thing owed. Applied
+			// unconditionally, not gated behind the Declare handshake, because it must not be
+			// possible to render a standard +1 in two different directions depending on what
+			// a client said.
+			StandardPose.Clamp(currentData);
 
 			if (currentData.Count >= 9 && skeleton != null && boneMap.Count > 0)
 			{
@@ -341,23 +312,25 @@ public partial class PredictedHandSkeleton : Node3D
 
 		List<float> outputData = [];
 
-		// Standard, not rig units: dividing by the gain recovers the multiplier, and the
-		// channel's sign turns that back into the value a client would have had to send to
-		// produce this pose. So VHI_Predict speaks the same language as the inlet, and a
-		// round-trip through the renderer is the identity rather than a sign flip.
+		// Standard, not rig degrees: StandardPose.Standard is the inverse of the conversion
+		// that rendered the pose, so VHI_Predict speaks the same language as the inlet and a
+		// round-trip through the renderer is the identity. Note this cannot detect a
+		// direction error on its own — an inverse agrees with its forward whichever way the
+		// pair points. The anchors for that live in the contract suite, against the control
+		// hand's named movements.
 		var thumb2Rot = GetBoneRotationDegrees(1);
-		outputData.Add(ToStandard(0, thumb2Rot.X, jointMovements[1][0])); // Thumb Flexion
-		outputData.Add(ToStandard(1, thumb2Rot.Z, jointMovements[1][2])); // Thumb Abduction
-		outputData.Add(ToStandard(2, GetBoneRotationDegrees(4).X, jointMovements[4][0]));
-		outputData.Add(ToStandard(3, GetBoneRotationDegrees(7).X, jointMovements[7][0]));
-		outputData.Add(ToStandard(4, GetBoneRotationDegrees(10).X, jointMovements[10][0]));
-		outputData.Add(ToStandard(5, GetBoneRotationDegrees(13).X, jointMovements[13][0]));
+		outputData.Add(StandardPose.Standard(1, 0, thumb2Rot.X)); // Thumb Flexion
+		outputData.Add(StandardPose.Standard(1, 2, thumb2Rot.Z)); // Thumb Abduction
+		outputData.Add(StandardPose.Standard(4, 0, GetBoneRotationDegrees(4).X));
+		outputData.Add(StandardPose.Standard(7, 0, GetBoneRotationDegrees(7).X));
+		outputData.Add(StandardPose.Standard(10, 0, GetBoneRotationDegrees(10).X));
+		outputData.Add(StandardPose.Standard(13, 0, GetBoneRotationDegrees(13).X));
 
 		// Wrist: all three axes of bone 0, which parents every digit.
 		var wristRot = GetBoneRotationDegrees(0);
-		outputData.Add(ToStandard(6, wristRot.X, jointMovements[0][0]));
-		outputData.Add(ToStandard(7, wristRot.Z, jointMovements[0][2]));
-		outputData.Add(ToStandard(8, wristRot.Y, jointMovements[0][1]));
+		outputData.Add(StandardPose.Standard(0, 0, wristRot.X));
+		outputData.Add(StandardPose.Standard(0, 2, wristRot.Z));
+		outputData.Add(StandardPose.Standard(0, 1, wristRot.Y));
 
 		communicationController.SendPredictedData(outputData);
 	}
@@ -452,9 +425,9 @@ public partial class PredictedHandSkeleton : Node3D
 	/// </summary>
 	/// <remarks>
 	/// <paramref name="standard"/> is a standard value: <c>+1</c> means the direction
-	/// the DOF's name denotes. The negation into this hand's wire convention (its
-	/// flexion gains are negative) happens here, so the standard vocabulary never has
-	/// to carry a sign that belongs to one renderer.
+	/// the DOF's name denotes. It is stored as it arrives — only clamped — because the
+	/// pose vector is in standard units all the way to <c>StandardPose.AtPlusOne</c>. No
+	/// sign is applied here, or anywhere outside <c>StandardPose</c>.
 	/// <para>
 	/// Bones stay where they are put: <c>_Process</c> only re-poses them when a fresh
 	/// LSL sample arrives, so a value set here persists until the next one does. A
@@ -467,7 +440,7 @@ public partial class PredictedHandSkeleton : Node3D
 			return;
 		while (currentData.Count < 9)
 			currentData.Add(0f);
-		currentData[channel] = StandardPose.ToRig(channel, standard);
+		currentData[channel] = StandardPose.Clamp(standard);
 		MoveBonesDirectly();
 	}
 

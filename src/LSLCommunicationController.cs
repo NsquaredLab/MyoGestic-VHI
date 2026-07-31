@@ -50,6 +50,15 @@ public partial class LSLCommunicationController : Node
 
 	/// <summary>Name of the LSL outlet that publishes the control hand's
 	/// pose at 60 Hz. Consumed by MyoGestic as a regression-target source.</summary>
+	/// <summary>What <c>+1</c> means on both pose outlets, published in their metadata.</summary>
+	/// <remarks>
+	/// <c>standard</c>: <c>+1</c> is the direction the channel's name denotes, <c>0</c> is
+	/// rest, the domain is <c>[-1, 1]</c>. Recordings made before this existed are in
+	/// <c>legacy</c> — the rig's own units, where the five flexion channels ran the other way
+	/// — and a reader that finds no <c>pose_convention</c> must assume that, not this.
+	/// </remarks>
+	public const string PoseConvention = "standard";
+
 	[Export] public string ControlOutletName = "VHI_Control";
 
 	/// <summary>Name of the LSL outlet that publishes the predicted hand's
@@ -453,10 +462,16 @@ public partial class LSLCommunicationController : Node
 				channelCount: ExpectedChannels,
 				nominalSrate: 60.0,
 				channelFormat: "Float",
-				sourceId: "control_hand_001"
+				// Bumped from control_hand_001 with the switch to standard values. The name
+				// and channel labels are unchanged, so a consumer resolving by name cannot
+				// tell the conventions apart — and the two disagree by a sign on five of the
+				// nine channels. A recorder that captures source_id can; one that does not
+				// gets the same silent break either way, which is why the convention is also
+				// stated outright below.
+				sourceId: "control_hand_002_standard"
 			);
 			GD.Print("    StreamInfo created successfully");
-			
+
 			// Add channel labels and config path
 			string[] channelLabels = [
 				"ThumbFlexion", "ThumbAbduction", "IndexFlexion",
@@ -466,6 +481,7 @@ public partial class LSLCommunicationController : Node
 			GD.Print($"    Setting {channelLabels.Length} channel labels...");
 			LSLWrapper.SetChannelLabels(controlInfo, channelLabels);
 			LSLWrapper.SetStreamMetadata(controlInfo, "config_file", configPath);
+			LSLWrapper.SetStreamMetadata(controlInfo, "pose_convention", PoseConvention);
 
 			GD.Print("    Creating StreamOutlet...");
 			controlOutlet = LSLWrapper.CreateStreamOutlet(controlInfo);
@@ -485,6 +501,7 @@ public partial class LSLCommunicationController : Node
 
 			LSLWrapper.SetChannelLabels(predictedInfo, channelLabels);
 			LSLWrapper.SetStreamMetadata(predictedInfo, "config_file", configPath);
+			LSLWrapper.SetStreamMetadata(predictedInfo, "pose_convention", PoseConvention);
 
 			GD.Print("    Creating StreamOutlet...");
 			predictedOutlet = LSLWrapper.CreateStreamOutlet(predictedInfo);

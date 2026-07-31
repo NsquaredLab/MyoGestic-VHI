@@ -230,33 +230,12 @@ public partial class ControlHandSkeleton : Node3D
 			}
 		}
 
-		// Thumb (joints 1-3)
-		// Wrist — joint 0 turns every digit with it. See StandardPose.Wrist.
-		jointMaximumMovement[0][0] = StandardPose.Wrist;
-
-		jointMaximumMovement[1][0] = [-45, 0, 30];
-		jointMaximumMovement[2][0] = [-55, 0, -35];
-		jointMaximumMovement[3][0] = [-80, 0, 0];
-
-		// Index (joints 4-6)
-		jointMaximumMovement[4][0] = [-85, 0, 0];
-		jointMaximumMovement[5][0] = [-75, 0, 0];
-		jointMaximumMovement[6][0] = [-60, 0, 0];
-
-		// Middle (joints 7-9)
-		jointMaximumMovement[7][0] = [-85, 0, 0];
-		jointMaximumMovement[8][0] = [-85, 0, 0];
-		jointMaximumMovement[9][0] = [-60, 0, 0];
-
-		// Ring (joints 10-12)
-		jointMaximumMovement[10][0] = [-85, 0, 0];
-		jointMaximumMovement[11][0] = [-85, 0, 0];
-		jointMaximumMovement[12][0] = [-60, 0, 0];
-
-		// Pinky (joints 13-15)
-		jointMaximumMovement[13][0] = [-85, 0, 0];
-		jointMaximumMovement[14][0] = [-85, 0, 0];
-		jointMaximumMovement[15][0] = [-60, 0, 0];
+		// The gains are StandardPose's, not this hand's — the same table the predicted hand
+		// uses, so the two cannot drift into disagreeing about which way +1 bends a digit.
+		// They did: both carried a private copy of the pose table's raw rows, which are the
+		// negative of what this rig renders.
+		foreach ((int joint, float[] degrees) in StandardPose.AtPlusOne)
+			jointMaximumMovement[joint][0] = degrees;
 	}
 
 	public override void _Process(double delta)
@@ -278,16 +257,11 @@ public partial class ControlHandSkeleton : Node3D
 				{
 					currentData = communicationController.GetReceivedDataControl();
 					// Standard values mean +1 is the direction the channel's name denotes.
-					// Converting them is StandardPose's job, so both hands agree on what
-					// +1 does — this used to be a local blanket negation, which made a
-					// standard +1 extend the digit instead of flexing it. Unconditional:
-					// there is one encoding now, so every control-pose producer sends
-					// standard values.
-					//
-					// The VHI_Control read-back below is deliberately left in the rig's own
-					// units: the archived reference sessions are permanently in them and
-					// their reader (MyoGestic's `vhi.legacy.decode_pose`) is pinned to that.
-					StandardPose.ToRig(currentData);
+					// They stay standard from here: MoveBonesFromStream multiplies by
+					// StandardPose.AtPlusOne, so only the domain clamp is owed.
+					// Unconditional — there is one encoding, so every control-pose producer
+					// sends standard values.
+					StandardPose.Clamp(currentData);
 					if (currentData.Count >= 9 && skeleton != null)
 						MoveBonesFromStream();
 				}
@@ -364,34 +338,27 @@ public partial class ControlHandSkeleton : Node3D
 
 		List<float> outputData = [];
 
-		// Extract current bone rotations and normalize them
-		// Thumb Flexion
+		// Standard values, through the same conversion the predicted hand publishes with, so
+		// the stream you train on and the stream you drive mean the same thing by +1. They
+		// did not: this divided by a privately-held gain table that was signed the other way,
+		// so a named Fist published [-1,-1,-1,-1,-1,-1] while the predicted hand needed
+		// [+1,-1,+1,+1,+1,+1] to make one. Every model trained here had to have its weights
+		// flipped by hand, and nothing on either wire said so.
 		var thumb2Rot = GetBoneRotationDegrees(1);
-		outputData.Add(thumb2Rot.X / jointMaximumMovement[1][0][0]);
+		outputData.Add(StandardPose.Standard(1, 0, thumb2Rot.X)); // Thumb Flexion
+		outputData.Add(StandardPose.Standard(1, 2, thumb2Rot.Z)); // Thumb Abduction
+		outputData.Add(StandardPose.Standard(4, 0, GetBoneRotationDegrees(4).X));
+		outputData.Add(StandardPose.Standard(7, 0, GetBoneRotationDegrees(7).X));
+		outputData.Add(StandardPose.Standard(10, 0, GetBoneRotationDegrees(10).X));
+		outputData.Add(StandardPose.Standard(13, 0, GetBoneRotationDegrees(13).X));
 
-		// Thumb Abduction
-		outputData.Add(thumb2Rot.Z / jointMaximumMovement[1][0][2]);
-
-		// Index Flexion
-		var index2Rot = GetBoneRotationDegrees(4);
-		outputData.Add(index2Rot.X / jointMaximumMovement[4][0][0]);
-
-		// Middle Flexion
-		var middle2Rot = GetBoneRotationDegrees(7);
-		outputData.Add(middle2Rot.X / jointMaximumMovement[7][0][0]);
-
-		// Ring Flexion
-		var ring2Rot = GetBoneRotationDegrees(10);
-		outputData.Add(ring2Rot.X / jointMaximumMovement[10][0][0]);
-
-		// Pinky Flexion
-		var pinky2Rot = GetBoneRotationDegrees(13);
-		outputData.Add(pinky2Rot.X / jointMaximumMovement[13][0][0]);
-
-		// Wrist (not used, but needed for compatibility)
-		outputData.Add(0); // Wrist Flexion
-		outputData.Add(0); // Wrist Abduction
-		outputData.Add(0); // Wrist Rotation
+		// Wrist: bone 0, which parents every digit. Was hardcoded to three zeros "for
+		// compatibility" — but the control hand does move it (Movements.WristUpDown,
+		// WristLeftRight), so a recording of those movements captured nothing at all.
+		var wristRot = GetBoneRotationDegrees(0);
+		outputData.Add(StandardPose.Standard(0, 0, wristRot.X)); // Wrist Flexion
+		outputData.Add(StandardPose.Standard(0, 2, wristRot.Z)); // Wrist Abduction
+		outputData.Add(StandardPose.Standard(0, 1, wristRot.Y)); // Wrist Rotation
 
 		communicationController.SendControlData(outputData);
 	}
@@ -811,7 +778,12 @@ public partial class ControlHandSkeleton : Node3D
 		if (skeleton == null || boneMap.Count == 0)
 			return;
 
-		float sinValue = -Mathf.Sin(argument);  // 0 to 1 interpolation
+		// 0 at rest, 1 at the target. This used to be negated, which was not an
+		// interpolation at all: rest + (max - rest) * -1 is 2*rest - max, and it only looked
+		// right because every rest was 0 and the pose table was signed the other way. Where a
+		// rest was not 0 it missed — Movements.Thumb's middle joint (rest 10, max 55) ended at
+		// -35 rather than 55. The table now holds rig degrees, so this interpolates plainly.
+		float sinValue = Mathf.Sin(argument);
 
 		for (int jointIdx = 0; jointIdx < 16; jointIdx++)
 		{
@@ -855,6 +827,15 @@ public partial class ControlHandSkeleton : Node3D
 		{
 			GD.Print($"Config file not found at {configPath}, generating default...");
 			MovementConfigGenerator.GenerateDefaultConfig(configPath);
+		}
+		else
+		{
+			// Migrate a Unity-signed config once, in place, rather than converting it on
+			// every load forever. A permanent dual-convention reader is a second convention:
+			// it keeps files around whose numbers mean the opposite of what they say, and
+			// the next person to hand-edit one gets a hand that bends backwards. After this
+			// the file says what it means and the shim never runs again.
+			MovementConfigGenerator.MigrateToRigNative(configPath);
 		}
 
 		// Load config

@@ -43,9 +43,14 @@ public static class MovementConfigGenerator
 		sb.AppendLine("# Rest position is always [0, 0, 0] for all joints");
 		sb.AppendLine("#");
 		sb.AppendLine("# Joint rotation format: [X, Y, Z] in degrees");
-		sb.AppendLine("# - X axis: Flexion/Extension (negative = flexion/bend, positive = extension)");
+		sb.AppendLine("# - X axis: Flexion/Extension (POSITIVE = flexion/bend, negative = extension)");
 		sb.AppendLine("# - Y axis: Lateral movement");
 		sb.AppendLine("# - Z axis: Abduction/Adduction (thumb) or rotation");
+		sb.AppendLine("#");
+		sb.AppendLine("# `convention` says which way the X signs run. Files written before it");
+		sb.AppendLine("# existed are \"unity-signed\" — flexion negative — and are flipped on load.");
+		sb.AppendLine("# Delete the key and the signs below will be read as their own opposite.");
+		sb.AppendLine($"convention = \"{MovementConfigLoader.RigNativeConvention}\"");
 		sb.AppendLine();
 
 		// Export each movement
@@ -105,5 +110,88 @@ public static class MovementConfigGenerator
 		{
 			GD.PrintErr($"❌ Error generating config: {e.Message}");
 		}
+	}
+
+	/// <summary>
+	/// Rewrite a Unity-signed config in rig-native degrees, once. A file that already
+	/// declares its convention is left untouched.
+	/// </summary>
+	/// <remarks>
+	/// The alternative — converting on every load — leaves a file on disk whose numbers say
+	/// the opposite of what they mean, forever, and the person who hand-edits it next gets a
+	/// hand that bends the wrong way. Migrating negates every rotation and stamps the
+	/// convention, so the shim runs once and the file is then self-describing.
+	/// <para>A backup is written beside it first: this rewrites hand-tuned poses, and the
+	/// migration is only correct if the file really was Unity-signed.</para>
+	/// </remarks>
+	public static void MigrateToRigNative(string filePath)
+	{
+		try
+		{
+			using (var read = FileAccess.Open(filePath, FileAccess.ModeFlags.Read))
+			{
+				if (read == null)
+					return;
+				string existing = read.GetAsText();
+				var model = Tomlyn.Toml.ToModel(existing);
+				if (MovementConfigLoader.ConventionOf(model) == MovementConfigLoader.RigNativeConvention)
+					return;
+
+				using var backup = FileAccess.Open(filePath + ".unity-signed.bak", FileAccess.ModeFlags.Write);
+				backup?.StoreString(existing);
+			}
+
+			// Re-emitting from the (already rig-native) hardcoded table would discard any
+			// hand-tuning in the file, so negate what is there instead.
+			var migrated = NegateRotations(filePath);
+			if (migrated == null)
+				return;
+
+			using var write = FileAccess.Open(filePath, FileAccess.ModeFlags.Write);
+			if (write == null)
+			{
+				GD.PrintErr($"❌ Could not rewrite {filePath}; it stays Unity-signed.");
+				return;
+			}
+			write.StoreString(migrated);
+			GD.Print($"✅ Migrated {filePath} to rig-native degrees (backup: *.unity-signed.bak)");
+		}
+		catch (System.Exception e)
+		{
+			GD.PrintErr($"❌ Error migrating config: {e.Message}");
+		}
+	}
+
+	/// <summary>Negate every `joint = [x, y, z]` and prepend the convention key.</summary>
+	private static string NegateRotations(string filePath)
+	{
+		using var file = FileAccess.Open(filePath, FileAccess.ModeFlags.Read);
+		if (file == null)
+			return null;
+
+		var sb = new StringBuilder();
+		sb.AppendLine($"convention = \"{MovementConfigLoader.RigNativeConvention}\"");
+		sb.AppendLine("# Migrated from Unity-signed degrees: POSITIVE X is now flexion.");
+		sb.AppendLine();
+
+		var row = new System.Text.RegularExpressions.Regex(
+			@"^(\s*\w+\s*=\s*\[)\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*(\])");
+		foreach (string line in file.GetAsText().Split('\n'))
+		{
+			string text = line.TrimEnd('\r');
+			var match = row.Match(text);
+			if (!match.Success)
+			{
+				sb.AppendLine(text);
+				continue;
+			}
+			string Flip(int group) =>
+				(-float.Parse(
+					match.Groups[group].Value,
+					System.Globalization.CultureInfo.InvariantCulture)
+				+ 0f).ToString(System.Globalization.CultureInfo.InvariantCulture);
+			sb.AppendLine($"{match.Groups[1].Value}{Flip(2)}, {Flip(3)}, {Flip(4)}{match.Groups[5].Value}");
+		}
+		return sb.ToString();
 	}
 }

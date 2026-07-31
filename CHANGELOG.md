@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Both hands bent the wrong way, and `VHI_Control` published the opposite of
+  `VHI_Predict`.** Standard `+1` extended a digit instead of flexing it, and the
+  ground-truth stream you train on called a fist `-1` while the prediction stream you
+  drive needed `+1`. Every model trained against VHI needed its weights flipped by hand,
+  and nothing on either wire said so.
+
+  The root cause was that `MovementPoses` is not what the rig renders.
+  `ApplyMovementPose` interpolated with `-Mathf.Sin(argument)`, so a held `Fist` put bone
+  4 at `+85°` while the table read `-85`. **Positive X is flexion on this rig.** Both
+  skeletons had privately copied those raw rows as their gain tables, and so had the
+  contract suite's direction gate — every check agreed with every other and all of them
+  disagreed with the hand. Four fingers curling backwards still look fist-shaped; the
+  thumb is the only digit whose flexion is not symmetric front-to-back, and it is where
+  the error was finally visible.
+
+  `StandardPose.AtPlusOne` is now the only place that knows what a standard value means in
+  degrees; neither skeleton owns a sign. `MovementPoses` is in rig-native degrees and the
+  animation interpolates plainly — which also fixes a movement whose rest pose is not
+  zero, where `rest + (max - rest) * -1` was not an interpolation at all
+  (`Movements.Thumb`'s middle joint reached `+35°` instead of `55°`).
+
+  The direction anchor is no longer derived from anything the renderer also reads. It
+  holds the movement whose *name* says what it is — `Movements.Index` is index flexion
+  because a human called it that — and asserts what `VHI_Control` publishes.
+
+### Changed
+
+- **`VHI_Control` publishes standard values.** A held `Fist` is
+  `[1, -1, 1, 1, 1, 1, …]`: five flexions and an *ad*ducted thumb. It previously published
+  the rig's own units, opposite on five channels. The outlets advertise
+  `pose_convention = "standard"` and the control outlet's `source_id` is now
+  `control_hand_002_standard`, so the conventions are distinguishable on the wire.
+  Recordings made before this are readable through `myogestic.vhi.legacy.decode_pose`,
+  which is an **archive reader only** — putting a current frame through it inverts it.
+- **`VHI_Control` fills the wrist channels.** They were hardcoded to three zeros "for
+  compatibility", so a recording of `WristUpDown` or `WristLeftRight` captured nothing.
+- **`movements.toml` declares its convention and is migrated once.** A file without a
+  `convention` key is Unity-signed, and is rewritten in place in rig-native degrees with a
+  `.unity-signed.bak` copy beside it. Converting on every load instead would leave a file
+  on disk whose numbers mean the opposite of what they say.
+
 ### Added
 
 - **`VhiControl` — the one gRPC control service.** An application declares which of

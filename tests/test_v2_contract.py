@@ -24,60 +24,65 @@ from __future__ import annotations
 import math
 import pathlib
 import re
+import time
 
 import pytest
 
 #: Standard name -> the bones it must move, and the signed degrees at standard +1.
 #:
-#: Read off `PredictedHandSkeleton.jointMovements`, which *is* `MovementPoses[Fist]` — the
-#: max-flexion pose. So standard +1 on a flexion DOF renders the gain itself: negative
-#: degrees, the same sign `Fist` uses and the opposite of `IndexExtension`'s `+20`.
+#: **Literal calibration, not derived from anything the renderer also reads.** Every earlier
+#: version of this table was computed from `MovementPoses` — and so was the renderer, so the
+#: two agreed with each other and both disagreed with the hand. Twice: once when the suite
+#: took its numbers from a live sweep, and once when it took them from the pose library
+#: without accounting for `ApplyMovementPose` negating every row on the way to the bone. A
+#: held `Movements.Fist` puts bone 4 at `+85°`; the table said `-85`.
 #:
-#: Abduction is the one channel whose sign is inverted, because the fist's thumb Z is
-#: *adduction*. See `Vhi.StandardPose`, which both hands share.
-#:
-#: These were once the negatives of this, taken from a live sweep of a renderer that
-#: negated every channel on ingest — so the suite agreed with the rig and both disagreed
-#: with the DOF names. Derive this table from the movement library, never from a sweep.
+#: Positive X is flexion on this rig. The independent anchor for that claim is not here — it
+#: is `test_a_named_flexion_publishes_standard_plus_one`, which holds the movement whose
+#: *name* says what it is and reads the ground-truth stream. A human named it; no renderer
+#: computed it.
 #:
 #: Thumb abduction has only two entries on purpose: it drives all three thumb bones
 #: through channel 1, but the distal bone's Z gain is 0, so it cannot move. The wrist has
 #: one, because bone 0 is a single joint that every digit hangs off.
 EXPECTED = {
     "vhi.prediction.thumb.flexion": {
-        "WaveBone_3": -45.0,
-        "WaveBone_4": -55.0,
-        "WaveBone_5": -80.0,
+        "WaveBone_3": 45.0,
+        "WaveBone_4": 55.0,
+        "WaveBone_5": 80.0,
     },
-    "vhi.prediction.thumb.abduction": {"WaveBone_3": -30.0, "WaveBone_4": 35.0},
+    # Abduction is away from the palm — the opposite of the fist's thumb, which comes
+    # across the fingers. So these are the negatives of `Fist`'s thumb Z.
+    "vhi.prediction.thumb.abduction": {"WaveBone_3": 30.0, "WaveBone_4": -35.0},
     "vhi.prediction.index": {
-        "WaveBone_7": -85.0,
-        "WaveBone_8": -75.0,
-        "WaveBone_9": -60.0,
+        "WaveBone_7": 85.0,
+        "WaveBone_8": 75.0,
+        "WaveBone_9": 60.0,
     },
     "vhi.prediction.middle": {
-        "WaveBone_12": -85.0,
-        "WaveBone_13": -85.0,
-        "WaveBone_14": -60.0,
+        "WaveBone_12": 85.0,
+        "WaveBone_13": 85.0,
+        "WaveBone_14": 60.0,
     },
     "vhi.prediction.ring": {
-        "WaveBone_17": -85.0,
-        "WaveBone_18": -85.0,
-        "WaveBone_19": -60.0,
+        "WaveBone_17": 85.0,
+        "WaveBone_18": 85.0,
+        "WaveBone_19": 60.0,
     },
     "vhi.prediction.little": {
-        "WaveBone_22": -85.0,
-        "WaveBone_23": -85.0,
-        "WaveBone_24": -60.0,
+        "WaveBone_22": 85.0,
+        "WaveBone_23": 85.0,
+        "WaveBone_24": 60.0,
     },
-    # The wrist: one bone, two axes. Bone 0 parents every digit chain, so this is the
-    # whole hand turning. Read off `StandardPose.Wrist`, whose X comes from
-    # `Movements.WristUpDown` and whose Z sign is a documented choice, not a derivation.
-    "vhi.prediction.wrist.flexion": {"WaveBone_1": -30.0},
-    "vhi.prediction.wrist.abduction": {"WaveBone_1": -20.0},
-    # Rotation pins a *choice*, not a derivation: nothing in the movement library touches
-    # joint 0's Y axis, so 90 degrees and its sign were picked. See `StandardPose.Wrist`.
-    "vhi.prediction.wrist.rotation": {"WaveBone_1": -179.0},
+    # The wrist: one bone, three axes. Bone 0 parents every digit chain, so this is the
+    # whole hand turning. All three are calibrations of `StandardPose.Wrist` — X's
+    # magnitude comes from `Movements.WristUpDown`, but no bone's local basis can be
+    # deduced from another's, so none of the three signs is derived.
+    "vhi.prediction.wrist.flexion": {"WaveBone_1": 30.0},
+    "vhi.prediction.wrist.abduction": {"WaveBone_1": 20.0},
+    # Rotation pins a *choice*: nothing in the movement library touches joint 0's Y axis,
+    # so both the magnitude and the sign were picked. See `StandardPose.Wrist`.
+    "vhi.prediction.wrist.rotation": {"WaveBone_1": 179.0},
 }
 
 STANDARD_DOFS = tuple(EXPECTED)
@@ -570,12 +575,25 @@ def rest_control_hand(v2, aid):
 
 # --- Direction: standard +1 renders what the DOF name denotes ------------------
 #
-# `EXPECTED` above is a table, and a table can be inverted by a careless edit as easily
-# as the rig can — that is exactly what happened once: the renderer negated every
-# channel on ingest, the table was filled in from a sweep of that renderer, and the
-# suite agreed with the rig while both disagreed with the DOF names. So these tests take
-# their expectation from `MovementPoses`, the rig's own library of what the hand looks
-# like in a named posture, and never from a measurement.
+# This section has been wrong twice, in opposite directions, and both times it passed.
+#
+#   1. The expectation was filled in from a live sweep of a renderer that negated every
+#      channel on ingest. The suite agreed with the rig; both disagreed with the names.
+#   2. The expectation was then derived from `MovementPoses` instead — the rig's own
+#      library of named postures, which looks like ground truth and is not. Those rows
+#      reach the bone through `ApplyMovementPose`, which negated them, so a held
+#      `Movements.Fist` put bone 4 at `+85°` while the table read `-85`. The renderer read
+#      the table the same wrong way, so again the two agreed and the hand was backwards.
+#
+# Neither failure is detectable from inside one renderer. `VHI_Predict`'s read-back cannot
+# help either — it is the algebraic inverse of the conversion that rendered the pose, so it
+# round-trips whichever way the pair points.
+#
+# The anchor below is therefore the **control hand**: VHI's own ground-truth renderer,
+# holding the movement whose *name* says what it is. `Movements.Index` is index flexion
+# because it is called that and an operator watched it. Driving the predicted hand at
+# standard +1 and requiring the same bones to land in the same place compares two renderers
+# and consults no table, so a sign error has to be made identically in both to survive.
 
 SOURCE = pathlib.Path(__file__).resolve().parent.parent / "src"
 
@@ -583,25 +601,33 @@ SOURCE = pathlib.Path(__file__).resolve().parent.parent / "src"
 #: is `PredictedHandSkeleton.boneNames`, read rather than restated.
 BONE_NAMES = re.findall(r'"(WaveBone_\d+)"', (SOURCE / "PredictedHandSkeleton.cs").read_text())
 
-#: joint index -> the Euler degrees of `Movements.Fist`, the fully-closed hand. Flexion is
-#: what closing a hand does, so this is the pose a standard +1 flexion must produce.
-FIST = {
-    int(joint): tuple(float(axis) for axis in (x, y, z))
-    for joint, x, y, z in re.findall(
-        r"poses\[Movements\.Fist\]\[(\d+)\]\[0\] = \[\s*(-?[\d.]+),\s*(-?[\d.]+),\s*(-?[\d.]+)\s*\]",
-        (SOURCE / "MovementDefinitions.cs").read_text(),
-    )
-}
-
 #: The flexion DOFs: every advertised control except the thumb's second axis. Not
 #: `endswith(".flexion")` — a single-axis digit carries no suffix, because `index` cannot
 #: mean anything else. Only the thumb, with two axes, names them.
-#: The wrist is excluded: a fist does not move it, so `Movements.Fist` is no evidence
-#: about its direction. It has its own anchor below.
+#: The wrist is excluded: no named movement in the library flexes it alongside the digits,
+#: so it has no ground-truth counterpart here. Its calibration is asserted from `EXPECTED`.
 FLEXION_DOFS = tuple(
     name
     for name in STANDARD_DOFS
     if not name.endswith(".abduction") and ".wrist" not in name
+)
+
+#: Movement the control hand can hold -> the VHI_Control channel it must drive to +1, and
+#: the channels it must leave alone. Both names are the rig's own; nothing is computed.
+#: `Movements.Index` is index flexion because it is called that and an operator watched it,
+#: which is the only claim in this file that no renderer also makes.
+NAMED_FLEXIONS = {
+    "Thumb": 0,
+    "Index": 2,
+    "Middle": 3,
+    "Ring": 4,
+    "Pinky": 5,
+}
+
+#: `ControlHandSkeleton`'s outlet, in channel order.
+CONTROL_CHANNELS = (
+    "ThumbFlexion", "ThumbAbduction", "IndexFlexion", "MiddleFlexion", "RingFlexion",
+    "PinkyFlexion", "WristFlexion", "WristAbduction", "WristRotation",
 )
 
 
@@ -615,46 +641,121 @@ def _sweep(v2, name):
     return {BONE_NAMES.index(o.element): o for o in reply.observed}
 
 
-def test_the_pose_library_was_actually_parsed():
-    """Guards the two regexes: a rename upstream must fail loudly, not vacuously."""
+def test_the_bone_names_were_actually_parsed():
+    """Guards the regex: a rename upstream must fail loudly, not vacuously."""
     assert len(BONE_NAMES) == 16, BONE_NAMES
-    assert FIST, "no Fist pose parsed — the direction tests below would assert nothing"
-    assert FIST[4][0] == -85.0, FIST[4]
 
 
 @pytest.mark.parametrize("name", FLEXION_DOFS)
-def test_standard_plus_one_renders_the_fist_pose(v2, name):
-    """The direction anchor. Standard +1 closes the hand; it does not open it.
+def test_standard_plus_one_flexes_the_digit(v2, name):
+    """Standard +1 closes the hand; it does not open it.
 
-    A renderer that negates on ingest puts these bones at `+85°` — which is near
-    `IndexExtension`'s `+20°` and on the opposite side of rest from `Fist`. That is a
-    hand extending when it was told to flex, and it is what this catches.
+    Bends toward the palm are positive on this rig. Stated as a literal here rather than
+    read from `MovementPoses`, whose rows are the opposite of what they render.
     """
     for joint, observed in _sweep(v2, name).items():
-        flexed = FIST[joint][0]
-        assert flexed < 0.0, f"joint {joint}: the fist's X is not negative — re-read FIST"
-        assert observed.degrees_at_hi == pytest.approx(flexed, abs=0.5), (
+        assert observed.degrees_at_hi > 0.0, (
             f"{name} joint {joint} ({observed.element}): standard +1 rendered "
-            f"{observed.degrees_at_hi:+.1f}°, but a closed hand is {flexed:+.1f}°"
+            f"{observed.degrees_at_hi:+.1f}°, which bends away from the palm"
         )
 
 
 def test_standard_plus_one_abducts_away_from_the_fist(v2):
-    """The one inverted channel, and why it is inverted.
+    """The thumb's second axis, and why it opposes the fist.
 
-    A fist wraps the thumb *across* the palm, so the library's thumb Z is adduction. The
-    DOF is named abduction, so standard +1 must render the other way — the reason
-    `Sign[1]` is `-1` while the five flexion channels are `+1`. Getting this
-    right by negating everything, as the old ingest did, made abduction correct and all
-    five flexion DOFs backwards.
+    A fist wraps the thumb *across* the palm — adduction. The DOF is named abduction, so
+    standard +1 must render the other way. This is the channel that a blanket negation
+    gets right by accident while inverting all five flexion DOFs, which is how two
+    successive direction bugs both survived review.
     """
-    for joint, observed in _sweep(v2, "vhi.prediction.thumb.abduction").items():
-        adducted = FIST[joint][2]
-        assert adducted != 0.0, f"joint {joint} has no Z gain and cannot abduct"
-        assert observed.degrees_at_hi == pytest.approx(-adducted, abs=0.5), (
-            f"thumb abduction joint {joint} ({observed.element}): standard +1 rendered "
-            f"{observed.degrees_at_hi:+.1f}°, but adduction is {adducted:+.1f}°"
+    observed = _sweep(v2, "vhi.prediction.thumb.abduction")
+    by_bone = {o.element: o.degrees_at_hi for o in observed.values()}
+    assert by_bone == pytest.approx(EXPECTED["vhi.prediction.thumb.abduction"], abs=0.5)
+    # And the sign is genuinely opposite the closed hand's, not merely a matching number.
+    fist = {"WaveBone_3": -30.0, "WaveBone_4": 35.0}
+    for bone, degrees in by_bone.items():
+        assert degrees * fist[bone] < 0.0, (
+            f"thumb abduction {bone}: standard +1 rendered {degrees:+.1f}°, the same side "
+            f"as the fist's {fist[bone]:+.1f}° — that is adduction"
         )
+
+
+@pytest.fixture(scope="module")
+def control_inlet(vhi_process):
+    """An open inlet on VHI_Control, or a skip if pylsl/the outlet is unavailable."""
+    pylsl = pytest.importorskip("pylsl", reason="the direction anchor reads VHI_Control")
+    streams = [s for s in pylsl.resolve_streams(wait_time=8.0) if s.name() == "VHI_Control"]
+    if not streams:
+        pytest.skip("VHI_Control did not resolve")
+    inlet = pylsl.StreamInlet(streams[0])
+    try:
+        yield inlet
+    finally:
+        inlet.close_stream()
+
+
+def _hold(stub, pb2, inlet, movement):
+    """Hold `movement` on the control hand and return its settled VHI_Control frame."""
+    stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(
+            movement=movement, frequency_hz=0.5, hold_time_s=25.0, rest_time_s=0.0
+        ),
+        timeout=10.0,
+    )
+    try:
+        time.sleep(5.0)  # ramp in, then hold
+        inlet.flush()
+        sample, _ = inlet.pull_sample(timeout=5.0)
+        assert sample is not None, f"no VHI_Control sample while holding {movement}"
+        return sample
+    finally:
+        stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0)
+
+
+@pytest.mark.parametrize("movement", sorted(NAMED_FLEXIONS))
+def test_a_named_flexion_publishes_standard_plus_one(v2, control_inlet, movement):
+    """The non-circular anchor. `Movements.Index` is flexion because it is *called* that.
+
+    Every other direction check in this file consults something the renderer also consults
+    — the pose table, or an inverse of the renderer's own conversion — and therefore agrees
+    with it whichever way it points. This one starts from a human-assigned name and asks
+    what the ground-truth stream says while the hand is in it. A renderer bending the wrong
+    way publishes `-1` here.
+
+    It is also what a user actually does: train on `VHI_Control`, drive
+    `vhi.prediction.*`. If these two disagree by a sign, every model needs its weights
+    flipped by hand — which is the bug this pins.
+    """
+    stub, pb2 = v2
+    channel = NAMED_FLEXIONS[movement]
+    sample = _hold(stub, pb2, control_inlet, movement)
+
+    assert sample[channel] == pytest.approx(1.0, abs=0.05), (
+        f"holding {movement}, {CONTROL_CHANNELS[channel]} published "
+        f"{sample[channel]:+.2f} — a named flexion is standard +1, so this hand bends "
+        f"the opposite way from the DOF that shares its name"
+    )
+    others = {
+        CONTROL_CHANNELS[i]: v
+        for i, v in enumerate(sample)
+        if i != channel and abs(v) > 0.05
+    }
+    assert not others, f"{movement} also moved {others}"
+
+
+def test_the_named_fist_is_the_standard_fist(v2, control_inlet):
+    """A fist is five flexions and an *ad*ducted thumb — `[1, -1, 1, 1, 1, 1]`.
+
+    The thumb is the digit that catches a whole-hand sign error. Bend every joint the wrong
+    way and four fingers still curl into something fist-shaped; the thumb is the only one
+    whose flexion is not symmetric front-to-back, so it is where a backwards hand stops
+    looking plausible.
+    """
+    stub, pb2 = v2
+    sample = _hold(stub, pb2, control_inlet, "Fist")
+    assert list(sample[:6]) == pytest.approx([1.0, -1.0, 1.0, 1.0, 1.0, 1.0], abs=0.05), (
+        f"a held Fist published {[round(v, 2) for v in sample[:6]]}"
+    )
 
 
 def test_direction_is_the_same_on_every_repeat(v2):
@@ -753,21 +854,22 @@ WRIST = {
 def test_the_wrist_movements_were_actually_parsed():
     """Guards the regex, so the two tests below cannot pass by asserting nothing."""
     assert set(WRIST) == {"WristUpDown", "WristLeftRight"}, WRIST
-    assert WRIST["WristUpDown"][0][0] == 30.0
-    assert WRIST["WristLeftRight"][0][2] == 20.0
+    assert WRIST["WristUpDown"][0][0] == -30.0
+    assert WRIST["WristLeftRight"][0][2] == -20.0
 
 
 def test_standard_plus_one_flexes_the_wrist_by_the_documented_amount(v2):
     """The wrist's X anchor: the library's extreme, with flexion's sign.
 
-    `Movements.WristUpDown` gives the magnitude (30°) but names neither side; the sign
-    comes from the rule that holds across this rig — negative X is flexion. So a standard
-    +1 on wrist flexion is the negative extreme, not the positive one.
+    `Movements.WristUpDown` gives the magnitude (30°) but names neither side, and no other
+    bone's local basis settles joint 0's — the previous version of this test deduced the
+    sign from the fingers, which was not evidence. It is a calibration: standard +1 flexes
+    at the positive extreme, matching the digits.
     """
     magnitude = abs(WRIST["WristUpDown"][0][0])
     observed = _sweep(v2, "vhi.prediction.wrist.flexion")
     assert set(observed) == {0}, f"the wrist moved joints {sorted(observed)}"
-    assert observed[0].degrees_at_hi == pytest.approx(-magnitude, abs=0.5)
+    assert observed[0].degrees_at_hi == pytest.approx(magnitude, abs=0.5)
 
 
 def test_wrist_abduction_uses_the_librarys_magnitude(v2):
@@ -781,7 +883,7 @@ def test_wrist_abduction_uses_the_librarys_magnitude(v2):
     magnitude = abs(WRIST["WristLeftRight"][0][2])
     observed = _sweep(v2, "vhi.prediction.wrist.abduction")
     assert set(observed) == {0}
-    assert observed[0].degrees_at_hi == pytest.approx(-magnitude, abs=0.5)
+    assert observed[0].degrees_at_hi == pytest.approx(magnitude, abs=0.5)
 
 
 def test_wrist_rotation_pins_a_choice_not_a_derivation(v2):
@@ -798,8 +900,8 @@ def test_wrist_rotation_pins_a_choice_not_a_derivation(v2):
     """
     observed = _sweep(v2, "vhi.prediction.wrist.rotation")
     assert set(observed) == {0}, f"rotation moved joints {sorted(observed)}"
-    assert observed[0].degrees_at_hi == pytest.approx(-179.0, abs=0.5)
-    assert observed[0].degrees_at_lo == pytest.approx(179.0, abs=0.5)
+    assert observed[0].degrees_at_hi == pytest.approx(179.0, abs=0.5)
+    assert observed[0].degrees_at_lo == pytest.approx(-179.0, abs=0.5)
     # 179, not 180, and the one degree is load-bearing: `GetEuler` returns angles in
     # (-180, +180], so -180 and +180 are the same orientation and the decode picks the
     # positive one. At exactly 180 the pose is right and the *read-back inverts* — a

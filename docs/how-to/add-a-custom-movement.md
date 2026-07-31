@@ -32,18 +32,29 @@ updates live**, no restart.
 Each movement is a `[movements.<Name>]` table with one line per joint -
 `joint_name = [x, y, z]`, the joint's **max-flexion** pose in Euler degrees.
 There is no rest pose in the file; rest is always neutral (`[0, 0, 0]`). On the
-X axis, **negative = flexion**, positive = extension. The generated file is the
+X axis, **positive = flexion**, negative = extension. The generated file is the
 best reference - open it and copy an existing entry like `Fist`, rename it, and
 adjust the joint values.
 
+!!! warning "Files written before VHI 2 are signed the other way"
+
+    They said `negative = flexion`, and the renderer negated every row again on the
+    way to the bone, so the two cancelled. That is fixed, which means the old signs
+    now mean what they say — backwards. A file without a `convention` key is
+    detected as Unity-signed and **migrated in place on first load**, with a
+    `.unity-signed.bak` copy left beside it. Check the result if you had hand-tuned
+    poses.
+
 ```toml
 # movements.toml - one movement entry (joint_name = [x, y, z], degrees)
+convention = "rig-native"   # positive X is flexion; omit and the file is migrated
+
 [movements.MyGesture]
 wrist          = [0, 0, 0]
-thumb_proximal = [-20, 0, 0]
-thumb_middle   = [-30, 0, 0]
-thumb_distal   = [-30, 0, 0]
-index_proximal = [-40, 0, 0]
+thumb_proximal = [20, 0, 0]
+thumb_middle   = [30, 0, 0]
+thumb_distal   = [30, 0, 0]
+index_proximal = [40, 0, 0]
 # … index_middle, index_distal, then middle_*, ring_*, pinky_* (16 joints total)
 ```
 

@@ -12,6 +12,18 @@ namespace Vhi;
 /// </summary>
 public static class MovementConfigLoader
 {
+	/// <summary>The `convention` value meaning "degrees as this rig renders them".</summary>
+	/// <remarks>Positive X is flexion. A file without a `convention` key predates the
+	/// distinction and is Unity-signed, the opposite way round; see <see cref="ConventionOf"/>.
+	/// </remarks>
+	public const string RigNativeConvention = "rig-native";
+
+	/// <summary>A parsed config's declared convention, or the legacy one if it declares none.</summary>
+	public static string ConventionOf(TomlTable model) =>
+		model != null && model.TryGetValue("convention", out object value) && value is string name
+			? name
+			: "unity-signed";
+
 	private static readonly string[] JointNames =
 	[
 		"wrist",
@@ -75,6 +87,19 @@ public static class MovementConfigLoader
 			// Parse TOML
 			var model = Toml.ToModel(tomlContent);
 
+			// Which convention the file's degrees are in. Files written before this key
+			// existed are Unity-signed — negative X flexion — and this rig renders the
+			// opposite, so they are converted once, here, at the boundary. Without this a
+			// config already sitting in user:// silently outvotes the corrected table and
+			// every named movement plays backwards.
+			bool legacySigned = ConventionOf(model) != RigNativeConvention;
+			if (legacySigned)
+			{
+				GD.Print(
+					$"  Converting '{filePath}' from Unity-signed degrees to rig-native. "
+					+ $"Add `convention = \"{RigNativeConvention}\"` to keep its signs as written.");
+			}
+
 			if (!model.ContainsKey("movements"))
 			{
 				GD.PrintErr("❌ Config file missing 'movements' section");
@@ -134,9 +159,10 @@ public static class MovementConfigLoader
 
 					try
 					{
-						float x = Convert.ToSingle(rotationArray[0]);
-						float y = Convert.ToSingle(rotationArray[1]);
-						float z = Convert.ToSingle(rotationArray[2]);
+						float sign = legacySigned ? -1f : 1f;
+						float x = sign * Convert.ToSingle(rotationArray[0]);
+						float y = sign * Convert.ToSingle(rotationArray[1]);
+						float z = sign * Convert.ToSingle(rotationArray[2]);
 
 						pose[jointIdx][0] = [x, y, z]; // Max pose
 						// Rest pose stays [0, 0, 0]

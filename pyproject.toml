@@ -24,6 +24,12 @@ test = [
     "pytest>=8.0",
     "grpcio>=1.60",
     "grpcio-tools>=1.60",
+    # For the direction anchor only. gRPC can drive the predicted hand and read its bones
+    # back, but it cannot see where a *named movement* put the control hand — and that is
+    # the one piece of ground truth in the system that no renderer computes, because
+    # `Movements.Index` is index flexion by virtue of being called that. Reading it needs
+    # the VHI_Control outlet.
+    "pylsl>=1.16",
 ]
 docs = [
     "properdocs",
