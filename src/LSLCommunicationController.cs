@@ -393,16 +393,48 @@ public partial class LSLCommunicationController : Node
 			// Off, a lost producer raises, the inlet is dropped, and the resolve-by-name
 			// loop picks up whatever is publishing that name now. That is the recovery this
 			// renderer actually wants, and it is the one it already had code for.
-			var inlet = LSLWrapper.CreateStreamInlet(streams[0], recover: false);
 			int channelCount = LSLWrapper.GetStreamInfoChannelCount(streams[0]);
 			width = channelCount > 0 ? channelCount : ExpectedChannels;
 
-			// The resolved StreamInfo carries only the header, so the labels have to be
-			// fetched from the sender. A producer that publishes none is the normal case.
-			routing = BuildRouting(
-				LSLWrapper.GetChannelLabels(LSLWrapper.GetInletStreamInfo(inlet)),
-				controlPose,
-				streamName);
+			// The labels are read through an inlet that exists only for this call, and the
+			// inlet that stays is never asked for its info. That is not tidiness — it is
+			// what keeps this renderer out of the crash liblsl has in every released
+			// version (1.16.2 here, unchanged on master).
+			//
+			// liblsl starts an inlet's info_receiver thread lazily, on the first info()
+			// call, and it then runs for the life of the inlet, retrying against the
+			// producer. Its request is written into a cancellable_streambuf, and:
+			//
+			//   ~cancellable_streambuf() { unregister_from_all();
+			//                              if (pptr() != pbase()) overflow(eof); }
+			//
+			// so destruction *sends* whatever is still buffered. cancel() never empties
+			// that buffer — it only posts close_if_open() to another thread — and
+			// ~info_receiver() joins without cancelling first. Cancel an info thread while
+			// a request is in flight and it unwinds through a flush into a socket that is
+			// being closed underneath it. That is what took VHI down with EXC_BAD_ACCESS
+			// at 0x0 on thread I_MyoGestic_Ou.
+			//
+			// The dangerous cancel is precisely the one this renderer does most: the stale
+			// timer drops an inlet 5s after its producer vanished, which is exactly when
+			// that inlet's info thread is mid-retry against a peer that is gone. Fetching
+			// here instead means the fetch happens once, against a producer that just
+			// answered a resolve, and the inlet holding the info thread is closed
+			// immediately after it succeeds — never cancelled mid-request. The inlet that
+			// the stale timer later drops has no info thread at all.
+			object labelReader = LSLWrapper.CreateStreamInlet(streams[0], recover: false);
+			string[] labels;
+			try
+			{
+				labels = LSLWrapper.GetChannelLabels(LSLWrapper.GetInletStreamInfo(labelReader));
+			}
+			finally
+			{
+				LSLWrapper.Dispose(labelReader);
+			}
+			routing = BuildRouting(labels, controlPose, streamName);
+
+			var inlet = LSLWrapper.CreateStreamInlet(streams[0], recover: false);
 			string layout = routing == null
 				? "positional"
 				: $"labelled -> pose channels [{string.Join(", ", routing)}]";
