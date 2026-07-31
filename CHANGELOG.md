@@ -9,14 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`VhiCanonicalControl` — the canonical control service.** An application declares
-  which of VHI's **addresses** it drives (`vhi.prediction.index`, `vhi.control.gesture`),
+- **`VhiControl` — the one gRPC control service.** An application declares which of
+  VHI's **addresses** it drives (`vhi.prediction.index`, `vhi.control.gesture`),
   under whatever names its own configuration uses, and VHI answers with what
   it can render. Neither side hard-codes a channel index. `Declare` returns a per-DOF
-  verdict, the continuous channel order, how to encode that stream, and whether the
-  renderer blends. A DOF that cannot be rendered is reported with a reason and **never
-  silently ignored** — an ignored joint looks exactly like a joint that is working and
-  holding still.
+  verdict, the continuous channel order, and whether the renderer blends. A DOF that
+  cannot be rendered is reported with a reason and **never silently ignored** — an
+  ignored joint looks exactly like a joint that is working and holding still.
 - **Discrete DOFs render as control-hand movements.** States resolve case-insensitively
   against the movement names the build actually offers, discovered per call rather than
   from a table, because the movement set changes with the movement mode. A DOF where any
@@ -28,21 +27,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finger, in the
   flexion direction" into an assertion. It reports the model's own bone names, so a
   re-rig surfaces as a changed name rather than as a hand moving the wrong finger.
-- **`VhiTrainingAid` — a recording aid, deliberately not a control plane.** Carries the
-  recording-session gate (stops VHI's local keyboard competing as a movement source) and
-  training programs that cycle the control hand to generate a continuous trajectory for
-  aligning EMG windows against. A separate service so the boundary is structural: a
-  canonical discrete DOF is a *held state*, and collecting training data must not
-  redefine that. While a program runs it owns the control hand and discrete DOFs are
-  refused with the reason.
+- **Recording-session coordination lives on the same service, deliberately not on the
+  control plane.** `SetRecordingSession` gates VHI's local keyboard off so a recording
+  has one movement source; `StartRecordingTrajectory` cycles the control hand through a
+  movement so the recorded pose stream sweeps a continuous range instead of snapping
+  between held states; `GetRecordingSessionState` reports session state plus the
+  movement names a trajectory may use. These RPCs live on `VhiControl` rather than a
+  service of their own — a canonical discrete DOF is a *held state*, and a running
+  trajectory must not redefine that, so while one runs it owns the control hand and
+  discrete DOFs are refused with the reason.
 - **The optional `MyoGestic_ControlPose` inlet is under the same handshake, additively.**
-  `DeclareRequest.control_pose_encoding` lets a client say which convention it will send:
-  omitting it (what every existing client does) changes nothing at all, `LEGACY_NEGATED`
-  gets the handshake while keeping renderer units, and `CANONICAL` reads the stream as
-  canonical values. Unlike `MyoGestic_Output`, this stream's convention was **negotiated
-  rather than changed**, so an existing renderer-unit producer needs no edit.
+  `DeclareRequest.control_pose` is a plain bool: unset (what every existing client does)
+  changes nothing at all, and `true` also negotiates the control hand's pose stream and
+  reports its channel order.
 
-  Declaring the stream is also how a client asks for `Stream` mode, since v2 has no
+  Declaring the stream is also how a client asks for `Stream` mode, since there is no
   separate mode RPC — an inlet nobody reads is indistinguishable from a stream that is
   not arriving. Declaring it *together with* a discrete DOF is refused at the handshake:
   both drive the control hand's bones, and v1 arbitrated that per command via
@@ -63,18 +62,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING: the continuous LSL inlet takes canonical values.** `MyoGestic_Output` now
   carries values where `+1` means the direction the DOF name denotes, so `+1` on index
   flexion *flexes*. v1 expected the renderer's own convention, where flexion was
-  negative. `DeclareReply.continuous_encoding` announces which is in force and is not
-  optional — a client reading `ENCODING_UNSPECIFIED` must fall back rather than guess.
+  negative. There is exactly one encoding now, so nothing negotiates it: the field that
+  once announced it is gone, and a client simply sends canonical values.
 
-  VHI's own outlets (`VHI_Control`, `VHI_Predict`) deliberately **did not** change: every
-  session recorded before this release stays readable by the same decoder.
+  `VHI_Control` deliberately stays in the renderer's own units: the archived reference
+  sessions and `myogestic.vhi.legacy.decode_pose` are pinned to them, so every session
+  recorded before this release stays readable by the same decoder. `VHI_Predict` does
+  not stay in those units — see Fixed, below.
 - **`SweepControl`'s expectation is axis-aware.** Thumb abduction drives all three thumb
   bones through one channel, but the distal bone's Z gain is `0` — a channel-wide
   expectation reported a correct sweep as a mismatch.
 - The `MyoGestic_Output` inlet is documented with its **verified** channel map. Channel 0
   is thumb *flexion* and channel 1 thumb *abduction*; the previous documentation had
-  those swapped and described channels 6-8 as a wrist. There are no wrist channels — 6-8
-  are read by no consumer.
+  those swapped. Channels 6-8 are the wrist — see Fixed, below.
+- **BREAKING: the control plane collapsed to one gRPC service, and none of this has a
+  compatibility window.** `VhiTrainingAid` is gone; its RPCs move onto `VhiControl` and
+  lose "training" from their names in the process (`StartTrainingProgram` →
+  `StartRecordingTrajectory`, `StopTrainingProgram` → `StopRecordingTrajectory`,
+  `GetTrainingState` → `GetRecordingSessionState`) — a recording aid that cannot see what
+  the control service already declared to the same hand was two sources of truth for one
+  state machine, not two independent responsibilities. The per-capability
+  `ContinuousEncoding` field is gone from the manifest, and `control_pose_encoding`
+  narrows to a plain `control_pose` bool on both `DeclareRequest` and `DeclareReply`: the
+  sign convention it used to carry left the wire entirely once the predicted hand stopped
+  computing one to negate. None of this degrades gracefully — an old MyoGestic against a
+  new VHI, or the reverse, refuses to link at all: wrong service name, wrong RPC names, a
+  field that no longer exists. **MyoGestic and VHI must be upgraded together**; there is
+  no staged rollout and no version this pair is backward-compatible with.
 
 ### Removed
 
@@ -113,7 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Movements.WristLeftRight` (±20°) but its **sign is a choice** — "left/right" names an
   axis, not a direction, and nothing in the library, the rig or the docs settles which side
   is abduction. It is taken by analogy with flexion and marked as such in
-  `Vhi.CanonicalPose`; flipping it is one sign and a failing test.
+  `Vhi.StandardPose`; flipping it is one sign and a failing test.
 
   `wrist.rotation` renders too, on channel 8, and it is the one control here with **no
   rig-side evidence at all** — no movement in the library touches joint 0's Y axis, so both
@@ -144,7 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   puts a digit at max flexion — bone 7 at `-85°`, where `IndexExtension` puts it at
   `+20°`. Negating it rendered `+85°`, an opening hand.
 
-  The rule now lives in one place, `Vhi.CanonicalPose`, beside the pose library that
+  The rule now lives in one place, `Vhi.StandardPose`, beside the pose library that
   justifies it: `+1` for the five flexion channels, `-1` for thumb abduction alone,
   because the fist's thumb Z is *ad*duction and no movement in the library goes the other
   way. Getting that one channel right by negating everything is why the bug was not
@@ -156,9 +170,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names. Restoring the blanket negation fails 11 assertions.
 - **The canonical conversion is no longer gated, and no longer claims to be.** The ingest
   comment said it was "gated behind the handshake" while negating regardless of what a
-  client declared. `DeclareReply.continuous_encoding` reports `CANONICAL` unconditionally,
-  so the conversion is unconditional too: it must not be possible for the same `+1` to
-  render two ways depending on what was said during `Declare`.
+  client declared. The conversion is unconditional now, with no field left to say
+  otherwise: it must not be possible for the same `+1` to render two ways depending on
+  what was said during `Declare`.
 - **An over-range pose sample could invert a joint.** The gRPC path clamped to `[-1, 1]`;
   the LSL path did not. Past `±90°` the Euler round-trip used to read a bone back wraps and
   changes sign, so a sample beyond `±1.06` on an `85°` gain flipped the read-back. Both
