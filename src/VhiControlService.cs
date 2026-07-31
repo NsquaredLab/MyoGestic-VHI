@@ -208,23 +208,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 		"vhi.control.pose.little.flexion",
 	];
 
-	/// <summary>The pose channel an address occupies on one stream, or <c>-1</c>.</summary>
-	/// <remarks>
-	/// Exposed for <see cref="LSLCommunicationController"/>, which reads a producer's channel
-	/// labels and needs to know where each labelled address belongs in this renderer's own
-	/// pose order. That is the same address table <c>Declare</c>, <c>SetControl</c> and
-	/// <c>SweepControl</c> resolve against, so a labelled stream and a declaration cannot
-	/// disagree about where a control lives — there is one table.
-	/// </remarks>
-	public static int ChannelForAddress(string address, bool controlPose)
-	{
-		if (address == null)
-			return -1;
-		if (controlPose)
-			return ControlPoseRenderable.TryGetValue(address, out int channel) ? channel : -1;
-		return Renderable.TryGetValue(address, out var slot) ? slot.Channel : -1;
-	}
-
 	/// <summary>Advertised addresses in pose-channel order, for one stream.</summary>
 	/// <remarks>
 	/// <para>Derived from the same tables the manifest is built from, minus

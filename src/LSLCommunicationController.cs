@@ -38,11 +38,6 @@ public partial class LSLCommunicationController : Node
 	/// Resolved by name only.</summary>
 	[Export] public string PredictionStreamName = "MyoGestic_Output";
 
-	/// <summary>LSL type advertised by the predicted-hand stream. Currently
-	/// not used for resolution - inlets are matched by name only - but kept
-	/// as Inspector metadata.</summary>
-	[Export] public string PredictionStreamType = "MyoGestic_9DVector";
-
 	/// <summary>Name of the optional LSL inlet that drives the control hand
 	/// in <see cref="ControlHandDriverMode.Stream"/>. Resolved by name only;
 	/// missing is fine - the inlet is simply skipped.</summary>
@@ -108,16 +103,8 @@ public partial class LSLCommunicationController : Node
 	/// </remarks>
 	[Export] public float PredictionStaleAfterSeconds = 5.0f;
 
-	public new bool IsConnected { get; private set; } = false;  // 'new' to hide base class member
-	public int LastInputFPS { get; private set; } = 0;
-	public int LastOutputFPS { get; private set; } = 0;
-
-	private DateTime lastInputTime;
-	private DateTime lastOutputTime;
 	private DateTime lastConnectionAttempt;
 	private DateTime lastControlPoseAttempt;
-	private int inputFrameCount = 0;
-	private int outputFrameCount = 0;
 	private float connectionRetryInterval = 5.0f;
 	private bool isConnecting = false;             // prediction inlet connect in progress
 	private bool isConnectingControlPose = false;  // control-pose inlet connect in progress
@@ -140,8 +127,6 @@ public partial class LSLCommunicationController : Node
 		GD.Print("  Sample buffers initialized");
 
 		// Initialize timestamps
-		lastInputTime = DateTime.Now;
-		lastOutputTime = DateTime.Now;
 		lastConnectionAttempt = DateTime.Now.AddSeconds(-connectionRetryInterval); // Allow immediate first attempt
 		lastControlPoseAttempt = lastConnectionAttempt;
 		GD.Print("  Timestamps initialized");
@@ -204,23 +189,12 @@ public partial class LSLCommunicationController : Node
 				}
 
 				if (samplesThisFrame > 0)
-				{
 					lastPredictionSample = DateTime.Now;
-					inputFrameCount += samplesThisFrame;
-					var timeSinceLastInput = (DateTime.Now - lastInputTime).TotalSeconds;
-					if (timeSinceLastInput >= 1.0)
-					{
-						LastInputFPS = (int)(inputFrameCount / timeSinceLastInput);
-						inputFrameCount = 0;
-						lastInputTime = DateTime.Now;
-					}
-				}
 			}
 			catch (Exception e)
 			{
 				GD.PrintErr($"Error pulling LSL prediction sample: {e.Message}");
 				DropInlet(ref predictionInlet);
-				IsConnected = false;
 				receivedDataPredicted.Clear();
 			}
 		}
@@ -233,7 +207,6 @@ public partial class LSLCommunicationController : Node
 				$"⏱️ No {PredictionStreamName} samples for "
 				+ $"{PredictionStaleAfterSeconds:F0}s — dropping the inlet and looking again.");
 			DropInlet(ref predictionInlet);
-			IsConnected = false;
 			receivedDataPredicted.Clear();
 			// Reset the clock, or the next inlet is judged on this one's silence.
 			lastPredictionSample = DateTime.Now;
@@ -253,15 +226,6 @@ public partial class LSLCommunicationController : Node
 				DropInlet(ref controlPoseInlet);
 				receivedDataControl.Clear();
 			}
-		}
-
-		// --- Update output FPS ---
-		var timeSinceLastOutput = (DateTime.Now - lastOutputTime).TotalSeconds;
-		if (timeSinceLastOutput >= 1.0)
-		{
-			LastOutputFPS = (int)(outputFrameCount / timeSinceLastOutput);
-			outputFrameCount = 0;
-			lastOutputTime = DateTime.Now;
 		}
 	}
 
@@ -353,7 +317,6 @@ public partial class LSLCommunicationController : Node
 				lastPredictionSample = DateTime.Now;
 			if (inlet != null && sampleBuffer.Length != width)
 				sampleBuffer = new float[width];
-			IsConnected = inlet != null;
 			isConnecting = false;
 		}
 		if (inlet == null)
@@ -494,8 +457,7 @@ public partial class LSLCommunicationController : Node
 			{
 				float[] sample = [.. data];
 				LSLWrapper.PushSample(controlOutlet, sample);
-				outputFrameCount++;
-			}
+				}
 			catch (Exception e)
 			{
 				GD.PrintErr($"❌ Error sending control data: {e.Message}");
@@ -517,8 +479,7 @@ public partial class LSLCommunicationController : Node
 			{
 				float[] sample = [.. data];
 				LSLWrapper.PushSample(predictedOutlet, sample);
-				outputFrameCount++;
-			}
+				}
 			catch (Exception e)
 			{
 				GD.PrintErr($"❌ Error sending predicted data: {e.Message}");

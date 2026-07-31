@@ -41,9 +41,6 @@ public partial class PredictedHandSkeleton : Node3D
 	// Bone name to index mapping
 	private readonly Dictionary<string, int> boneMap = [];
 
-	// Maximum movement for each joint
-	private readonly Dictionary<int, float[]> jointMovements = [];
-
 	// Bone names in the FBX model (WaveBone naming convention)
 	// Based on the Unity hand structure - matches ControlHandSkeleton mapping
 	private string[] boneNames =
@@ -65,9 +62,6 @@ public partial class PredictedHandSkeleton : Node3D
 		"WaveBone_23",  // 14 - pinkie1 (middle)
 		"WaveBone_24"   // 15 - pinkie0 (distal)
 	];
-
-	private DateTime lastInputTime;
-	private int inputFrameCount = 0;
 
 	public override void _Ready()
 	{
@@ -99,11 +93,6 @@ public partial class PredictedHandSkeleton : Node3D
 			GD.PrintErr("⚠️ No Skeleton3D found! Hand won't animate.");
 		}
 
-		// Set up joint movement limits
-		InitializeJointMovements();
-
-
-		lastInputTime = DateTime.Now;
 		GD.Print("=== Predicted Hand Skeleton Controller _Ready() COMPLETE ===");
 	}
 
@@ -148,15 +137,6 @@ public partial class PredictedHandSkeleton : Node3D
 		}
 	}
 
-	private void InitializeJointMovements()
-	{
-		// The gains are StandardPose's, not this hand's. Both skeletons kept their own copy
-		// once, and the copies drifted: these were the pose table's raw rows, which are the
-		// negative of what the rig renders, so a standard +1 bent every digit backwards.
-		foreach ((int joint, float[] degrees) in StandardPose.AtPlusOne)
-			jointMovements[joint] = degrees;
-	}
-
 	public override void _Process(double delta)
 	{
 		if (communicationController != null)
@@ -173,17 +153,6 @@ public partial class PredictedHandSkeleton : Node3D
 
 			if (currentData.Count >= 9 && skeleton != null && boneMap.Count > 0)
 			{
-				// Update input FPS tracking
-				inputFrameCount++;
-				var timeSinceLastInput = (DateTime.Now - lastInputTime).TotalSeconds;
-				if (timeSinceLastInput >= 1.0)
-				{
-					int fps = (int)(inputFrameCount / timeSinceLastInput);
-					GD.Print($"Predicted Hand Input FPS: {fps}");
-					inputFrameCount = 0;
-					lastInputTime = DateTime.Now;
-				}
-
 				if (EnableSmoothing)
 				{
 					MoveBonesSmoothly(delta);
@@ -204,31 +173,31 @@ public partial class PredictedHandSkeleton : Node3D
 	private void MoveBonesDirectly()
 	{
 		// Thumb (indices 0 and 1: flexion and abduction)
-		SetBoneRotation(0, currentData[6] * jointMovements[0][0], currentData[8] * jointMovements[0][1], currentData[7] * jointMovements[0][2]);
+		SetBoneRotation(0, currentData[6] * StandardPose.AtPlusOne[0][0], currentData[8] * StandardPose.AtPlusOne[0][1], currentData[7] * StandardPose.AtPlusOne[0][2]);
 
-		SetBoneRotation(1, currentData[0] * jointMovements[1][0], 0, currentData[1] * jointMovements[1][2]);
-		SetBoneRotation(2, currentData[0] * jointMovements[2][0], 0, currentData[1] * jointMovements[2][2]);
-		SetBoneRotation(3, currentData[0] * jointMovements[3][0], 0, currentData[1] * jointMovements[3][2]);
+		SetBoneRotation(1, currentData[0] * StandardPose.AtPlusOne[1][0], 0, currentData[1] * StandardPose.AtPlusOne[1][2]);
+		SetBoneRotation(2, currentData[0] * StandardPose.AtPlusOne[2][0], 0, currentData[1] * StandardPose.AtPlusOne[2][2]);
+		SetBoneRotation(3, currentData[0] * StandardPose.AtPlusOne[3][0], 0, currentData[1] * StandardPose.AtPlusOne[3][2]);
 
 		// Index (index 2)
-		SetBoneRotation(4, currentData[2] * jointMovements[4][0], 0, 0);
-		SetBoneRotation(5, currentData[2] * jointMovements[5][0], 0, 0);
-		SetBoneRotation(6, currentData[2] * jointMovements[6][0], 0, 0);
+		SetBoneRotation(4, currentData[2] * StandardPose.AtPlusOne[4][0], 0, 0);
+		SetBoneRotation(5, currentData[2] * StandardPose.AtPlusOne[5][0], 0, 0);
+		SetBoneRotation(6, currentData[2] * StandardPose.AtPlusOne[6][0], 0, 0);
 
 		// Middle (index 3)
-		SetBoneRotation(7, currentData[3] * jointMovements[7][0], 0, 0);
-		SetBoneRotation(8, currentData[3] * jointMovements[8][0], 0, 0);
-		SetBoneRotation(9, currentData[3] * jointMovements[9][0], 0, 0);
+		SetBoneRotation(7, currentData[3] * StandardPose.AtPlusOne[7][0], 0, 0);
+		SetBoneRotation(8, currentData[3] * StandardPose.AtPlusOne[8][0], 0, 0);
+		SetBoneRotation(9, currentData[3] * StandardPose.AtPlusOne[9][0], 0, 0);
 
 		// Ring (index 4)
-		SetBoneRotation(10, currentData[4] * jointMovements[10][0], 0, 0);
-		SetBoneRotation(11, currentData[4] * jointMovements[11][0], 0, 0);
-		SetBoneRotation(12, currentData[4] * jointMovements[12][0], 0, 0);
+		SetBoneRotation(10, currentData[4] * StandardPose.AtPlusOne[10][0], 0, 0);
+		SetBoneRotation(11, currentData[4] * StandardPose.AtPlusOne[11][0], 0, 0);
+		SetBoneRotation(12, currentData[4] * StandardPose.AtPlusOne[12][0], 0, 0);
 
 		// Pinky (index 5)
-		SetBoneRotation(13, currentData[5] * jointMovements[13][0], 0, 0);
-		SetBoneRotation(14, currentData[5] * jointMovements[14][0], 0, 0);
-		SetBoneRotation(15, currentData[5] * jointMovements[15][0], 0, 0);
+		SetBoneRotation(13, currentData[5] * StandardPose.AtPlusOne[13][0], 0, 0);
+		SetBoneRotation(14, currentData[5] * StandardPose.AtPlusOne[14][0], 0, 0);
+		SetBoneRotation(15, currentData[5] * StandardPose.AtPlusOne[15][0], 0, 0);
 	}
 
 	private void MoveBonesSmoothly(double delta)
@@ -236,31 +205,31 @@ public partial class PredictedHandSkeleton : Node3D
 		float lerpFactor = (float)(SmoothingSpeed * delta);
 
 		// Thumb
-		SmoothBoneRotation(0, currentData[6] * jointMovements[0][0], currentData[8] * jointMovements[0][1], currentData[7] * jointMovements[0][2], lerpFactor);
+		SmoothBoneRotation(0, currentData[6] * StandardPose.AtPlusOne[0][0], currentData[8] * StandardPose.AtPlusOne[0][1], currentData[7] * StandardPose.AtPlusOne[0][2], lerpFactor);
 
-		SmoothBoneRotation(1, currentData[0] * jointMovements[1][0], 0, currentData[1] * jointMovements[1][2], lerpFactor);
-		SmoothBoneRotation(2, currentData[0] * jointMovements[2][0], 0, currentData[1] * jointMovements[2][2], lerpFactor);
-		SmoothBoneRotation(3, currentData[0] * jointMovements[3][0], 0, currentData[1] * jointMovements[3][2], lerpFactor);
+		SmoothBoneRotation(1, currentData[0] * StandardPose.AtPlusOne[1][0], 0, currentData[1] * StandardPose.AtPlusOne[1][2], lerpFactor);
+		SmoothBoneRotation(2, currentData[0] * StandardPose.AtPlusOne[2][0], 0, currentData[1] * StandardPose.AtPlusOne[2][2], lerpFactor);
+		SmoothBoneRotation(3, currentData[0] * StandardPose.AtPlusOne[3][0], 0, currentData[1] * StandardPose.AtPlusOne[3][2], lerpFactor);
 
 		// Index
-		SmoothBoneRotation(4, currentData[2] * jointMovements[4][0], 0, 0, lerpFactor);
-		SmoothBoneRotation(5, currentData[2] * jointMovements[5][0], 0, 0, lerpFactor);
-		SmoothBoneRotation(6, currentData[2] * jointMovements[6][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(4, currentData[2] * StandardPose.AtPlusOne[4][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(5, currentData[2] * StandardPose.AtPlusOne[5][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(6, currentData[2] * StandardPose.AtPlusOne[6][0], 0, 0, lerpFactor);
 
 		// Middle
-		SmoothBoneRotation(7, currentData[3] * jointMovements[7][0], 0, 0, lerpFactor);
-		SmoothBoneRotation(8, currentData[3] * jointMovements[8][0], 0, 0, lerpFactor);
-		SmoothBoneRotation(9, currentData[3] * jointMovements[9][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(7, currentData[3] * StandardPose.AtPlusOne[7][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(8, currentData[3] * StandardPose.AtPlusOne[8][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(9, currentData[3] * StandardPose.AtPlusOne[9][0], 0, 0, lerpFactor);
 
 		// Ring
-		SmoothBoneRotation(10, currentData[4] * jointMovements[10][0], 0, 0, lerpFactor);
-		SmoothBoneRotation(11, currentData[4] * jointMovements[11][0], 0, 0, lerpFactor);
-		SmoothBoneRotation(12, currentData[4] * jointMovements[12][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(10, currentData[4] * StandardPose.AtPlusOne[10][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(11, currentData[4] * StandardPose.AtPlusOne[11][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(12, currentData[4] * StandardPose.AtPlusOne[12][0], 0, 0, lerpFactor);
 
 		// Pinky
-		SmoothBoneRotation(13, currentData[5] * jointMovements[13][0], 0, 0, lerpFactor);
-		SmoothBoneRotation(14, currentData[5] * jointMovements[14][0], 0, 0, lerpFactor);
-		SmoothBoneRotation(15, currentData[5] * jointMovements[15][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(13, currentData[5] * StandardPose.AtPlusOne[13][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(14, currentData[5] * StandardPose.AtPlusOne[14][0], 0, 0, lerpFactor);
+		SmoothBoneRotation(15, currentData[5] * StandardPose.AtPlusOne[15][0], 0, 0, lerpFactor);
 	}
 
 	private void SetBoneRotation(int jointIndex, float xDeg, float yDeg, float zDeg)
@@ -345,22 +314,6 @@ public partial class PredictedHandSkeleton : Node3D
 		return rot.GetEuler() * (180.0f / Mathf.Pi);
 	}
 
-	/// <summary>Reset all 16 animated joints to their rest pose. Used to clear
-	/// the hand to neutral - typically when the prediction stream stops or a
-	/// fresh stream connects.</summary>
-	public void ResetBones()
-	{
-		if (skeleton == null)
-			return;
-
-		foreach (var bone in boneMap.Values)
-		{
-			skeleton.SetBonePoseRotation(bone, Quaternion.Identity);
-		}
-
-		GD.Print("Predicted hand bones reset");
-	}
-
 	// --- standard control (v2) --------------------------------------------------
 	//
 	// The v2 service addresses DOFs by name and needs three things this class did not
@@ -406,7 +359,7 @@ public partial class PredictedHandSkeleton : Node3D
 		var movable = new List<int>();
 		foreach (int joint in JointsForChannel(channel))
 		{
-			if (jointMovements.TryGetValue(joint, out float[] gains)
+			if (StandardPose.AtPlusOne.TryGetValue(joint, out float[] gains)
 				&& axisIndex < gains.Length
 				&& gains[axisIndex] != 0f)
 			{

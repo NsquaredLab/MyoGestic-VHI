@@ -24,26 +24,6 @@ public static class MovementConfigLoader
 			? name
 			: "unity-signed";
 
-	private static readonly string[] JointNames =
-	[
-		"wrist",
-		"thumb_proximal",
-		"thumb_middle",
-		"thumb_distal",
-		"index_proximal",
-		"index_middle",
-		"index_distal",
-		"middle_proximal",
-		"middle_middle",
-		"middle_distal",
-		"ring_proximal",
-		"ring_middle",
-		"ring_distal",
-		"pinky_proximal",
-		"pinky_middle",
-		"pinky_distal"
-	];
-
 	private static readonly Dictionary<string, int> JointNameToIndex = new()
 	{
 		{ "wrist", 0 },

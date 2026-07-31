@@ -444,18 +444,6 @@ public static class StandardPose
 		[15] = [60, 0, 0],
 	};
 
-	/// <summary>Rig degrees for one joint and axis at <paramref name="standard"/>.</summary>
-	/// <param name="joint">Joint index, 0-15.</param>
-	/// <param name="axis">0 for X, 1 for Y, 2 for Z.</param>
-	/// <param name="standard">A standard value; clamped to <c>[-1, 1]</c>.</param>
-	/// <remarks>Clamped because past <c>±90°</c> the Euler round-trip used to read a bone back
-	/// wraps and changes sign. The gRPC path always clamped; the LSL path did not, which made
-	/// an over-range sample the one remaining way to flip a direction.</remarks>
-	public static float Degrees(int joint, int axis, float standard) =>
-		!AtPlusOne.TryGetValue(joint, out float[] at) || axis < 0 || axis >= at.Length
-			? 0f
-			: Math.Clamp(standard, -1f, 1f) * at[axis];
-
 	/// <summary>Rendered degrees → the standard value that produced them. The inverse of
 	/// <see cref="Degrees"/> in range, so a read-back round-trips rather than flipping.
 	/// </summary>

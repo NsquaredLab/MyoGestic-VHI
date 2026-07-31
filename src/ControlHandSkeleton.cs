@@ -78,9 +78,6 @@ public partial class ControlHandSkeleton : Node3D
 	// Bone name to index mapping
 	private readonly Dictionary<string, int> boneMap = [];
 
-	// Maximum movement for each joint (from Unity)
-	private readonly float[][][] jointMaximumMovement = new float[16][][];
-
 	// Movement control system
 	private Dictionary<string, float[][][]> movementPoses;
 	private string[] availableMovements;
@@ -142,10 +139,6 @@ public partial class ControlHandSkeleton : Node3D
 		{
 			GD.PrintErr("⚠️ No Skeleton3D found! Hand won't animate.");
 		}
-
-		// Set up maximum movements
-		GD.Print("  Initializing maximum movements...");
-		InitializeMaximumMovements();
 
 		// Initialize movement control system
 		if (EnableMovementControl)
@@ -219,25 +212,6 @@ public partial class ControlHandSkeleton : Node3D
 		}
 	}
 
-	private void InitializeMaximumMovements()
-	{
-		for (int i = 0; i < jointMaximumMovement.Length; i++)
-		{
-			jointMaximumMovement[i] = new float[2][];
-			for (int j = 0; j < 2; j++)
-			{
-				jointMaximumMovement[i][j] = new float[3];
-			}
-		}
-
-		// The gains are StandardPose's, not this hand's — the same table the predicted hand
-		// uses, so the two cannot drift into disagreeing about which way +1 bends a digit.
-		// They did: both carried a private copy of the pose table's raw rows, which are the
-		// negative of what this rig renders.
-		foreach ((int joint, float[] degrees) in StandardPose.AtPlusOne)
-			jointMaximumMovement[joint][0] = degrees;
-	}
-
 	public override void _Process(double delta)
 	{
 		switch (DriverMode)
@@ -285,32 +259,32 @@ public partial class ControlHandSkeleton : Node3D
 
 
 		// Wrist (indices 6, 7, 8: flexion, abduction, rotation)
-		SetBoneRotation(0, currentData[6] * jointMaximumMovement[0][0][0], currentData[8] * jointMaximumMovement[0][0][1], currentData[7] * jointMaximumMovement[0][0][2]);
+		SetBoneRotation(0, currentData[6] * StandardPose.AtPlusOne[0][0], currentData[8] * StandardPose.AtPlusOne[0][1], currentData[7] * StandardPose.AtPlusOne[0][2]);
 
 		// Thumb (uses indices 0 and 1: flexion and abduction)
-		SetBoneRotation(1, currentData[0] * jointMaximumMovement[1][0][0], 0, currentData[1] * jointMaximumMovement[1][0][2]);
-		SetBoneRotation(2, currentData[0] * jointMaximumMovement[2][0][0], 0, currentData[1] * jointMaximumMovement[2][0][2]);
-		SetBoneRotation(3, currentData[0] * jointMaximumMovement[3][0][0], 0, currentData[1] * jointMaximumMovement[3][0][2]);
+		SetBoneRotation(1, currentData[0] * StandardPose.AtPlusOne[1][0], 0, currentData[1] * StandardPose.AtPlusOne[1][2]);
+		SetBoneRotation(2, currentData[0] * StandardPose.AtPlusOne[2][0], 0, currentData[1] * StandardPose.AtPlusOne[2][2]);
+		SetBoneRotation(3, currentData[0] * StandardPose.AtPlusOne[3][0], 0, currentData[1] * StandardPose.AtPlusOne[3][2]);
 
 		// Index (uses index 2)
-		SetBoneRotation(4, currentData[2] * jointMaximumMovement[4][0][0], 0, 0);
-		SetBoneRotation(5, currentData[2] * jointMaximumMovement[5][0][0], 0, 0);
-		SetBoneRotation(6, currentData[2] * jointMaximumMovement[6][0][0], 0, 0);
+		SetBoneRotation(4, currentData[2] * StandardPose.AtPlusOne[4][0], 0, 0);
+		SetBoneRotation(5, currentData[2] * StandardPose.AtPlusOne[5][0], 0, 0);
+		SetBoneRotation(6, currentData[2] * StandardPose.AtPlusOne[6][0], 0, 0);
 
 		// Middle (uses index 3)
-		SetBoneRotation(7, currentData[3] * jointMaximumMovement[7][0][0], 0, 0);
-		SetBoneRotation(8, currentData[3] * jointMaximumMovement[8][0][0], 0, 0);
-		SetBoneRotation(9, currentData[3] * jointMaximumMovement[9][0][0], 0, 0);
+		SetBoneRotation(7, currentData[3] * StandardPose.AtPlusOne[7][0], 0, 0);
+		SetBoneRotation(8, currentData[3] * StandardPose.AtPlusOne[8][0], 0, 0);
+		SetBoneRotation(9, currentData[3] * StandardPose.AtPlusOne[9][0], 0, 0);
 
 		// Ring (uses index 4)
-		SetBoneRotation(10, currentData[4] * jointMaximumMovement[10][0][0], 0, 0);
-		SetBoneRotation(11, currentData[4] * jointMaximumMovement[11][0][0], 0, 0);
-		SetBoneRotation(12, currentData[4] * jointMaximumMovement[12][0][0], 0, 0);
+		SetBoneRotation(10, currentData[4] * StandardPose.AtPlusOne[10][0], 0, 0);
+		SetBoneRotation(11, currentData[4] * StandardPose.AtPlusOne[11][0], 0, 0);
+		SetBoneRotation(12, currentData[4] * StandardPose.AtPlusOne[12][0], 0, 0);
 
 		// Pinky (uses index 5)
-		SetBoneRotation(13, currentData[5] * jointMaximumMovement[13][0][0], 0, 0);
-		SetBoneRotation(14, currentData[5] * jointMaximumMovement[14][0][0], 0, 0);
-		SetBoneRotation(15, currentData[5] * jointMaximumMovement[15][0][0], 0, 0);
+		SetBoneRotation(13, currentData[5] * StandardPose.AtPlusOne[13][0], 0, 0);
+		SetBoneRotation(14, currentData[5] * StandardPose.AtPlusOne[14][0], 0, 0);
+		SetBoneRotation(15, currentData[5] * StandardPose.AtPlusOne[15][0], 0, 0);
 	}
 
 	private void SetBoneRotation(int jointIndex, float xDeg, float yDeg, float zDeg)

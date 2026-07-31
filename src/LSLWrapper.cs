@@ -307,21 +307,6 @@ public static class LSLWrapper
 	}
 
 	/// <summary>
-	/// Push a string sample to a StreamOutlet
-	/// </summary>
-	public static void PushSample(object outlet, string[] sample)
-	{
-		try
-		{
-			var pushMethod = streamOutletType.GetMethod("PushSample", [typeof(string[])]);
-			pushMethod.Invoke(outlet, [sample]);
-		}
-		catch (Exception e)
-		{
-			GD.PrintErr($"❌ PushSample (string) failed: {e.Message}");
-		}
-	}
-
 	/// <summary>
 	/// Get StreamInfo name
 	/// </summary>

@@ -50,9 +50,6 @@ public partial class ControlPanelUI : Control
 	private bool isCollapsed = true; // Start collapsed
 
 	// Hand chirality toggle
-	private CheckBox rightHandToggle;
-	private Vector3 controlMeshOriginalPos;
-	private Vector3 predictedMeshOriginalPos;
 
 	// Config file buttons
 	private Button openConfigButton;
@@ -63,26 +60,14 @@ public partial class ControlPanelUI : Control
 	private Button freezeButton;
 
 	// UI scaling
-	private Vector2 baseResolution = new(1152, 648); // Default window size
-	private Window window;
 
 	// Public property to access hand chirality
-	public bool IsRightHand => rightHandToggle?.ButtonPressed ?? false;
 
 	public override void _Ready()
 	{
-		// Get window for scaling
-		window = GetWindow();
-
 		// Get references to hand controllers
 		controlHand = GetNode<ControlHandSkeleton>("/root/Main/ControlHand");
 		predictedHand = GetNode<PredictedHandSkeleton>("/root/Main/PredictedHand");
-
-		// Save original mesh positions
-		var controlMesh = controlHand.GetNode<Node3D>("WVRLeftHand_1106_ASCII");
-		var predictedMesh = predictedHand.GetNode<Node3D>("WVRLeftHand_1106_ASCII");
-		controlMeshOriginalPos = controlMesh.Position;
-		predictedMeshOriginalPos = predictedMesh.Position;
 
 		// Get collapse button and panel
 		collapseButton = GetNode<Button>("CollapseButton");
@@ -93,7 +78,6 @@ public partial class ControlPanelUI : Control
 		collapseButton.Text = isCollapsed ? ">" : "<";
 
 		// Get hand chirality toggle
-		rightHandToggle = GetNode<CheckBox>("Panel/VBoxContainer/HandChiralityGroup/RightHandToggle");
 
 		// Get config buttons
 		openConfigButton = GetNode<Button>("Panel/VBoxContainer/ConfigGroup/OpenConfigButton");
@@ -143,7 +127,6 @@ public partial class ControlPanelUI : Control
 		smoothingToggle.Toggled += OnSmoothingToggled;
 		smoothingSpeedSlider.ValueChanged += OnSmoothingSpeedChanged;
 		collapseButton.Pressed += OnCollapseToggled;
-		rightHandToggle.Toggled += OnHandChiralityToggled;
 		openConfigButton.Pressed += OnOpenConfigPressed;
 		loadConfigButton.Pressed += OnLoadConfigPressed;
 		freezeButton.Pressed += OnFreezePressed;
@@ -209,41 +192,6 @@ public partial class ControlPanelUI : Control
 		isCollapsed = !isCollapsed;
 		mainPanel.Visible = !isCollapsed;
 		collapseButton.Text = isCollapsed ? ">" : "<";
-	}
-
-	private void OnHandChiralityToggled(bool isRightHand)
-	{
-		// Mirror hands by flipping the mesh children, not the parent nodes
-		// This keeps the hands in their original positions while changing chirality
-		// Right hand: positive scale (1.0), original position
-		// Left hand: negative scale (-1.0), compensated position
-		// Note: Due to mesh rotation, we flip Z-axis to get visual X-axis mirroring
-
-		// TODO: Enable hand flipping when meshes are fixed
-		return; // Temporarily disable hand flipping
-
-		float Scale = isRightHand ? 1.0f : -1.0f;
-
-		// Find mesh child nodes
-		var controlMesh = controlHand.GetNode<Node3D>("WVRLeftHand_1106_ASCII");
-		var predictedMesh = predictedHand.GetNode<Node3D>("WVRLeftHand_1106_ASCII");
-
-		// Apply scale
-		controlMesh.Scale = new Vector3(Scale, 1.0f, 1.0f);
-		predictedMesh.Scale = new Vector3(Scale, 1.0f, 1.0f);
-
-		// Compensate position: when flipped, mirror the X position to keep hand in place
-		if (isRightHand)
-		{
-			controlMesh.Position = controlMeshOriginalPos;
-			predictedMesh.Position = predictedMeshOriginalPos;
-		}
-		else
-		{
-			// When flipped, negate X to compensate for the flip around wrist origin
-			controlMesh.Position = new Vector3(controlMeshOriginalPos.X, controlMeshOriginalPos.Y, controlMeshOriginalPos.Z);
-			predictedMesh.Position = new Vector3(predictedMeshOriginalPos.X, predictedMeshOriginalPos.Y, predictedMeshOriginalPos.Z);
-		}
 	}
 
 	private void OnFreezePressed()
