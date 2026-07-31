@@ -43,7 +43,7 @@ switched off with the `EnableOutlets` flag.
     (whatever VHI is rendering, 60 Hz). They are not the same signal: the
     outlets are an interpolated, smoothed, mode-aware view of what reached
     the screen. For frame-accurate experiment recording, treat `VHI_Predict`
-    / `VHI_Control` as the canonical record of what the participant *saw*,
+    / `VHI_Control` as the authoritative record of what the participant *saw*,
     and the inlets as the *cause*. Record both - LSL's XDF format is
     designed for exactly this heterogeneous-rate, multi-stream case
     (`pyxdf.load_xdf` lines them up on a common clock).
@@ -89,12 +89,12 @@ DOFs across the 16 animated joints internally (see [Architecture](architecture.m
     in a fist where recordings show `-1.0`. Duplicating it is how it drifts, so there is
     now one copy.
 
-    The convention also differs *per stream* as of 2.0: `MyoGestic_Output` takes canonical
+    The convention also differs *per stream* as of 2.0: `MyoGestic_Output` takes standard
     values (`+1` flexes) and `VHI_Predict` publishes them, so a round-trip through the
     predicted hand is the identity. `VHI_Control` stays in raw rig units, deliberately —
     every session recorded before 2.0 is in those units and stays readable by the same
-    decoder. `MyoGestic_ControlPose` is whichever the client negotiated, rig units by
-    default. Anything that hard-codes a sign is right on one stream and wrong on another;
+    decoder. `MyoGestic_ControlPose` is standard too, unconditionally, once declared.
+    Anything that hard-codes a sign is right on one stream and wrong on another;
     call `Declare` and honour what it reports.
 
 See the [LSL reference](../reference/lsl-reference.md) for stream types,

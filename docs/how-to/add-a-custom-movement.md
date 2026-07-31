@@ -51,12 +51,12 @@ index_proximal = [-40, 0, 0]
 
 Once the movement is in the config:
 
-- it appears in `GetTrainingState().available_movements`, so a client can discover
-  it without hard-coding anything;
-- a canonical discrete DOF declaring `"mygesture"` as one of its states resolves to
-  it and holds its end pose, and a
-  [training program](../concepts/grpc-control.md) cycles it when you want a
-  trajectory for recording;
+- it appears in `GetRecordingSessionState().available_movements`, so a client can
+  discover it without hard-coding anything;
+- a standard discrete DOF declaring `"mygesture"` as one of its states resolves to
+  it and holds its end pose, and
+  [`StartRecordingTrajectory`](../concepts/grpc-control.md) cycles it when you want
+  a swept trajectory for recording;
 - the keyboard ++arrow-left++ / ++arrow-right++ cycle through it;
 - it shows up in MyoGestic's movement palette.
 

@@ -43,8 +43,8 @@ vhi = virtual_hand()
 processes = ProcessLauncher([*vhi.launcher()])       # call .ui() each frame
 
 # 2. Open the control client. Fire-and-forget; never blocks the GUI.
-client = vhi.canonical_client()
-training_aid = vhi.training_client()
+client = vhi.control_client()
+recording = vhi.recording_client()
 
 # 3. Say what you control, in your own names, pointed at addresses VHI publishes.
 control_map = load_control_map({
@@ -63,8 +63,8 @@ bus = ControlBus(controls, targets=[VhiTarget(vhi.outlet(), client=client)], hz=
 # 5. Command by your own names.
 bus.push({"my_index": 0.8})              # a number, onto the predicted hand
 bus.select("gesture", "Fist")            # a held state: snap to the pose, hold it
-training_aid.start_program("Index")      # a trajectory, for recording data
-training_aid.set_recording_session(True) # recording live — VHI ignores its keyboard
+recording.start_trajectory("Index")      # a trajectory, for recording data
+recording.set_recording_session(True)    # recording live — VHI ignores its keyboard
 ```
 
 Commands are **fire-and-forget**: each call enqueues onto a daemon thread and
@@ -91,15 +91,15 @@ for cap in client.capabilities() or ():
 
 ## Query control-hand state
 
-`training_aid.state()` is the one **synchronous** call — use it on connect or an
+`recording.state()` is the one **synchronous** call — use it on connect or an
 explicit refresh, not every frame:
 
 ```python
-state = training_aid.state()
+state = recording.state()
 if state is not None:                       # None == VHI not reachable
     print(list(state.available_movements))  # names a discrete state may resolve to
     print(state.current_movement)
-    print(state.program_running)
+    print(state.trajectory_running)
 ```
 
 Discovering `available_movements` this way means you never hard-code the

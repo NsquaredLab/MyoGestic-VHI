@@ -26,9 +26,9 @@ VHI is the Godot / .NET front-end of the **[MyoGestic](https://github.com/Nsquar
 VHI talks to MyoGestic over two channels, each chosen for the kind of traffic it carries:
 
 - **LSL** for **continuous time-series**: `MyoGestic_Output` (prediction stream → predicted hand, ~32 Hz), the optional `MyoGestic_ControlPose` (operator-driven pose → control hand), and VHI's own `VHI_Control` / `VHI_Predict` outlets (60 Hz) so the experiment records what was actually shown on screen.
-- **gRPC** for **negotiation, discrete state and verification**: `Declare` agrees a control space by DOF *name*, `SetControl` carries held states, `SweepControl` reports what the rig actually did, and a separate recording aid gates a session and drives training trajectories. VHI hosts the server in-process on `127.0.0.1:50051`; MyoGestic is the client.
+- **gRPC** for **negotiation, discrete state and verification**: `Declare` agrees a control space by DOF *name*, `SetControl` carries held states, `SweepControl` reports what the rig actually did, and the same service gates a recording session and drives its trajectories. VHI hosts the server in-process on `127.0.0.1:50051`; MyoGestic is the client.
 
-`proto/myogestic_vhi_v2.proto` is the canonical wire contract for the gRPC side. MyoGestic vendors a copy and regenerates its Python stubs from it. The pre-2.0 `VhiControl` service is gone — see [Upgrading to VHI 2.0](docs/upgrading-to-v2.md).
+`proto/myogestic_vhi.proto` is the wire contract for the gRPC side. MyoGestic vendors a copy and regenerates its Python stubs from it. The pre-2.0 `VhiControl` service is gone — see [Upgrading to VHI 2.0](docs/upgrading-to-v2.md).
 
 ## Quick start
 
@@ -53,9 +53,9 @@ outlet = StreamOutlet(info)
 outlet.push_sample([0.0] * 9)
 ```
 
-Six of the nine channels are read: thumb flexion, thumb abduction, then index, middle, ring and little flexion. **Channels 6-8 are read by no consumer** — they are labelled as a wrist for wire compatibility and are always `0`; there is no wrist on this rig.
+All nine channels are read: thumb flexion, thumb abduction, then index, middle, ring and little flexion, then wrist flexion, abduction and rotation on channels 6-8 — there is no dead channel on this rig.
 
-As of 2.0 this inlet takes **canonical** values: `+1` is the direction the channel's name denotes, so a closed fist is roughly `[1, 1, 1, 1, 1, 1, 0, 0, 0]`. Before 2.0 the same fist was `[-1, -1, ...]`. Rather than hard-code either, call `Declare` and honour the `continuous_encoding` it reports — see [the LSL reference](docs/reference/lsl-reference.md#the-channel-layout).
+As of 2.0 this inlet takes **standard** values: `+1` is the direction the channel's name denotes, so a closed fist is roughly `[1, 1, 1, 1, 1, 1, 0, 0, 0]`. Before 2.0 the same fist was `[-1, -1, ...]`. Rather than hard-code either, call `Declare` and read `continuous_channel_order` from the reply — see [the LSL reference](docs/reference/lsl-reference.md#the-channel-layout).
 
 ## Documentation
 

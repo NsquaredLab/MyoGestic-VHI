@@ -17,15 +17,15 @@ stream.
 
 ### 1. Declare the stream
 
-There is no mode RPC in v2. You ask for `Stream` mode **by declaring the stream**,
-which is also where you say which convention you will send on it:
+There is no mode RPC. You ask for `Stream` mode **by declaring the stream** — pass
+`control_pose=True`:
 
 ```python
 from myogestic.controls import load_control_map, resolve
 from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
-client = vhi.canonical_client()
+client = vhi.control_client()
 
 # `vhi.control.pose.*` is the control hand's own namespace — distinct from
 # `vhi.prediction.*`, and on its own stream. Resolution asks VHI what it exports.
@@ -34,15 +34,15 @@ controls = resolve(
     client.capabilities(),
 )
 
-reply = client.declare(controls, control_pose="canonical")   # or "legacy"
+reply = client.declare(controls, control_pose=True)
 assert reply is not None and reply.accepted
 print(reply.control_pose_stream_name, list(reply.control_pose_channel_order))
 ```
 
-`"canonical"` means `+1` is the direction each channel's name denotes. `"legacy"`
-keeps the pre-2.0 renderer units (`-1` flexes) — the migration path for an existing
-producer that wants the handshake without changing its numbers yet. Read
-`reply.control_pose_encoding` rather than assuming your request won.
+There is one convention on this stream: standard values, where `+1` is the direction
+each channel's name denotes. VHI converts them to its own rig units internally, so a
+producer never chooses an encoding — it only opts the stream in or out. Read
+`reply.control_pose` rather than assuming your request was granted.
 
 In `Stream` mode the control hand reads its pose from the `MyoGestic_ControlPose`
 inlet, and discrete DOFs are rejected — which is why declaring a control-pose stream
@@ -92,8 +92,8 @@ from myogestic.controls import load_control_map, resolve
 from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
-client = vhi.canonical_client()
-training_aid = vhi.training_client()
+client = vhi.control_client()
+recording = vhi.recording_client()
 pose_outlet = vhi.control_outlet()
 controls = resolve(
     load_control_map({"dofs": {"my_index": "vhi.control.pose.index"}}),
@@ -101,13 +101,13 @@ controls = resolve(
 )
 
 # 1. Orchestration over gRPC.
-training_aid.set_recording_session(True)   # gate VHI's keyboard - MyoGestic owns the hand
-reply = client.declare(controls, control_pose="canonical")   # asks for Stream mode too
-assert reply is not None and reply.accepted                  # sanity-check
+recording.set_recording_session(True)   # gate VHI's keyboard - MyoGestic owns the hand
+reply = client.declare(controls, control_pose=True)   # asks for Stream mode too
+assert reply is not None and reply.accepted           # sanity-check
 
 # 2. Continuous pose injection over LSL.
 LEVELS = [0.0, 0.5, 1.0]                # rest / half / full flexion per DOF
-                                        # (canonical: +1 flexes, as declared above)
+                                        # (standard: +1 flexes, as declared above)
 DOFS = 6                                # 6 finger DOFs; wrist held at 0
 SETTLE_S = 0.5
 
@@ -119,15 +119,15 @@ for combo in product(LEVELS, repeat=DOFS):           # 3^6 = 729 multi-DOF poses
     # outlet; line it up with VHI_Control post-hoc via XDF timestamps.
 
 # 3. Tear down.
-training_aid.stop_program()                 # no-op unless one was started
-training_aid.set_recording_session(False)
+recording.stop_trajectory()             # no-op unless one was started
+recording.set_recording_session(False)
 ```
 
 Two planes, two roles - this is the whole design:
 
 | Plane | What it carries here | Role |
 |---|---|---|
-| **gRPC** | `Declare` (which also selects the driver mode), `SetRecordingSession`, `GetTrainingState` | discrete setup / assertions |
+| **gRPC** | `Declare` (which also selects the driver mode), `SetRecordingSession`, `GetRecordingSessionState` | discrete setup / assertions |
 | **LSL** (`MyoGestic_ControlPose`) | the 9-DOF test poses themselves | continuous data |
 
 Two LSL records line everything up offline:

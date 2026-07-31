@@ -6,13 +6,13 @@ for *recipes*, see [How-to](../how-to/index.md).
 - **[Every signal in and out](signals.md)** - the whole boundary on one page: four LSL
   streams, nine RPCs, and which protocol carries what. Start here to find the right page
   below.
-- **[gRPC API](grpc-api.md)** - every RPC and message of the `VhiCanonicalControl`
+- **[gRPC API](grpc-api.md)** - every RPC and message of the `VhiControl`
   service, plus the full `.proto` contract.
 - **[LSL streams](lsl-reference.md)** - every inlet and outlet, with stream
   type, channel count, rate, and the 9-DOF channel layout.
 - **[Configuration](configuration.md)** - every `[Export]` field, by node,
   with defaults.
 - **[C# API](api/index.md)** - the auto-generated class/method reference for
-  the `Vhi.*` and `Myogestic.Vhi.V2.*` (gRPC) namespaces, built from the
+  the `Vhi.*` and `Myogestic.Vhi.*` (gRPC) namespaces, built from the
   `///` XML doc comments. Regenerate locally with `tools/gen_api_docs.sh`;
   the generated tree is gitignored.

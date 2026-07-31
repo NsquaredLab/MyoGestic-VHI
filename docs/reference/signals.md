@@ -27,13 +27,14 @@ flowchart LR
 
 | stream | drives | units | present |
 |---|---|---|---|
-| `MyoGestic_Output` | the **predicted** hand | canonical, always | always |
-| `MyoGestic_ControlPose` | the **control** hand, in `Stream` mode | negotiated | only once declared |
+| `MyoGestic_Output` | the **predicted** hand | standard, always | always |
+| `MyoGestic_ControlPose` | the **control** hand, in `Stream` mode | standard, always | only once declared |
 
-`MyoGestic_Output` is canonical unconditionally: `+1` means the direction the channel's
-name denotes, whatever the client declared. `MyoGestic_ControlPose` is the negotiable one -
-`DeclareRequest.control_pose_encoding` chooses canonical or raw rig units, and declaring it
-at all is what switches the control hand into `Stream` mode, since v2 has no mode RPC.
+`MyoGestic_Output` is standard unconditionally: `+1` means the direction the channel's
+name denotes, whatever the client declared. `MyoGestic_ControlPose` takes the same
+convention — there is one encoding now, so nothing is negotiated — and declaring the
+stream at all is what switches the control hand into `Stream` mode, since there is no
+mode RPC.
 
 Both are resolved **by name**, first match wins.
 
@@ -58,14 +59,14 @@ instead of an outlet.
 
 | stream | reports | units | `source_id` |
 |---|---|---|---|
-| `VHI_Predict` | the predicted hand's pose | **canonical** | `predicted_hand_001` |
+| `VHI_Predict` | the predicted hand's pose | **standard** | `predicted_hand_001` |
 | `VHI_Control` | the control hand's pose | **raw rig units** | `control_hand_001` |
 
 Both are 9 channels at 60 Hz nominal, carry the channel labels below, and carry a
 `config_file` metadata entry. Unlike the inlets, these are always full width: they report a
 whole pose, not a selection.
 
-The unit difference is deliberate. `VHI_Predict` is canonical, so pushing `+1` on
+The unit difference is deliberate. `VHI_Predict` is standard, so pushing `+1` on
 `MyoGestic_Output` and reading it back returns `+1` - a round-trip through the predicted
 hand is the identity rather than a sign flip. `VHI_Control` stays in rig units because
 every session recorded before 2.0 is in them, cannot be re-recorded, and stays readable by
@@ -89,26 +90,21 @@ The order a stream uses when nothing labels it, and the order both outlets alway
 
 ## gRPC - nine RPCs on `127.0.0.1:50051`
 
-Two services share the port. Both are request/reply; nothing streams.
+One service, `VhiControl`, hosts all nine. All are request/reply; nothing streams.
 
-### `VhiCanonicalControl`
+### `VhiControl`
 
 | RPC | in | out |
 |---|---|---|
 | `GetControlManifest` | - | every control VHI exports, with the semantics VHI declares for each |
-| `Declare` | the DOFs a client intends to drive | a verdict **per DOF**, the continuous stream name, its channel order, the encoding, and whether the renderer blends |
+| `Declare` | the DOFs a client intends to drive | a verdict **per DOF**, the continuous stream name, its channel order, and whether the renderer blends |
 | `SetControl` | a `continuous` map and a `discrete` map | applied, or a rejection reason per name |
 | `SweepControl` | one DOF name and a duration | which bones moved, and the signed degrees at `hi` and at `lo` |
 | `SetPresentation` | blend on/off and speed | applied. Appearance only - it does not change a commanded value |
-
-### `VhiTrainingAid`
-
-| RPC | in | out |
-|---|---|---|
 | `SetRecordingSession` | active flag | applied |
-| `StartTrainingProgram` | a movement name to cycle as a subject cue | applied |
-| `StopTrainingProgram` | - | applied (idempotent) |
-| `GetTrainingState` | - | recording flag, whether a program runs, its movement, the animation state, `available_movements`, and the selected movement |
+| `StartRecordingTrajectory` | a movement name to cycle as a subject cue | applied |
+| `StopRecordingTrajectory` | - | applied (idempotent) |
+| `GetRecordingSessionState` | - | recording flag, whether a trajectory runs, its movement, the animation state, `available_movements`, and the selected movement |
 
 ## Neither protocol
 
@@ -137,7 +133,7 @@ means gRPC-only.
   index; `MyoGestic_ControlPose` channel 2 is the operator's. Same number, different hand -
   which is why a client must say which stream it drives, and why labelling with the full
   address rather than `index` is what makes a stream unambiguous.
-- **`VHI_Predict` is canonical; `VHI_Control` is not.** See above.
+- **`VHI_Predict` is standard; `VHI_Control` is not.** See above.
 - **The inlets may be narrow; the outlets never are.**
 - **`Declare` is optional for the predicted hand, mandatory for the control hand.** The
   service keeps no per-client session state and validates each call against its address

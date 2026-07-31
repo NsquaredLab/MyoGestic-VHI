@@ -33,7 +33,7 @@ exclusively to the other mode - so the standard config yields exactly the 17
 or 15 above, while a fully custom TOML (movement names in neither set) is
 exposed in full regardless of mode.
 
-A gRPC client doesn't have to hard-code these - `GetTrainingState` returns
+A gRPC client doesn't have to hard-code these - `GetRecordingSessionState` returns
 `available_movements`, which is already the valid set *for the current mode*.
 Discover, don't guess.
 
@@ -45,12 +45,12 @@ mode and 15 in Classifier mode.
 ## Cycling through the set
 
 The keyboard (++arrow-left++ / ++arrow-right++) walks the *currently
-available* movement list - the same list `GetTrainingState.available_movements`
-returns. Cycling is **circular**: pressing ++arrow-right++ at the end of the
+available* movement list - the same list
+`GetRecordingSessionState.available_movements` returns. Cycling is **circular**: pressing ++arrow-right++ at the end of the
 list wraps to index 0, and ++arrow-left++ at index 0 wraps to the last entry.
 No "end of list" stop state, no error, no `applied=false`.
 
-The programmatic equivalent is a canonical discrete DOF with the desired name -
+The programmatic equivalent is a standard discrete DOF with the desired name -
 which is also how a client *programmatically cycles* (it iterates over
 `available_movements` itself and issues a a discrete DOF for each). There is
 no "cycle by index" RPC by design: the client owns the iteration order so it

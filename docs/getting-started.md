@@ -81,7 +81,7 @@ ways to get motion:
     from myogestic.vhi import VhiTarget, virtual_hand
 
     vhi = virtual_hand()
-    client = vhi.canonical_client()
+    client = vhi.control_client()
     controls = resolve(
         load_control_map({"dofs": {"gesture": "vhi.control.gesture"}}),
         client.capabilities(),          # needs VHI running

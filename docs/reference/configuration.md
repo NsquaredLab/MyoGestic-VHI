@@ -24,7 +24,7 @@ The in-process [gRPC server](../concepts/grpc-control.md).
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `GrpcPort` | `int` | `50051` | TCP port the `VhiCanonicalControl` server listens on (`127.0.0.1`). |
+| `GrpcPort` | `int` | `50051` | TCP port the `VhiControl` server listens on (`127.0.0.1`). |
 
 ## `ControlHandSkeleton`
 

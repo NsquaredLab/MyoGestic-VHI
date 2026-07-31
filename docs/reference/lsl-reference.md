@@ -89,11 +89,7 @@ channel 0 as thumb *rotation* and channels 6-8 as a wrist, and neither was true.
 
     There is no forearm to carry the motion, so what turns is the hand about its own long
     axis. Unlike flexion and abduction, both the range and the sign of this axis are
-    **chosen** — no movement in the library touches joint 0's Y. See `Vhi.CanonicalPose`.
-
-    They are also absent from `DeclareReply.continuous_channel_order`: v2 will not name
-    a channel it does not read, because naming a dead channel is how the wrong maps
-    spread in the first place.
+    **chosen** — no movement in the library touches joint 0's Y. See `Vhi.StandardPose`.
 
 ### Two sign conventions, and which stream uses which
 
@@ -102,39 +98,40 @@ is worth stating per stream:
 
 | Stream | Direction | Convention |
 |---|---|---|
-| `MyoGestic_Output` (inlet) | into VHI | **Canonical** — `+1` is the direction the channel's name denotes, so `+1` on `IndexFlexion` *flexes*. |
-| `MyoGestic_ControlPose` (inlet) | into VHI | **Negotiated per client.** Renderer units (`-1` flexes) unless a client declares otherwise — see below. |
+| `MyoGestic_Output` (inlet) | into VHI | **Standard** — `+1` is the direction the channel's name denotes, so `+1` on `IndexFlexion` *flexes*. |
+| `MyoGestic_ControlPose` (inlet) | into VHI | **Standard**, unconditionally — see below. |
 | `VHI_Control` (outlet) | out of VHI | **Renderer units** — `-1` flexes. |
-| `VHI_Predict` (outlet) | out of VHI | **Renderer units** — `-1` flexes. |
+| `VHI_Predict` (outlet) | out of VHI | **Standard** — `+1` flexes. |
 
-### `MyoGestic_ControlPose` is negotiated, not fixed
+### `MyoGestic_ControlPose` is standard, always
 
-`MyoGestic_Output` had its convention *changed* in 2.0. The control-pose inlet was
-handled differently on purpose: its convention is chosen by the client, and the default
-is the old one. An existing producer that pushes renderer units keeps working with no
-change at all.
+`MyoGestic_Output` had its convention *changed* in 2.0. The control-pose inlet used to be
+handled differently: its convention was chosen by the client through a
+`DeclareRequest.control_pose_encoding` field, defaulting to the old renderer units. That
+field is gone. There is one encoding now — standard, unconditionally, on both continuous
+inlets — and VHI converts internally (`Vhi.StandardPose.ToRig`) so a producer never
+chooses a convention, only whether it declares the stream at all.
 
-Declare it through `DeclareRequest.control_pose_encoding`:
+Declare it through `DeclareRequest.control_pose`, a plain bool:
 
 | Value | VHI does |
 |---|---|
-| `ENCODING_UNSPECIFIED` (default, and what omitting the field sends) | Nothing. The stream and the control hand are left exactly as they were. |
-| `CANONICAL` | Reads the stream as canonical values, and switches the control hand to `Stream` mode so the inlet is consumed. |
-| `LEGACY_NEGATED` | Same mode switch, renderer units kept. The migration path: get the handshake now, change your numbers later. |
+| `false` (the default, and what omitting the field sends) | Nothing. The stream and the control hand are left exactly as they were. |
+| `true` | Reads the stream as standard values, and switches the control hand to `Stream` mode so the inlet is consumed. |
 
 Two things worth knowing:
 
 - **Declaring the stream is what asks for `Stream` mode.** An inlet nobody reads is
-  indistinguishable from a stream that is not arriving, and there is no separate mode RPC
-  in v2 — declaring that you will stream a control pose *is* the request.
+  indistinguishable from a stream that is not arriving, and there is no separate mode
+  RPC — declaring that you will stream a control pose *is* the request.
 - **A control-pose stream and a discrete DOF cannot be declared together.** A discrete
   DOF renders as a control-hand *movement*, and a streamed pose drives the same bones.
-  v1 arbitrated that per command through `ControlMode`; v2 refuses the combination at the
-  handshake, where a client can still fix its configuration rather than watch commands
-  quietly not apply.
+  v1 arbitrated that per command through `ControlMode`; the current handshake refuses
+  the combination at `Declare`, where a client can still fix its configuration rather
+  than watch commands quietly not apply.
 
-`DeclareReply` echoes the encoding **actually applied** rather than the one requested, so
-read it instead of assuming your request won.
+`DeclareReply.control_pose` echoes what was **actually granted** rather than what was
+requested, so read it instead of assuming your request won.
 
 `MyoGestic_Output` changed convention in 2.0; see
 [Upgrading to VHI 2.0](../upgrading-to-v2.md). The outlets deliberately did **not**, so
@@ -143,13 +140,11 @@ MyoGestic side that decoder is `myogestic.vhi.legacy.decode_pose`, which remains
 reader for archived kinematics.
 
 !!! tip "Don't hard-code any of this"
-    A frame built by hand from this table is correct for exactly one of the two
-    conventions and silently inverted on the other. Call `Declare` and honour
-    `continuous_channel_order` and `continuous_encoding`; treat
-    `ENCODING_UNSPECIFIED` as "cannot negotiate" rather than guessing. MyoGestic's
-    `VhiTarget` does all of that — pass `stream="control_pose"` when it is driving the
-    control hand, so it reads *that* stream's order and encoding rather than the
-    output stream's.
+    A frame built by hand from this table is correct for every standard stream and
+    silently inverted on `VHI_Control`, the one outlet that stays in rig units. Call
+    `Declare` and honour `continuous_channel_order`. MyoGestic's `VhiTarget` does
+    that — pass `stream="control_pose"` when it is driving the control hand, so it
+    reads *that* stream's order rather than the output stream's.
 
 ## Minimal producer
 
@@ -161,10 +156,10 @@ outlet = StreamOutlet(info)
 outlet.push_sample([0.0] * 9)   # all-rest; VHI's predicted hand follows it
 ```
 
-Zeros are rest under either convention, which is why the example uses them. A non-zero
-frame is **canonical** on this stream as of 2.0 — `[1.0, 0, 0, 0, 0, 0, 0, 0, 0]` flexes
-the thumb, and `-1.0` extends it. What "flexes" means is not a matter of taste here: the
-gain table the renderer multiplies by is `MovementPoses[Fist]`, the fully-closed hand, so
-a `+1` multiplier reproduces that pose exactly. `Vhi.CanonicalPose` is the one place that
-rule lives, and `tests/test_v2_contract.py` checks the rendered degrees against the
-movement library rather than against a table of its own.
+Zeros are rest, which is why the example uses them. A non-zero frame is **standard** on
+this stream — `[1.0, 0, 0, 0, 0, 0, 0, 0, 0]` flexes the thumb, and `-1.0` extends it.
+What "flexes" means is not a matter of taste here: the gain table the renderer multiplies
+by is `MovementPoses[Fist]`, the fully-closed hand, so a `+1` multiplier reproduces that
+pose exactly. `Vhi.StandardPose` is the one place that rule lives, and
+`tests/test_v2_contract.py` checks the rendered degrees against the movement library
+rather than against a table of its own.

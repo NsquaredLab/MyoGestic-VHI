@@ -1,6 +1,6 @@
 # Upgrading to VHI 2.0
 
-VHI 2.0 replaces the v1 gRPC control plane with the **canonical control standard**, and
+VHI 2.0 replaces the v1 gRPC control plane with the **standard control vocabulary**, and
 changes the convention of the continuous LSL stream it reads. Both are breaking, and
 both are detectable — nothing degrades silently.
 
@@ -19,57 +19,56 @@ channel 0 as thumb *rotation* and channels 6-8 as a wrist. Neither was true.
 v2 makes an application declare what it controls **by name** and VHI answer with what
 it can render. Nothing hard-codes a channel index on either side.
 
-| v1 | v2 | Why it moved |
+| v1 | current | Why it moved |
 |---|---|---|
-| `SetMovement(name)` | a canonical **discrete DOF** | A movement is a *held state*. Declaring it as one gets you a stability gate for free. |
-| `SetMovement(name, cycle=true)` | `VhiTrainingAid.StartTrainingProgram` | Cycling is a *recording* aid, not a control primitive — see below. |
-| `SetSessionActive` | `VhiTrainingAid.SetRecordingSession` | Gating a recording is a property of the session, not of the controlled thing. |
+| `SetMovement(name)` | a standard **discrete DOF** | A movement is a *held state*. Declaring it as one gets you a stability gate for free. |
+| `SetMovement(name, cycle=true)` | `StartRecordingTrajectory` | Cycling is a *recording* concern, not a control primitive — see below. |
+| `SetSessionActive` | `SetRecordingSession` | Gating a recording is a property of the session, not of the controlled thing. |
 | `SetSmoothing` | `SetPresentation` | Renamed for what it does: appearance. The old name invited it to be mistaken for chatter protection. |
-| `GetState` | `VhiTrainingAid.GetTrainingState` | Its only real job was discovering movement names. |
+| `GetState` | `GetRecordingSessionState` | Its only real job was discovering movement names. |
 | `Freeze`, `SetSpeed`, `SetChirality`, `SetControlMode` | **removed, not replaced** | No consumer in MyoGestic. `SetChirality` never worked — its handler always returned `applied=false`. |
 
 ### Recording is not control
 
-A canonical discrete DOF is a held state: ask for a grip, hold a grip. Collecting
+A standard discrete DOF is a held state: ask for a grip, hold a grip. Collecting
 regression training data wants the opposite — a control hand that keeps *moving*, so
 the recorded `VHI_Control` stream sweeps a continuous range for EMG windows to be
 aligned against.
 
-Those are different jobs, so they have separate services. Folding a sweep into the
-discrete vocabulary would have made "grip" mean *grip, unless someone is recording*.
-While a training program runs it **owns** the control hand: discrete DOFs are refused
-with the reason rather than silently interrupting the trajectory a recording is aligned
-against.
+Those are different jobs, so they stay apart in the RPC surface even where they share a
+service. Folding a sweep into the discrete vocabulary would have made "grip" mean *grip,
+unless someone is recording*. While a recording trajectory runs it **owns** the control
+hand: discrete DOFs are refused with the reason rather than silently interrupting the
+trajectory a recording is aligned against.
 
-### The continuous stream is now canonical
+### The continuous stream is now standard
 
-`MyoGestic_Output` carries **canonical** values: `+1` means the direction the DOF name
+`MyoGestic_Output` carries **standard** values: `+1` means the direction the DOF name
 denotes, so `+1` on index flexion *flexes*. v1 took raw rig units — the pose multipliers
 the renderer applies to its per-bone gains — and named no channel, so what a value meant
 was a matter of matching tables.
 
-`DeclareReply.continuous_encoding` reports which convention is in force, and it is not
-optional: a client that reads `ENCODING_UNSPECIFIED` must fall back rather than guess.
-That field exists because the first end-to-end v2 build got this wrong — the handshake
-agreed on channel *names* while the decoder still expected the old units, and the hand
-extended when it was told to flex.
+`DeclareReply` briefly carried a `continuous_encoding` field so a client could tell which
+convention was in force. It didn't last: the first end-to-end v2 build got the handshake
+wrong in exactly the way an optional encoding invites — it agreed on channel *names*
+while the decoder still expected the old units, and the hand extended when it was told
+to flex. The fix was to stop negotiating: there is one encoding now, standard,
+unconditionally, and the field is gone.
 
 !!! info "`VHI_Control` did **not** change; `VHI_Predict` did"
     `VHI_Control` still publishes raw rig units. That is deliberate and load-bearing:
     every session recorded before this release is in those units, cannot be re-recorded,
     and stays readable by the same decoder.
 
-    `VHI_Predict` publishes **canonical** values, so pushing `+1` on
+    `VHI_Predict` publishes **standard** values, so pushing `+1` on
     `MyoGestic_Output` and reading `VHI_Predict` gives `+1` back — the renderer is the
     identity rather than a sign flip. Nothing archived depends on that stream, which is
     what makes the change safe to make.
 
-    Nor did the optional `MyoGestic_ControlPose` inlet change. Its convention is
-    **negotiated** instead — `DeclareRequest.control_pose_encoding`, defaulting to the
-    old behaviour — so a producer pushing renderer units to it needs no change at all.
-    Declaring that stream is also how you ask for `Stream` mode, since v2 has no separate
-    mode RPC. See
-    [the LSL reference](reference/lsl-reference.md#myogestic_controlpose-is-negotiated-not-fixed).
+    The optional `MyoGestic_ControlPose` inlet is standard too, unconditionally — declare
+    `control_pose=True` to opt in. Declaring that stream is also how you ask for `Stream`
+    mode, since there is no separate mode RPC. See
+    [the LSL reference](reference/lsl-reference.md#myogestic_controlpose-is-standard-always).
 
 ## Upgrade steps
 
@@ -83,7 +82,7 @@ from myogestic.controls import ControlBus, load_control_map, resolve
 from myogestic.vhi import VhiTarget, virtual_hand
 
 vhi = virtual_hand()
-client = vhi.canonical_client()
+client = vhi.control_client()
 
 # Your name on the left, a control VHI declares on the right. VHI owns the
 # semantics — which addresses exist, and whether each is a number or a held state.
@@ -103,7 +102,7 @@ target = VhiTarget(
     client=client,                       # negotiates v2
 )
 bus = ControlBus(controls, targets=[target], hz=32)
-training_aid = vhi.training_client()
+recording = vhi.recording_client()
 ```
 
 The mapping is normally a TOML file rather than a dict literal —
@@ -123,23 +122,22 @@ target.negotiate()      # settles the contract; cheap and idempotent
    for a deliberate click; `bus.push({...})` per tick for a classifier. Delete any
    `EdgeTrigger` you wrapped around the client — `debounce_s` on the DOF replaces it,
    and the bus owns the edge detection, dedupe and rebase.
-2. **Replace `set_session_active`** with `training_aid.set_recording_session(...)`. It
+2. **Replace `set_session_active`** with `recording.set_recording_session(...)`. It
    returns `False` when the aid is unavailable rather than raising, so you can decide
    whether an ungated recording is acceptable.
 3. **Replace cycling `set_movement`** with
-   `training_aid.start_program(movement, frequency_hz=...)`. Call `stop_program()` in
+   `recording.start_trajectory(movement, frequency_hz=...)`. Call `stop_trajectory()` in
    teardown — it is idempotent.
-4. **Replace `set_smoothing`** with `canonical_client().set_presentation(blend=...)`.
+4. **Replace `set_smoothing`** with `control_client().set_presentation(blend=...)`.
 5. **Delete any hand-built 9-float frame.** It is correct for exactly one convention and
-   silently inverted on the other. Push canonical values through the bus instead.
-6. **Drop `freeze`, `set_speed`, `set_chirality`, `set_control_mode`.** They have no v2
+   silently inverted on the other. Push standard values through the bus instead.
+6. **Drop `freeze`, `set_speed`, `set_chirality`, `set_control_mode`.** They have no
    equivalent by design.
 
 ### If you use VHI directly
 
-Generate stubs from `proto/myogestic_vhi_v2.proto` and call `Declare` first. Honour
-`continuous_channel_order` (build your frame *from* it, don't assume your own order) and
-`continuous_encoding`. Treat `ENCODING_UNSPECIFIED` as "cannot negotiate".
+Generate stubs from `proto/myogestic_vhi.proto` and call `Declare` first. Honour
+`continuous_channel_order` — build your frame *from* it, don't assume your own order.
 
 ## Smoothing: three layers, not one
 
@@ -167,7 +165,7 @@ direction" is a
 machine-checkable question rather than something you watch for:
 
 ```python
-reply = vhi.canonical_client().sweep("vhi.prediction.index.flexion")
+reply = vhi.control_client().sweep("vhi.prediction.index.flexion")
 for observation in reply.observed:
     print(observation.element, observation.degrees_at_hi, observation.degrees_at_lo)
 ```
