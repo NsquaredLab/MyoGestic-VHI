@@ -38,39 +38,36 @@ mode RPC.
 
 Both are resolved **by name**, first match wins.
 
-#### Neither one has to be nine channels wide
+#### Both are the renderer's own pose layout
 
-A producer that labels its LSL channels with **control addresses** may send however many
-controls it drives, in whatever order. VHI reads the labels from the sender's stream
-description and places each value by name, so two channels carrying
-`vhi.prediction.index` and `vhi.prediction.middle` is a complete stream rather than a
-truncated nine.
+A channel *is* an address: the manifest says `vhi.prediction.index` is channel 2, and a
+producer writes it there. Nothing is negotiated, labelled or reconstructed — both ends
+read one table. Channels a producer leaves at `0` command rest, which is what rest is.
 
-An unlabelled producer sends the pose layout below, positionally, and is read exactly as
-it always was. So is a producer whose labels are *not* addresses this hand renders — a
-stream naming its channels for a human reader falls back rather than routing on a partial
-match, because dropping the channels that did not resolve would misattribute every later
-one.
-
-`myogestic.vhi.VhiTarget` builds a labelled stream when constructed with `interface=`
-instead of an outlet.
+This was once negotiable: a producer could compact its frame to only the controls it drove
+and label each channel with its address, and VHI would read those labels back to work out
+the mapping. Reading them meant asking the inlet for its stream info, which is the only
+thing that starts liblsl's `info_receiver` thread — and cancelling that thread mid-request
+crashed the renderer. The compaction saved three floats a frame.
 
 ### Outbound - VHI publishes
 
 | stream | reports | units | `source_id` |
 |---|---|---|---|
 | `VHI_Predict` | the predicted hand's pose | **standard** | `predicted_hand_001` |
-| `VHI_Control` | the control hand's pose | **raw rig units** | `control_hand_001` |
+| `VHI_Control` | the control hand's pose | **standard** | `control_hand_002_standard` |
 
 Both are 9 channels at 60 Hz nominal, carry the channel labels below, and carry a
 `config_file` metadata entry. Unlike the inlets, these are always full width: they report a
 whole pose, not a selection.
 
-The unit difference is deliberate. `VHI_Predict` is standard, so pushing `+1` on
-`MyoGestic_Output` and reading it back returns `+1` - a round-trip through the predicted
-hand is the identity rather than a sign flip. `VHI_Control` stays in rig units because
-every session recorded before 2.0 is in them, cannot be re-recorded, and stays readable by
-the same decoder.
+Both are standard, and that is the point: push `+1` on `MyoGestic_Output` and read it
+back as `+1`, and a fist on the ground-truth stream is the same vector that would produce
+one on the predicted hand. They disagreed once — `VHI_Control` published the renderer's
+own units, opposite on five channels — so every model trained on it needed its weights
+flipped by hand, and nothing on either wire said so. Sessions recorded before that are in
+the old units and were converted once by `myogestic.tools.migrate_vhi_sessions`; the
+outlets advertise `pose_convention` so the two cannot be confused.
 
 ### The pose layout
 

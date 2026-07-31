@@ -27,7 +27,7 @@ for the *why*.
 
 ## Outlets - published by VHI
 
-Both outlets are created at startup unless `EnableOutlets` is `false`.
+Both outlets are created at startup.
 
 ### `VHI_Control`
 
@@ -37,7 +37,7 @@ Both outlets are created at startup unless `EnableOutlets` is `false`.
 | Type | `MyoGestic_9DVector` |
 | Channels | 9 × `float32`, labelled (see layout below) |
 | Nominal rate | 60 Hz |
-| Source ID | `control_hand_001` |
+| Source ID | `control_hand_002_standard` |
 | Carries | the **control** hand's current pose |
 
 ### `VHI_Predict`

@@ -55,10 +55,14 @@ while the decoder still expected the old units, and the hand extended when it wa
 to flex. The fix was to stop negotiating: there is one encoding now, standard,
 unconditionally, and the field is gone.
 
-!!! info "`VHI_Control` did **not** change; `VHI_Predict` did"
-    `VHI_Control` still publishes raw rig units. That is deliberate and load-bearing:
-    every session recorded before this release is in those units, cannot be re-recorded,
-    and stays readable by the same decoder.
+!!! warning "`VHI_Control` changed too, and it is a wire break"
+    It published the renderer's own units, opposite to `VHI_Predict` on five channels —
+    so a fist read `-1` on the stream you train from and `+1` on the one you drive, and
+    every model needed its weights flipped by hand. Both are standard now. Sessions
+    recorded before this are in the old units: convert them once with
+    `myogestic.tools.migrate_vhi_sessions`, which stamps `pose_convention` into the
+    session so a reader never has to guess. The outlet advertises the same key, and its
+    `source_id` moved to `control_hand_002_standard`.
 
     `VHI_Predict` publishes **standard** values, so pushing `+1` on
     `MyoGestic_Output` and reading `VHI_Predict` gives `+1` back — the renderer is the

@@ -18,29 +18,16 @@ the rest pose is always neutral (`[0, 0, 0]`) and is not stored. The state
 machine interpolates between rest and that max-flexion pose (see
 [Control-hand modes](control-modes.md) for `cycle`).
 
-## AI vs. Classifier mode
+## Which movements are offered
 
-`MovementMode` selects *which subset* of movements is exposed:
+The 17 the build exposes: Rest, the five fingers, Fist, the two pinches, Pointing, the
+five extensions, WristUpDown and WristLeftRight. A movement the config names but this
+list does not — `PrecisionSphere`, `RockNRoll`, `Hook`, `PeaceSign`, `Pistol`,
+`ExtendedHand` — is hidden from cycling; a fully custom TOML whose names match neither
+is exposed in full.
 
-| Mode | Count | Set |
-|---|---|---|
-| **AI** *(default)* | 17 | Rest, the 5 fingers, Fist, the two pinches, Pointing, the 5 extensions, WristUpDown, WristLeftRight |
-| **Classifier** | 15 | Rest, the 5 fingers, Fist, the two pinches, PrecisionSphere, RockNRoll, Hook, PeaceSign, Pistol, ExtendedHand |
-
-The `Mode` `[Export]` on `ControlHandSkeleton` (set in the Inspector) picks the
-set. Filtering is by *exclusion*: a movement is hidden only if it belongs
-exclusively to the other mode - so the standard config yields exactly the 17
-or 15 above, while a fully custom TOML (movement names in neither set) is
-exposed in full regardless of mode.
-
-A gRPC client doesn't have to hard-code these - `GetRecordingSessionState` returns
-`available_movements`, which is already the valid set *for the current mode*.
-Discover, don't guess.
-
-The mode itself is not on the wire: nothing published it after the v1 service was
-removed, and the movement list answers the only question a client actually asks. If you
-need the mode as such, note the list length - the standard config yields 17 names in AI
-mode and 15 in Classifier mode.
+A gRPC client doesn't have to hard-code any of this: `GetRecordingSessionState` returns
+`available_movements`, which is the valid set. Discover, don't guess.
 
 ## Cycling through the set
 

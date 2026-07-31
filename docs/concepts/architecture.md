@@ -16,7 +16,7 @@ Main (Node3D)
 ├── MovementUI                   # on-screen movement/state label
 ├── Logo
 ├── DirectionalLight3D
-└── ControlPanel                 # runtime UI: speed, smoothing, chirality
+└── ControlPanel                 # runtime UI: speed, smoothing
 ```
 
 Each piece is one `Node` with one job:
