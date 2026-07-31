@@ -48,8 +48,6 @@ public partial class LSLCommunicationController : Node
 	/// missing is fine - the inlet is simply skipped.</summary>
 	[Export] public string ControlPoseStreamName = "MyoGestic_ControlPose";
 
-	/// <summary>Name of the LSL outlet that publishes the control hand's
-	/// pose at 60 Hz. Consumed by MyoGestic as a regression-target source.</summary>
 	/// <summary>What <c>+1</c> means on both pose outlets, published in their metadata.</summary>
 	/// <remarks>
 	/// <c>standard</c>: <c>+1</c> is the direction the channel's name denotes, <c>0</c> is
@@ -59,6 +57,8 @@ public partial class LSLCommunicationController : Node
 	/// </remarks>
 	public const string PoseConvention = "standard";
 
+	/// <summary>Name of the LSL outlet that publishes the control hand's
+	/// pose at 60 Hz. Consumed by MyoGestic as a regression-target source.</summary>
 	[Export] public string ControlOutletName = "VHI_Control";
 
 	/// <summary>Name of the LSL outlet that publishes the predicted hand's
@@ -233,8 +233,7 @@ public partial class LSLCommunicationController : Node
 			catch (Exception e)
 			{
 				GD.PrintErr($"Error pulling LSL prediction sample: {e.Message}");
-				predictionInlet = null;
-				predictionRouting = null;
+				DropInlet(ref predictionInlet, ref predictionRouting);
 				IsConnected = false;
 				receivedDataPredicted.Clear();
 			}
@@ -247,12 +246,8 @@ public partial class LSLCommunicationController : Node
 			GD.Print(
 				$"⏱️ No {PredictionStreamName} samples for "
 				+ $"{PredictionStaleAfterSeconds:F0}s — dropping the inlet and looking again.");
-			lock (connectionLock)
-			{
-				predictionInlet = null;
-				predictionRouting = null;
-				IsConnected = false;
-			}
+			DropInlet(ref predictionInlet, ref predictionRouting);
+			IsConnected = false;
 			receivedDataPredicted.Clear();
 			// Reset the clock, or the next inlet is judged on this one's silence.
 			lastPredictionSample = DateTime.Now;
@@ -269,8 +264,7 @@ public partial class LSLCommunicationController : Node
 			catch (Exception e)
 			{
 				GD.PrintErr($"Error pulling LSL control-pose sample: {e.Message}");
-				controlPoseInlet = null;
-				controlPoseRouting = null;
+				DropInlet(ref controlPoseInlet, ref controlPoseRouting);
 				receivedDataControl.Clear();
 			}
 		}
@@ -283,6 +277,39 @@ public partial class LSLCommunicationController : Node
 			outputFrameCount = 0;
 			lastOutputTime = DateTime.Now;
 		}
+	}
+
+	/// <summary>Close an inlet and clear the field, so nothing is left for the finalizer.</summary>
+	/// <remarks>
+	/// <para>Every path that gives up on an inlet must come through here. They used to just
+	/// assign <see langword="null"/>, which does not close anything: a
+	/// <c>stream_inlet</c> is a native object with its own receiver threads and open
+	/// sockets, and dropping the managed reference only queues it for the GC. Teardown then
+	/// happened at some arbitrary later moment on the finalizer thread — in practice while
+	/// this renderer had already resolved and opened a *replacement* inlet for the same
+	/// stream, because the retry loop starts as soon as the field reads null.</para>
+	/// <para>That is what crashed VHI: liblsl 1.17.4's <c>cancellable_streambuf</c>
+	/// destructor flushes through a socket that <c>cancel()</c> has already reset, so the
+	/// abandoned inlet's <c>info_receiver</c> thread dereferenced null and took the process
+	/// with it (<c>EXC_BAD_ACCESS at 0x0</c>). A renderer that reconnects on a 5s stale
+	/// timer does this often — 28 times in one session here — and the suite that churns
+	/// outlets made it likely enough to hit.</para>
+	/// <para>The field is cleared under the lock, because <c>ConnectToInletAsync</c> assigns
+	/// it from a task thread. The close happens *outside* the lock: it joins the inlet's
+	/// threads, and holding a lock the connect path wants across a network teardown is how
+	/// this renderer used to stall the app it was talking to.</para>
+	/// </remarks>
+	private void DropInlet(ref object inlet, ref int[] routing)
+	{
+		object doomed;
+		lock (connectionLock)
+		{
+			doomed = inlet;
+			inlet = null;
+			routing = null;
+		}
+		if (doomed != null)
+			LSLWrapper.Dispose(doomed);
 	}
 
 	// Resolves an LSL stream by name on the calling (background) thread.
