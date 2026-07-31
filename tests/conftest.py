@@ -1,4 +1,4 @@
-"""Bring a live VHI up and hand the tests a v2 gRPC stub.
+"""Bring a live VHI up and hand the tests a gRPC stub for the one control service.
 
 The other files in this directory are interactive LSL monitors you run by hand.
 ``test_v2_contract.py`` is different: it is an automated check of what the rig
@@ -6,7 +6,7 @@ actually does, so it needs a running VHI and generated Python stubs.
 
 Both are produced here rather than committed:
 
-- The stubs come from ``proto/myogestic_vhi_v2.proto`` via ``grpcio-tools`` into a
+- The stubs come from ``proto/myogestic_vhi.proto`` via ``grpcio-tools`` into a
   temp directory. Generating them at session start means the test can never drift
   from the contract — a proto edit is picked up on the next run instead of silently
   testing a stale copy.
@@ -40,7 +40,7 @@ import time
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-PROTO = REPO / "proto" / "myogestic_vhi_v2.proto"
+PROTO = REPO / "proto" / "myogestic_vhi.proto"
 GRPC_PORT = 50051
 #: Generous: Godot has to boot, load the scene, map bones and start Kestrel.
 STARTUP_TIMEOUT_S = 90.0
@@ -87,8 +87,8 @@ def v2_pb2():
     )
     assert result.returncode == 0, f"protoc failed:\n{result.stderr}"
     sys.path.insert(0, str(out))
-    import myogestic_vhi_v2_pb2 as pb2
-    import myogestic_vhi_v2_pb2_grpc as pb2_grpc
+    import myogestic_vhi_pb2 as pb2
+    import myogestic_vhi_pb2_grpc as pb2_grpc
 
     return pb2, pb2_grpc
 
@@ -148,7 +148,7 @@ def v2(v2_pb2, vhi_process):
 
     pb2, pb2_grpc = v2_pb2
     channel = grpc.insecure_channel(f"127.0.0.1:{GRPC_PORT}")
-    stub = pb2_grpc.VhiCanonicalControlStub(channel)
+    stub = pb2_grpc.VhiControlStub(channel)
 
     # The port opens before the scene finishes wiring, so wait for a real answer
     # rather than for the socket.

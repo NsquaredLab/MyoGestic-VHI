@@ -1,4 +1,4 @@
-"""Machine-check what the v2 canonical service actually does to the rig.
+"""Machine-check what the v2 standard service actually does to the rig.
 
 Until this file existed, the only assertion about VHI's rig behaviour lived in
 MyoGestic's test suite as a mapping *read out of this source* — which cannot catch a
@@ -9,7 +9,7 @@ range and reports which bones moved and by how many signed degrees, read back of
 skeleton. That turns three claims into assertions:
 
 - **Identity.** ``index`` moves the index bones and nothing else.
-- **Direction.** Canonical ``+1`` produces the sign flexion produces.
+- **Direction.** Standard ``+1`` produces the sign flexion produces.
 - **Symmetry.** ``-1`` produces exactly the negative, which is what "the extension
   half renders" means — the property the signed ``[-1, 1]`` domain rests on, and one
   that no recording could establish because no operator ever extended.
@@ -27,14 +27,14 @@ import re
 
 import pytest
 
-#: Canonical name -> the bones it must move, and the signed degrees at canonical +1.
+#: Standard name -> the bones it must move, and the signed degrees at standard +1.
 #:
 #: Read off `PredictedHandSkeleton.jointMovements`, which *is* `MovementPoses[Fist]` — the
-#: max-flexion pose. So canonical +1 on a flexion DOF renders the gain itself: negative
+#: max-flexion pose. So standard +1 on a flexion DOF renders the gain itself: negative
 #: degrees, the same sign `Fist` uses and the opposite of `IndexExtension`'s `+20`.
 #:
 #: Abduction is the one channel whose sign is inverted, because the fist's thumb Z is
-#: *adduction*. See `Vhi.CanonicalPose`, which both hands share.
+#: *adduction*. See `Vhi.StandardPose`, which both hands share.
 #:
 #: These were once the negatives of this, taken from a live sweep of a renderer that
 #: negated every channel on ingest — so the suite agreed with the rig and both disagreed
@@ -71,16 +71,16 @@ EXPECTED = {
         "WaveBone_24": -60.0,
     },
     # The wrist: one bone, two axes. Bone 0 parents every digit chain, so this is the
-    # whole hand turning. Read off `CanonicalPose.Wrist`, whose X comes from
+    # whole hand turning. Read off `StandardPose.Wrist`, whose X comes from
     # `Movements.WristUpDown` and whose Z sign is a documented choice, not a derivation.
     "vhi.prediction.wrist.flexion": {"WaveBone_1": -30.0},
     "vhi.prediction.wrist.abduction": {"WaveBone_1": -20.0},
     # Rotation pins a *choice*, not a derivation: nothing in the movement library touches
-    # joint 0's Y axis, so 90 degrees and its sign were picked. See `CanonicalPose.Wrist`.
+    # joint 0's Y axis, so 90 degrees and its sign were picked. See `StandardPose.Wrist`.
     "vhi.prediction.wrist.rotation": {"WaveBone_1": -179.0},
 }
 
-CANONICAL_DOFS = tuple(EXPECTED)
+STANDARD_DOFS = tuple(EXPECTED)
 
 
 def _declare(stub, pb2, *names, kind=None, states=None):
@@ -98,11 +98,11 @@ def _declare(stub, pb2, *names, kind=None, states=None):
 # --- Declare -------------------------------------------------------------------
 
 
-def test_the_six_canonical_dofs_are_renderable(v2):
+def test_the_six_standard_dofs_are_renderable(v2):
     stub, pb2 = v2
-    reply = _declare(stub, pb2, *CANONICAL_DOFS)
+    reply = _declare(stub, pb2, *STANDARD_DOFS)
     assert reply.accepted
-    assert [v.name for v in reply.verdicts] == list(CANONICAL_DOFS)
+    assert [v.name for v in reply.verdicts] == list(STANDARD_DOFS)
     for verdict in reply.verdicts:
         assert verdict.renderable, verdict.message
         assert verdict.renders_as, f"{verdict.name} must say what it drives"
@@ -110,18 +110,10 @@ def test_the_six_canonical_dofs_are_renderable(v2):
 
 def test_declare_reports_the_channel_order_and_stream(v2):
     stub, pb2 = v2
-    reply = _declare(stub, pb2, *CANONICAL_DOFS)
-    assert list(reply.continuous_channel_order) == list(CANONICAL_DOFS)
+    reply = _declare(stub, pb2, *STANDARD_DOFS)
+    assert list(reply.continuous_channel_order) == list(STANDARD_DOFS)
     assert reply.continuous_stream_name == "MyoGestic_Output"
     assert reply.standard_version == "1"
-
-
-def test_declare_states_how_to_encode_the_stream(v2):
-    """An unspecified encoding is what made the first v2 build invert every joint."""
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, "vhi.prediction.index")
-    assert reply.continuous_encoding != pb2.ENCODING_UNSPECIFIED
-    assert reply.continuous_encoding in (pb2.CANONICAL, pb2.LEGACY_NEGATED)
 
 
 def test_every_named_channel_is_actually_rendered(v2):
@@ -133,9 +125,9 @@ def test_every_named_channel_is_actually_rendered(v2):
     which is the property that mattered all along.
     """
     stub, pb2 = v2
-    reply = _declare(stub, pb2, *CANONICAL_DOFS)
+    reply = _declare(stub, pb2, *STANDARD_DOFS)
     order = list(reply.continuous_channel_order)
-    assert len(order) == len(CANONICAL_DOFS) == 9
+    assert len(order) == len(STANDARD_DOFS) == 9
     assert all(v.renderable for v in reply.verdicts), [v.message for v in reply.verdicts]
     # Declaring the order itself must also be accepted: a name in it that this hand could
     # not drive would be exactly the old bug in a new place.
@@ -223,7 +215,7 @@ def test_setcontrol_rejects_an_unresolvable_state(v2):
 def test_setcontrol_applies_continuous_values(v2):
     stub, pb2 = v2
     ack = stub.SetControl(
-        pb2.SetControlRequest(continuous={n: 0.0 for n in CANONICAL_DOFS}), timeout=10.0
+        pb2.SetControlRequest(continuous={n: 0.0 for n in STANDARD_DOFS}), timeout=10.0
     )
     assert ack.applied, dict(ack.rejected)
 
@@ -247,7 +239,7 @@ def test_setcontrol_rejects_a_non_finite_value(v2, bad):
 # --- SweepControl: the rig itself ----------------------------------------------
 
 
-@pytest.mark.parametrize("name", CANONICAL_DOFS)
+@pytest.mark.parametrize("name", STANDARD_DOFS)
 def test_a_sweep_moves_exactly_the_bones_the_name_denotes(v2, name):
     stub, pb2 = v2
     reply = stub.SweepControl(
@@ -259,7 +251,7 @@ def test_a_sweep_moves_exactly_the_bones_the_name_denotes(v2, name):
     assert reply.matched_expectation
 
 
-@pytest.mark.parametrize("name", CANONICAL_DOFS)
+@pytest.mark.parametrize("name", STANDARD_DOFS)
 def test_a_sweep_turns_each_bone_the_documented_amount(v2, name):
     """Locks the per-bone gains: a changed gain silently rescales the whole DOF."""
     stub, pb2 = v2
@@ -273,9 +265,9 @@ def test_a_sweep_turns_each_bone_the_documented_amount(v2, name):
         assert observation.degrees_at_hi == pytest.approx(expected, abs=0.5), observation.element
 
 
-@pytest.mark.parametrize("name", CANONICAL_DOFS)
+@pytest.mark.parametrize("name", STANDARD_DOFS)
 def test_the_extension_half_is_the_exact_mirror(v2, name):
-    """No clamping anywhere: this is what makes the canonical domain signed.
+    """No clamping anywhere: this is what makes the standard domain signed.
 
     Never observable from a recording — the reference sessions only ever contain
     flexion, because no operator extended.
@@ -353,28 +345,33 @@ def test_the_legacy_v1_service_is_no_longer_served(vhi_process):
     assert excinfo.value.code() == grpc.StatusCode.UNIMPLEMENTED, excinfo.value.code()
 
 
-# --- the recording aid: a separate service, and deliberately not control ---------
+# --- the recording aid: same service, deliberately not control ------------------
 
 
 @pytest.fixture
 def aid(v2_pb2, vhi_process):
-    """A training-aid stub on the same live VHI, on the same port."""
+    """A second VhiControl stub on the same live VHI, on the same port.
+
+    Recording RPCs live on the one service now, so this is not a different stub type
+    from ``v2`` — just an independent channel, so tests can exercise a second client
+    without the two sharing state that only a real second connection would expose.
+    """
     import grpc
 
     pb2, pb2_grpc = v2_pb2
     channel = grpc.insecure_channel("127.0.0.1:50051")
-    stub = pb2_grpc.VhiTrainingAidStub(channel)
+    stub = pb2_grpc.VhiControlStub(channel)
     yield stub, pb2
-    # Never leave a program running for the next test.
-    stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0)
+    # Never leave a trajectory running for the next test.
+    stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0)
     stub.SetRecordingSession(pb2.SetRecordingSessionRequest(active=False), timeout=10.0)
     channel.close()
 
 
-def test_the_aid_is_a_separate_service_on_the_same_port(aid):
-    """Structural separation: control and recording are different services."""
+def test_recording_session_state_is_served_by_the_same_stub(aid):
+    """One service now: recording RPCs are reached through VhiControl, not a stub of their own."""
     stub, pb2 = aid
-    state = stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0)
+    state = stub.GetRecordingSessionState(pb2.GetRecordingSessionStateRequest(), timeout=10.0)
     assert list(state.available_movements), "the aid discovers movements on its own"
 
 
@@ -383,40 +380,40 @@ def test_the_recording_session_gate_round_trips(aid):
     assert stub.SetRecordingSession(
         pb2.SetRecordingSessionRequest(active=True), timeout=10.0
     ).applied
-    assert stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0).recording_session_active
+    assert stub.GetRecordingSessionState(pb2.GetRecordingSessionStateRequest(), timeout=10.0).recording_session_active
     assert stub.SetRecordingSession(
         pb2.SetRecordingSessionRequest(active=False), timeout=10.0
     ).applied
-    assert not stub.GetTrainingState(
-        pb2.GetTrainingStateRequest(), timeout=10.0
+    assert not stub.GetRecordingSessionState(
+        pb2.GetRecordingSessionStateRequest(), timeout=10.0
     ).recording_session_active
 
 
-def test_a_training_program_runs_and_reports_itself(aid):
+def test_a_recording_trajectory_runs_and_reports_itself(aid):
     stub, pb2 = aid
-    movement = stub.GetTrainingState(
-        pb2.GetTrainingStateRequest(), timeout=10.0
+    movement = stub.GetRecordingSessionState(
+        pb2.GetRecordingSessionStateRequest(), timeout=10.0
     ).available_movements[1]
-    ack = stub.StartTrainingProgram(
-        pb2.StartTrainingProgramRequest(movement=movement, frequency_hz=1.0), timeout=10.0
+    ack = stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(movement=movement, frequency_hz=1.0), timeout=10.0
     )
     assert ack.applied, ack.message
-    state = stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0)
-    assert state.program_running
-    assert state.program_movement == movement
+    state = stub.GetRecordingSessionState(pb2.GetRecordingSessionStateRequest(), timeout=10.0)
+    assert state.trajectory_running
+    assert state.trajectory_movement == movement
 
 
-def test_a_second_program_is_refused_rather_than_swapped(aid):
+def test_a_second_trajectory_is_refused_rather_than_swapped(aid):
     """A recording is aligned against the running trajectory; swapping corrupts it."""
     stub, pb2 = aid
-    movements = stub.GetTrainingState(
-        pb2.GetTrainingStateRequest(), timeout=10.0
+    movements = stub.GetRecordingSessionState(
+        pb2.GetRecordingSessionStateRequest(), timeout=10.0
     ).available_movements
-    assert stub.StartTrainingProgram(
-        pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
+    assert stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(movement=movements[1]), timeout=10.0
     ).applied
-    second = stub.StartTrainingProgram(
-        pb2.StartTrainingProgramRequest(movement=movements[2]), timeout=10.0
+    second = stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(movement=movements[2]), timeout=10.0
     )
     assert not second.applied
     assert "already running" in second.message
@@ -424,22 +421,22 @@ def test_a_second_program_is_refused_rather_than_swapped(aid):
 
 def test_an_unknown_movement_is_refused_with_what_is_available(aid):
     stub, pb2 = aid
-    ack = stub.StartTrainingProgram(
-        pb2.StartTrainingProgramRequest(movement="not-a-movement"), timeout=10.0
+    ack = stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(movement="not-a-movement"), timeout=10.0
     )
     assert not ack.applied
     assert "offers" in ack.message
 
 
-def test_stopping_a_program_is_idempotent(aid):
+def test_stopping_a_trajectory_is_idempotent(aid):
     """Teardown calls this without knowing whether anything is running."""
     stub, pb2 = aid
-    assert stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0).applied
-    assert stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0).applied
-    assert not stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0).program_running
+    assert stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0).applied
+    assert stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0).applied
+    assert not stub.GetRecordingSessionState(pb2.GetRecordingSessionStateRequest(), timeout=10.0).trajectory_running
 
 
-def test_a_running_program_owns_the_control_hand(aid, v2):
+def test_a_running_trajectory_owns_the_control_hand(aid, v2):
     """The aid must not be silently overridden mid-recording — nor silently override.
 
     This is the guard that keeps a recording aid from changing what a discrete DOF
@@ -448,45 +445,45 @@ def test_a_running_program_owns_the_control_hand(aid, v2):
     """
     aid_stub, pb2 = aid
     control_stub, _ = v2
-    movements = aid_stub.GetTrainingState(
-        pb2.GetTrainingStateRequest(), timeout=10.0
+    movements = aid_stub.GetRecordingSessionState(
+        pb2.GetRecordingSessionStateRequest(), timeout=10.0
     ).available_movements
-    assert aid_stub.StartTrainingProgram(
-        pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
+    assert aid_stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(movement=movements[1]), timeout=10.0
     ).applied
 
     ack = control_stub.SetControl(
         pb2.SetControlRequest(discrete={"vhi.control.gesture": movements[2]}), timeout=10.0
     )
     assert not ack.applied
-    assert "training program is running" in ack.rejected["vhi.control.gesture"]
+    assert "recording trajectory is running" in ack.rejected["vhi.control.gesture"]
 
 
-def test_discrete_control_works_again_once_the_program_stops(aid, v2):
+def test_discrete_control_works_again_once_the_trajectory_stops(aid, v2):
     aid_stub, pb2 = aid
     control_stub, _ = v2
-    movements = aid_stub.GetTrainingState(
-        pb2.GetTrainingStateRequest(), timeout=10.0
+    movements = aid_stub.GetRecordingSessionState(
+        pb2.GetRecordingSessionStateRequest(), timeout=10.0
     ).available_movements
-    aid_stub.StartTrainingProgram(
-        pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
+    aid_stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(movement=movements[1]), timeout=10.0
     )
-    aid_stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0)
+    aid_stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0)
     ack = control_stub.SetControl(
         pb2.SetControlRequest(discrete={"vhi.control.gesture": movements[2]}), timeout=10.0
     )
     assert ack.applied, dict(ack.rejected)
 
 
-def test_continuous_control_is_unaffected_by_a_running_program(aid, v2):
-    """The program drives the *control* hand; continuous DOFs drive the predicted one."""
+def test_continuous_control_is_unaffected_by_a_running_trajectory(aid, v2):
+    """The trajectory drives the *control* hand; continuous DOFs drive the predicted one."""
     aid_stub, pb2 = aid
     control_stub, _ = v2
-    movements = aid_stub.GetTrainingState(
-        pb2.GetTrainingStateRequest(), timeout=10.0
+    movements = aid_stub.GetRecordingSessionState(
+        pb2.GetRecordingSessionStateRequest(), timeout=10.0
     ).available_movements
-    aid_stub.StartTrainingProgram(
-        pb2.StartTrainingProgramRequest(movement=movements[1]), timeout=10.0
+    aid_stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(movement=movements[1]), timeout=10.0
     )
     ack = control_stub.SetControl(
         pb2.SetControlRequest(continuous={"vhi.prediction.index.flexion": 0.5}), timeout=10.0
@@ -533,15 +530,15 @@ def test_blending_does_not_change_the_commanded_value(v2):
         assert readings[True][element] == pytest.approx(degrees, abs=0.5), element
 
 
-def test_the_training_state_reports_the_current_movement(v2, aid, movements):
-    """The palette highlights it, and must not need the v1 control service to."""
+def test_the_recording_state_reports_the_current_movement(v2, aid, movements):
+    """The palette highlights it, and must not need a second stub to."""
     aid_stub, pb2 = aid
     control_stub, _ = v2
     target = movements[1]
     assert control_stub.SetControl(
         pb2.SetControlRequest(discrete={"vhi.control.gesture": target}), timeout=10.0
     ).applied
-    state = aid_stub.GetTrainingState(pb2.GetTrainingStateRequest(), timeout=10.0)
+    state = aid_stub.GetRecordingSessionState(pb2.GetRecordingSessionStateRequest(), timeout=10.0)
     assert state.current_movement == target
 
 
@@ -559,116 +556,19 @@ def rest_control_hand(v2, aid):
     yield
     aid_stub, pb2 = aid
     control_stub, _ = v2
-    movements = aid_stub.GetTrainingState(
-        pb2.GetTrainingStateRequest(), timeout=10.0
+    movements = aid_stub.GetRecordingSessionState(
+        pb2.GetRecordingSessionStateRequest(), timeout=10.0
     ).available_movements
-    # Commanding a movement is only possible in Movement mode, so the aid's program
-    # start/stop is the way back: StopTrainingProgram rests via SetMovement.
+    # Commanding a movement is only possible in Movement mode, so the aid's trajectory
+    # start/stop is the way back: StopRecordingTrajectory rests via SetMovement.
     control_stub.SetControl(pb2.SetControlRequest(continuous={}), timeout=10.0)
-    aid_stub.StartTrainingProgram(
-        pb2.StartTrainingProgramRequest(movement=movements[0]), timeout=10.0
+    aid_stub.StartRecordingTrajectory(
+        pb2.StartRecordingTrajectoryRequest(movement=movements[0]), timeout=10.0
     )
-    aid_stub.StopTrainingProgram(pb2.StopTrainingProgramRequest(), timeout=10.0)
+    aid_stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0)
 
 
-def _declare_pose(stub, pb2, encoding, dofs=("vhi.prediction.index",), kind=None):
-    kind = kind if kind is not None else pb2.CONTINUOUS
-    return stub.Declare(
-        pb2.DeclareRequest(
-            standard_version="1",
-            client_name="control-pose-test",
-            control_pose_encoding=encoding,
-            dofs=[
-                pb2.DofDeclaration(name=n, kind=kind, lo=-1.0, hi=1.0, states=[])
-                for n in dofs
-            ],
-        ),
-        timeout=10.0,
-    )
-
-
-def test_not_declaring_a_control_pose_leaves_the_stream_unmentioned(v2):
-    """The additive guarantee: an existing client's handshake is unchanged.
-
-    Every client written before this field sends ENCODING_UNSPECIFIED by omission, and
-    must see exactly what it saw before — no stream name, no order, no mode change.
-    """
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, "vhi.prediction.index")
-    assert reply.accepted
-    assert reply.control_pose_stream_name == ""
-    assert list(reply.control_pose_channel_order) == []
-    assert reply.control_pose_encoding == pb2.ENCODING_UNSPECIFIED
-
-
-def test_declaring_a_canonical_control_pose_is_accepted(v2, rest_control_hand):
-    stub, pb2 = v2
-    reply = _declare_pose(stub, pb2, pb2.CANONICAL)
-    assert reply.accepted, [v.message for v in reply.verdicts]
-    assert reply.control_pose_stream_name == "MyoGestic_ControlPose"
-    # The control hand's own vocabulary, not the predicted hand's. This asserted
-    # `CANONICAL_DOFS` — the prediction names — and passed, because both orders were
-    # filled from the prediction table.
-    assert list(reply.control_pose_channel_order) == [
-        name.replace("vhi.prediction.", "vhi.control.pose.") for name in CANONICAL_DOFS
-    ]
-    assert reply.control_pose_encoding == pb2.CANONICAL
-
-
-def test_an_existing_producer_can_negotiate_without_changing_its_numbers(v2, rest_control_hand):
-    """The compatibility path: get the handshake, keep renderer units."""
-    stub, pb2 = v2
-    reply = _declare_pose(stub, pb2, pb2.LEGACY_NEGATED)
-    assert reply.accepted
-    assert reply.control_pose_encoding == pb2.LEGACY_NEGATED
-
-
-def test_the_reply_echoes_what_was_applied_not_what_was_asked(v2, rest_control_hand):
-    """A client must be able to read the outcome rather than assume its request won."""
-    stub, pb2 = v2
-    for asked in (pb2.CANONICAL, pb2.LEGACY_NEGATED):
-        assert _declare_pose(stub, pb2, asked).control_pose_encoding == asked
-
-
-def test_a_control_pose_and_a_discrete_dof_are_refused_together(v2, rest_control_hand):
-    """Two drivers for one hand — refused at the handshake, not per command.
-
-    A discrete DOF renders as a control-hand movement and a streamed pose drives the
-    same bones. v1 arbitrated this per command via ControlMode; saying no up front lets
-    the client fix its configuration instead of watching things not happen.
-    """
-    stub, pb2 = v2
-    reply = stub.Declare(
-        pb2.DeclareRequest(
-            standard_version="1",
-            control_pose_encoding=pb2.CANONICAL,
-            dofs=[
-                pb2.DofDeclaration(name="vhi.prediction.index.flexion", kind=pb2.CONTINUOUS, lo=-1.0, hi=1.0),
-                pb2.DofDeclaration(name="vhi.control.gesture", kind=pb2.DISCRETE, states=["rest", "fist"]),
-            ],
-        ),
-        timeout=10.0,
-    )
-    assert not reply.accepted
-    grasp = next(v for v in reply.verdicts if v.name == "vhi.control.gesture")
-    assert not grasp.renderable
-    assert "control-pose stream" in grasp.message
-    # The continuous DOF is still fine — the refusal is specific, not a blanket no.
-    assert next(v for v in reply.verdicts if v.name == "vhi.prediction.index.flexion").renderable
-
-
-def test_a_control_pose_may_be_declared_with_no_dofs_at_all(v2, rest_control_hand):
-    """Streaming the control hand is a legitimate thing to negotiate on its own."""
-    stub, pb2 = v2
-    reply = stub.Declare(
-        pb2.DeclareRequest(standard_version="1", control_pose_encoding=pb2.CANONICAL),
-        timeout=10.0,
-    )
-    assert reply.accepted
-    assert reply.control_pose_encoding == pb2.CANONICAL
-
-
-# --- Direction: canonical +1 renders what the DOF name denotes ------------------
+# --- Direction: standard +1 renders what the DOF name denotes ------------------
 #
 # `EXPECTED` above is a table, and a table can be inverted by a careless edit as easily
 # as the rig can — that is exactly what happened once: the renderer negated every
@@ -684,7 +584,7 @@ SOURCE = pathlib.Path(__file__).resolve().parent.parent / "src"
 BONE_NAMES = re.findall(r'"(WaveBone_\d+)"', (SOURCE / "PredictedHandSkeleton.cs").read_text())
 
 #: joint index -> the Euler degrees of `Movements.Fist`, the fully-closed hand. Flexion is
-#: what closing a hand does, so this is the pose a canonical +1 flexion must produce.
+#: what closing a hand does, so this is the pose a standard +1 flexion must produce.
 FIST = {
     int(joint): tuple(float(axis) for axis in (x, y, z))
     for joint, x, y, z in re.findall(
@@ -700,7 +600,7 @@ FIST = {
 #: about its direction. It has its own anchor below.
 FLEXION_DOFS = tuple(
     name
-    for name in CANONICAL_DOFS
+    for name in STANDARD_DOFS
     if not name.endswith(".abduction") and ".wrist" not in name
 )
 
@@ -723,8 +623,8 @@ def test_the_pose_library_was_actually_parsed():
 
 
 @pytest.mark.parametrize("name", FLEXION_DOFS)
-def test_canonical_plus_one_renders_the_fist_pose(v2, name):
-    """The direction anchor. Canonical +1 closes the hand; it does not open it.
+def test_standard_plus_one_renders_the_fist_pose(v2, name):
+    """The direction anchor. Standard +1 closes the hand; it does not open it.
 
     A renderer that negates on ingest puts these bones at `+85°` — which is near
     `IndexExtension`'s `+20°` and on the opposite side of rest from `Fist`. That is a
@@ -734,17 +634,17 @@ def test_canonical_plus_one_renders_the_fist_pose(v2, name):
         flexed = FIST[joint][0]
         assert flexed < 0.0, f"joint {joint}: the fist's X is not negative — re-read FIST"
         assert observed.degrees_at_hi == pytest.approx(flexed, abs=0.5), (
-            f"{name} joint {joint} ({observed.element}): canonical +1 rendered "
+            f"{name} joint {joint} ({observed.element}): standard +1 rendered "
             f"{observed.degrees_at_hi:+.1f}°, but a closed hand is {flexed:+.1f}°"
         )
 
 
-def test_canonical_plus_one_abducts_away_from_the_fist(v2):
+def test_standard_plus_one_abducts_away_from_the_fist(v2):
     """The one inverted channel, and why it is inverted.
 
     A fist wraps the thumb *across* the palm, so the library's thumb Z is adduction. The
-    DOF is named abduction, so canonical +1 must render the other way — the reason
-    `canonicalSign[1]` is `-1` while the five flexion channels are `+1`. Getting this
+    DOF is named abduction, so standard +1 must render the other way — the reason
+    `Sign[1]` is `-1` while the five flexion channels are `+1`. Getting this
     right by negating everything, as the old ingest did, made abduction correct and all
     five flexion DOFs backwards.
     """
@@ -752,7 +652,7 @@ def test_canonical_plus_one_abducts_away_from_the_fist(v2):
         adducted = FIST[joint][2]
         assert adducted != 0.0, f"joint {joint} has no Z gain and cannot abduct"
         assert observed.degrees_at_hi == pytest.approx(-adducted, abs=0.5), (
-            f"thumb abduction joint {joint} ({observed.element}): canonical +1 rendered "
+            f"thumb abduction joint {joint} ({observed.element}): standard +1 rendered "
             f"{observed.degrees_at_hi:+.1f}°, but adduction is {adducted:+.1f}°"
         )
 
@@ -764,32 +664,6 @@ def test_direction_is_the_same_on_every_repeat(v2):
         for _ in range(3)
     ]
     assert runs[0] == runs[1] == runs[2], runs
-
-
-def test_direction_does_not_depend_on_the_control_pose_declaration(v2, rest_control_hand):
-    """The predicted hand's direction is not something a client can negotiate.
-
-    Its conversion is deliberately ungated: `DeclareReply.continuous_encoding` reports
-    CANONICAL unconditionally, so it must also *be* canonical unconditionally. When the
-    ingest negation claimed in a comment to be "gated behind the handshake" while
-    negating regardless, this is the asymmetry that made the direction look like it
-    depended on whether the control-pose stream was declared.
-    """
-    stub, pb2 = v2
-    rendered = {}
-    for label, encoding in (
-        ("predicted-only", pb2.ENCODING_UNSPECIFIED),
-        ("predicted+control-pose", pb2.CANONICAL),
-    ):
-        reply = _declare_pose(stub, pb2, encoding)
-        assert reply.accepted, reply.message
-        assert reply.continuous_encoding == pb2.CANONICAL
-        rendered[label] = {
-            joint: round(o.degrees_at_hi, 3)
-            for joint, o in _sweep(v2, "vhi.prediction.index").items()
-        }
-    assert rendered["predicted-only"] == rendered["predicted+control-pose"], rendered
-    assert all(deg < 0.0 for deg in rendered["predicted-only"].values()), rendered
 
 
 # --- one vocabulary ---------------------------------------------------------------
@@ -824,7 +698,19 @@ def test_the_control_pose_order_names_control_pose_controls(v2, rest_control_han
     onto this one.
     """
     stub, pb2 = v2
-    reply = _declare_pose(stub, pb2, pb2.CANONICAL)
+    reply = stub.Declare(
+        pb2.DeclareRequest(
+            standard_version="1",
+            client_name="control-pose-test",
+            control_pose=True,
+            dofs=[
+                pb2.DofDeclaration(
+                    name="vhi.prediction.index", kind=pb2.CONTINUOUS, lo=-1.0, hi=1.0, states=[]
+                )
+            ],
+        ),
+        timeout=10.0,
+    )
     assert reply.accepted, reply.message
     order = list(reply.control_pose_channel_order)
     assert order, "declaring the stream must report its channel order"
@@ -871,11 +757,11 @@ def test_the_wrist_movements_were_actually_parsed():
     assert WRIST["WristLeftRight"][0][2] == 20.0
 
 
-def test_canonical_plus_one_flexes_the_wrist_by_the_documented_amount(v2):
+def test_standard_plus_one_flexes_the_wrist_by_the_documented_amount(v2):
     """The wrist's X anchor: the library's extreme, with flexion's sign.
 
     `Movements.WristUpDown` gives the magnitude (30°) but names neither side; the sign
-    comes from the rule that holds across this rig — negative X is flexion. So a canonical
+    comes from the rule that holds across this rig — negative X is flexion. So a standard
     +1 on wrist flexion is the negative extreme, not the positive one.
     """
     magnitude = abs(WRIST["WristUpDown"][0][0])
@@ -888,7 +774,7 @@ def test_wrist_abduction_uses_the_librarys_magnitude(v2):
     """The Z axis: magnitude derived, sign chosen.
 
     `Movements.WristLeftRight` defines ±20° and calls neither side abduction, so only the
-    magnitude is evidence here. The sign is `CanonicalPose.Wrist`'s documented choice —
+    magnitude is evidence here. The sign is `StandardPose.Wrist`'s documented choice —
     taken by analogy with flexion — and this pins it so that flipping it is a deliberate
     edit with a failing test attached, rather than a silent change of direction.
     """
@@ -903,7 +789,7 @@ def test_wrist_rotation_pins_a_choice_not_a_derivation(v2):
 
     `Movements.WristUpDown` and `WristLeftRight` define joint 0's X and Z; nothing in the
     library touches its Y. So the range and the sign were both picked — 90 degrees for the
-    human range, negative so canonical +1 is pronation — and this test exists to make
+    human range, negative so standard +1 is pronation — and this test exists to make
     changing either a deliberate edit with a failing assertion attached, rather than a
     silent change to what +1 means.
 

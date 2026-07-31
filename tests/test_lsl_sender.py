@@ -12,9 +12,9 @@ Data format (9 channels):
 - 3: Middle flexion (0-1)
 - 4: Ring flexion (0-1)
 - 5: Pinky flexion (0-1)
-- 6: Wrist flexion (0-1, currently unused)
-- 7: Wrist abduction (0-1, currently unused)
-- 8: Wrist rotation (0-1, currently unused)
+- 6: Wrist flexion (0-1)
+- 7: Wrist abduction (0-1)
+- 8: Wrist rotation (0-1)
 """
 
 import time
@@ -119,7 +119,7 @@ def generate_test_pattern(t, pattern="wave"):
             phase = 2 * np.pi * t * (0.1 + i * 0.05)
             data[i] = (np.sin(phase + i) + 1) / 2
 
-    # Canonical values as of VHI 2.0: +1 is the direction the channel's name denotes,
+    # Standard values as of VHI 2.0: +1 is the direction the channel's name denotes,
     # so a positive value flexes. This used to `return -data` for the pre-2.0 inlet,
     # where flexion was negative — sending that now would render extension.
     return data
