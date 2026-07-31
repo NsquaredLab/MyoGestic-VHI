@@ -82,30 +82,42 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// </remarks>
 	private static readonly Dictionary<string, (int Channel, int Joint, Axis Axis)> Renderable = new()
 	{
-		// Short forms: what a configuration reads most naturally. For the thumb the short
-		// address is DECLARED to mean flexion (its primary axis, legacy channel 0);
-		// abduction is addressed explicitly, because silently picking one of two axes is
-		// the guesswork a manifest exists to remove.
-		["vhi.prediction.thumb"] = (0, 1, Axis.X),
+		// This table is the *resolver*, not the vocabulary. It lists every spelling that
+		// resolves; what a client discovers is what is left after removing
+		// <see cref="Aliases"/> — nine addresses per stream, one per channel.
+		//
+		// Canonical, and the only ones advertised. The suffix appears exactly where it
+		// carries information: these four digits bend one way, so `index` cannot mean
+		// anything else, while the thumb and the wrist name their axes.
 		["vhi.prediction.index"] = (2, 4, Axis.X),
 		["vhi.prediction.middle"] = (3, 7, Axis.X),
 		["vhi.prediction.ring"] = (4, 10, Axis.X),
 		["vhi.prediction.little"] = (5, 13, Axis.X),
-
-		// Explicit axis forms. Same channels — two addresses naming one control is why
-		// the channel is published per capability rather than inferred from a list.
 		["vhi.prediction.thumb.flexion"] = (0, 1, Axis.X),
 		["vhi.prediction.thumb.abduction"] = (1, 1, Axis.Z),
-		["vhi.prediction.index.flexion"] = (2, 4, Axis.X),
-		["vhi.prediction.middle.flexion"] = (3, 7, Axis.X),
-		["vhi.prediction.ring.flexion"] = (4, 10, Axis.X),
-		["vhi.prediction.little.flexion"] = (5, 13, Axis.X),
 
 		// The wrist: one joint, three axes, so all three are named for the same reason the
 		// thumb's two are.
 		["vhi.prediction.wrist.flexion"] = (6, 0, Axis.X),
 		["vhi.prediction.wrist.abduction"] = (7, 0, Axis.Z),
 		["vhi.prediction.wrist.rotation"] = (8, 0, Axis.Y),
+
+		// Aliases. Each is a second spelling of a channel already named above, accepted so
+		// a map resolves instead of being refused over punctuation, and hidden from the
+		// manifest so discovery returns one name per control. <see cref="Aliases"/> is the
+		// list, and both the manifest and Declare's channel order filter on it.
+		//
+		// A bare `thumb` is here rather than above because the thumb is the one digit
+		// where a bare name would have to guess, and guessing is what a manifest exists to
+		// remove. It resolves to flexion, its primary axis.
+		//
+		// Two spellings reaching one control is also why a capability publishes its own
+		// channel rather than letting a client infer it from position in a list.
+		["vhi.prediction.thumb"] = (0, 1, Axis.X),
+		["vhi.prediction.index.flexion"] = (2, 4, Axis.X),
+		["vhi.prediction.middle.flexion"] = (3, 7, Axis.X),
+		["vhi.prediction.ring.flexion"] = (4, 10, Axis.X),
+		["vhi.prediction.little.flexion"] = (5, 13, Axis.X),
 	};
 
 	/// <summary>
@@ -113,6 +125,11 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// occupies.
 	/// </summary>
 	/// <remarks>
+	/// <para>
+	/// Same canonical-plus-alias shape as <see cref="Renderable"/>: the bare digit names
+	/// and the thumb's two axes are advertised, the four <c>&lt;digit&gt;.flexion</c>
+	/// spellings and a bare <c>thumb</c> are accepted and hidden. See <see cref="Aliases"/>.
+	/// </para>
 	/// <para>
 	/// A deliberately separate namespace from <c>vhi.prediction.*</c>, because these are a
 	/// separate <b>hand</b> on a separate stream serving a separate purpose. The prediction
