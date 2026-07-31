@@ -907,3 +907,55 @@ def test_wrist_rotation_pins_a_choice_not_a_derivation(v2):
     # positive one. At exactly 180 the pose is right and the *read-back inverts* — a
     # commanded +1 reports as -1. Measured, not assumed.
     assert abs(observed[0].degrees_at_hi) < 180.0
+
+
+# --- narrow streams route by declaration, not by asking the wire -------------------
+
+
+def test_a_narrow_declared_stream_lands_on_the_right_joints(v2, control_inlet):
+    """Declare two fingers, send two channels, and only those two must move.
+
+    The routing used to be read back off the stream's channel labels, which meant calling
+    liblsl's `info()` — the only thing that starts an `info_receiver` thread, and cancelling
+    one mid-request is what crashed this renderer three times. It comes from `Declare` now,
+    which already named the addresses. Nothing asserts that mapping but this: send a frame
+    whose two channels mean index and middle, and read back where it landed.
+    """
+    pylsl = pytest.importorskip("pylsl")
+    stub, pb2 = v2
+    addresses = ["vhi.prediction.index", "vhi.prediction.middle"]
+    assert _declare(stub, pb2, *addresses).accepted
+
+    info = pylsl.StreamInfo("MyoGestic_Output", "Control", 2, 60, "float32", "narrow-route")
+    channels = info.desc().append_child("channels")
+    for address in addresses:
+        channels.append_child("channel").append_child_value("label", address)
+    outlet = pylsl.StreamOutlet(info)
+    predict = None
+    try:
+        deadline = time.time() + 20.0
+        while time.time() < deadline:
+            outlet.push_sample([1.0, 1.0])
+            if predict is None:
+                found = [s for s in pylsl.resolve_streams(wait_time=1.0)
+                         if s.name() == "VHI_Predict"]
+                if found:
+                    predict = pylsl.StreamInlet(found[0])
+                continue
+            predict.flush()
+            time.sleep(0.5)
+            sample, _ = predict.pull_sample(timeout=2.0)
+            if sample and sample[2] > 0.9:
+                break
+            time.sleep(0.2)
+        assert sample, "VHI_Predict never delivered a sample"
+    finally:
+        if predict is not None:
+            predict.close_stream()
+        del outlet
+
+    # Channels 2 and 3 are index and middle; a positional read would have put the two
+    # values on thumb flexion and abduction instead.
+    assert sample[2] == pytest.approx(1.0, abs=0.05), f"index not driven: {sample}"
+    assert sample[3] == pytest.approx(1.0, abs=0.05), f"middle not driven: {sample}"
+    assert abs(sample[0]) < 0.05 and abs(sample[1]) < 0.05, f"thumb moved: {sample}"

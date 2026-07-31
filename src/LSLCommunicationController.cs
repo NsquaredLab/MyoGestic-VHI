@@ -314,36 +314,6 @@ public partial class LSLCommunicationController : Node
 
 	// Resolves an LSL stream by name on the calling (background) thread.
 	// Returns the created inlet, or null if not found / shutting down / on error.
-	/// <summary>Channel labels -> wire-index-to-pose-channel routing, or null.</summary>
-	/// <remarks>
-	/// Returns <see langword="null"/> — meaning "read positionally" — when the producer
-	/// labelled nothing, and also when it labelled channels this renderer does not recognise
-	/// as addresses. The second case matters: labels are a general LSL feature and a producer
-	/// may name its channels for a human ("IndexFlexion") without meaning them as addresses.
-	/// Routing on a partial match would silently drop the channels that did not resolve, so a
-	/// set of labels is taken as a routing table only if <b>every</b> one of them is an
-	/// address this renderer renders.
-	/// </remarks>
-	private int[] BuildRouting(string[] labels, bool controlPose, string streamName)
-	{
-		if (labels == null || labels.Length == 0)
-			return null;
-
-		var routing = new int[labels.Length];
-		for (int i = 0; i < labels.Length; i++)
-		{
-			routing[i] = VhiControlService.ChannelForAddress(labels[i], controlPose);
-			if (routing[i] < 0)
-			{
-				CallDeferred(nameof(LogMessage),
-					$"ℹ️ {streamName} labels channel {i} '{labels[i]}', which is not an address "
-					+ "this hand renders — reading the stream positionally instead.");
-				return null;
-			}
-		}
-		return routing;
-	}
-
 	/// <summary>One wire sample as a full pose frame in this renderer's channel order.</summary>
 	/// <remarks>
 	/// With a routing table the frame is always the renderer's full width, so everything
@@ -396,43 +366,23 @@ public partial class LSLCommunicationController : Node
 			int channelCount = LSLWrapper.GetStreamInfoChannelCount(streams[0]);
 			width = channelCount > 0 ? channelCount : ExpectedChannels;
 
-			// The labels are read through an inlet that exists only for this call, and the
-			// inlet that stays is never asked for its info. That is not tidiness — it is
-			// what keeps this renderer out of the crash liblsl has in every released
-			// version (1.16.2 here, unchanged on master).
+			// The routing comes from the declaration, not the wire. A client that sends a
+			// narrow frame renumbers it in this renderer's channel order, and it already
+			// named those addresses in Declare — so asking the stream only ever confirmed
+			// what the handshake said. Asking meant liblsl's info(), the only thing that
+			// starts an info_receiver thread; cancelling one mid-request is what crashed
+			// this renderer three times, and it is unfixed in every liblsl release.
 			//
-			// liblsl starts an inlet's info_receiver thread lazily, on the first info()
-			// call, and it then runs for the life of the inlet, retrying against the
-			// producer. Its request is written into a cancellable_streambuf, and:
-			//
-			//   ~cancellable_streambuf() { unregister_from_all();
-			//                              if (pptr() != pbase()) overflow(eof); }
-			//
-			// so destruction *sends* whatever is still buffered. cancel() never empties
-			// that buffer — it only posts close_if_open() to another thread — and
-			// ~info_receiver() joins without cancelling first. Cancel an info thread while
-			// a request is in flight and it unwinds through a flush into a socket that is
-			// being closed underneath it. That is what took VHI down with EXC_BAD_ACCESS
-			// at 0x0 on thread I_MyoGestic_Ou.
-			//
-			// The dangerous cancel is precisely the one this renderer does most: the stale
-			// timer drops an inlet 5s after its producer vanished, which is exactly when
-			// that inlet's info thread is mid-retry against a peer that is gone. Fetching
-			// here instead means the fetch happens once, against a producer that just
-			// answered a resolve, and the inlet holding the info thread is closed
-			// immediately after it succeeds — never cancelled mid-request. The inlet that
-			// the stale timer later drops has no info thread at all.
-			object labelReader = LSLWrapper.CreateStreamInlet(streams[0], recover: false);
-			string[] labels;
-			try
+			// A producer that never declared is read positionally, as an unlabelled one
+			// always was.
+			routing = VhiControlService.DeclaredRouting(controlPose);
+			if (routing != null && routing.Length > width)
 			{
-				labels = LSLWrapper.GetChannelLabels(LSLWrapper.GetInletStreamInfo(labelReader));
+				CallDeferred(nameof(LogMessage),
+					$"ℹ️ {streamName} declared {routing.Length} channels but carries {width} — "
+					+ "reading it positionally.");
+				routing = null;
 			}
-			finally
-			{
-				LSLWrapper.Dispose(labelReader);
-			}
-			routing = BuildRouting(labels, controlPose, streamName);
 
 			var inlet = LSLWrapper.CreateStreamInlet(streams[0], recover: false);
 			string layout = routing == null
