@@ -18,8 +18,6 @@ namespace Vhi;
 ///   <item><description><b>Stream</b>: ignores the state machine and follows a continuous
 ///     9-DOF pose streamed in over the <c>MyoGestic_ControlPose</c> LSL inlet
 ///     (consumed via <see cref="LSLCommunicationController"/>).</description></item>
-///   <item><description><b>Idle</b>: resets to the neutral pose and holds it;
-///     ignores keyboard, stream, and commands.</description></item>
 /// </list>
 ///
 /// Frame-by-frame animation logic runs in <c>_Process</c>; the resulting pose is
@@ -28,29 +26,13 @@ namespace Vhi;
 /// command API on this class) and from local keyboard input - the same methods are
 /// called either way.
 /// </summary>
-public partial class ControlHandSkeleton : Node3D
+public partial class ControlHandSkeleton : HandSkeleton
 {
-	/// <summary>Path to the <c>Skeleton3D</c> to animate. Left empty, the
-	/// skeleton is auto-discovered inside the FBX child.</summary>
-	[Export] public NodePath SkeletonPath;
-
 	/// <summary>How the control hand is driven each frame -
 	/// <see cref="ControlHandDriverMode.Movement"/>,
-	/// <see cref="ControlHandDriverMode.Stream"/>, or
-	/// <see cref="ControlHandDriverMode.Idle"/>. Change at runtime with
+	/// <see cref="ControlHandDriverMode.Stream"/>. Change at runtime with
 	/// <see cref="SetDriverMode"/>, itself driven by the v2 Declare handshake.</summary>
 	[Export] public ControlHandDriverMode DriverMode = ControlHandDriverMode.Movement;
-
-	/// <summary>Enable the predefined-movement state machine. When
-	/// <see langword="false"/>, the hand holds its current pose and ignores
-	/// keyboard input.</summary>
-	[Export] public bool EnableMovementControl = true;
-
-	/// <summary>Which subset of movements is exposed in
-	/// <see cref="GetAvailableMovements"/>. <see cref="MovementMode.AI"/> = 17;
-	/// <see cref="MovementMode.Classifier"/> = 15. Filtering rule: hide
-	/// movements exclusive to the other mode.</summary>
-	[Export] public MovementMode Mode = MovementMode.AI;
 
 	/// <summary>Godot resource path to the movements TOML config. Defaults to
 	/// <c>user://movements.toml</c>; auto-generated from the hard-coded poses
@@ -71,12 +53,8 @@ public partial class ControlHandSkeleton : Node3D
 	/// <summary>Seconds held at rest in each movement cycle.</summary>
 	[Export] public float RestTime = 1.0f;
 
-	private Skeleton3D skeleton;
 	private LSLCommunicationController communicationController;
 	private List<float> currentData = [];
-
-	// Bone name to index mapping
-	private readonly Dictionary<string, int> boneMap = [];
 
 	// Movement control system
 	private Dictionary<string, float[][][]> movementPoses;
@@ -85,30 +63,7 @@ public partial class ControlHandSkeleton : Node3D
 	private string animationState = "waiting";  // waiting, closing, holding, opening, resting, frozen
 	private float animationArgument = 0.0f;
 	private float stateTimer = 0.0f;
-	private DateTime animationStartTime;
 	private FileSystemWatcher configWatcher;  // Watches for config file changes
-
-	// Bone names in the FBX model (WaveBone naming convention)
-	// Based on the Unity hand structure, mapping to WaveBone_0 through WaveBone_15
-	private string[] boneNames =
-	[
-		"WaveBone_1",   // 0 - wrist
-		"WaveBone_3",   // 1 - thumb2 (proximal)
-		"WaveBone_4",   // 2 - thumb1 (middle)
-		"WaveBone_5",   // 3 - thumb0 (distal)
-		"WaveBone_7",   // 4 - index2 (proximal)
-		"WaveBone_8",   // 5 - index1 (middle)
-		"WaveBone_9",   // 6 - index0 (distal)
-		"WaveBone_12",   // 7 - middle2 (proximal)
-		"WaveBone_13",   // 8 - middle1 (middle)
-		"WaveBone_14",   // 9 - middle0 (distal)
-		"WaveBone_17",  // 10 - ring2 (proximal)
-		"WaveBone_18",  // 11 - ring1 (middle)
-		"WaveBone_19",  // 12 - ring0 (distal)
-		"WaveBone_22",  // 13 - pinkie2 (proximal)
-		"WaveBone_23",  // 14 - pinkie1 (middle)
-		"WaveBone_24"   // 15 - pinkie0 (distal)
-	];
 
 	public override void _Ready()
 	{
@@ -119,49 +74,18 @@ public partial class ControlHandSkeleton : Node3D
 		communicationController = GetNode<LSLCommunicationController>("/root/Main/LSLCommunicationController");
 		GD.Print("  Communication controller found");
 
-		// Find skeleton
-		if (SkeletonPath != null)
+		FindAndMapSkeleton();
+
+		LoadMovementConfig();
+		if (movementPoses != null && availableMovements != null && availableMovements.Length > 0)
 		{
-			skeleton = GetNode<Skeleton3D>(SkeletonPath);
+			GD.Print($"  {availableMovements.Length} movements; current: {availableMovements[currentMovementIndex]}");
+			SetupConfigWatcher();  // hot-reload
 		}
 		else
 		{
-			// Try to find skeleton automatically
-			skeleton = FindSkeletonRecursive(this);
-		}
-
-		if (skeleton != null)
-		{
-			GD.Print($"✅ Found Skeleton3D with {skeleton.GetBoneCount()} bones");
-			MapBones();
-		}
-		else
-		{
-			GD.PrintErr("⚠️ No Skeleton3D found! Hand won't animate.");
-		}
-
-		// Initialize movement control system
-		if (EnableMovementControl)
-		{
-			GD.Print("  Initializing movement control system...");
-			LoadMovementConfig();
-			animationStartTime = DateTime.Now;
-
-			if (movementPoses != null && availableMovements != null && availableMovements.Length > 0)
-			{
-				GD.Print($"  Movement mode: {Mode} ({availableMovements.Length} movements available)");
-				GD.Print($"  Current movement: {availableMovements[currentMovementIndex]}");
-
-				// Movement state will be sent when movement is first initiated (not while in waiting state)
-
-				// Set up file watcher for hot-reload
-				SetupConfigWatcher();
-			}
-			else
-			{
-				GD.PrintErr("  Failed to load movements - using empty movement list");
-				availableMovements = [];
-			}
+			GD.PrintErr("  Failed to load movements - using empty movement list");
+			availableMovements = [];
 		}
 
 		// Apply skin color material to the hand mesh
@@ -170,59 +94,14 @@ public partial class ControlHandSkeleton : Node3D
 		GD.Print("=== Control Hand Skeleton Controller _Ready() COMPLETE ===");
 	}
 
-	private Skeleton3D FindSkeletonRecursive(Node node)
-	{
-		if (node is Skeleton3D skel)
-			return skel;
-
-		foreach (Node child in node.GetChildren())
-		{
-			var result = FindSkeletonRecursive(child);
-			if (result != null)
-				return result;
-		}
-		return null;
-	}
-
-	private void MapBones()
-	{
-		boneMap.Clear();
-
-		// First, print all available bone names
-		GD.Print($"\n  === Available bones in skeleton ({skeleton.GetBoneCount()} total) ===");
-		for (int i = 0; i < skeleton.GetBoneCount(); i++)
-		{
-			GD.Print($"  [{i}] {skeleton.GetBoneName(i)}");
-		}
-		GD.Print("  ===============================================\n");
-
-		GD.Print("\n  === Attempting to map hand joints to WaveBones ===");
-		for (int i = 0; i < boneNames.Length; i++)
-		{
-			int boneIdx = skeleton.FindBone(boneNames[i]);
-			if (boneIdx != -1)
-			{
-				boneMap[boneNames[i]] = boneIdx;
-				GD.Print($"  Mapped {boneNames[i]} → bone index {boneIdx}");
-			}
-			else
-			{
-				GD.PrintErr($"  ⚠️ Bone '{boneNames[i]}' not found in skeleton!");
-			}
-		}
-	}
-
 	public override void _Process(double delta)
 	{
 		switch (DriverMode)
 		{
 			case ControlHandDriverMode.Movement:
 				// Predefined-movement state machine + local keyboard.
-				if (EnableMovementControl)
-				{
-					HandleMovementInput();
-					UpdateMovementAnimation((float)delta);
-				}
+				HandleMovementInput();
+				UpdateMovementAnimation((float)delta);
 				break;
 
 			case ControlHandDriverMode.Stream:
@@ -240,16 +119,13 @@ public partial class ControlHandSkeleton : Node3D
 						MoveBonesFromStream();
 				}
 				break;
-
-			case ControlHandDriverMode.Idle:
-				// Hold whatever pose; ignore keyboard, stream, and commands.
-				break;
 		}
 	}
 
 	public override void _PhysicsProcess(double delta)
 	{
-		SendControlHandData();
+		if (communicationController != null && skeleton != null && boneMap.Count > 0)
+			communicationController.SendControlData(ReadStandardPose());
 	}
 
 	private void MoveBonesFromStream()
@@ -285,82 +161,6 @@ public partial class ControlHandSkeleton : Node3D
 		SetBoneRotation(13, currentData[5] * StandardPose.AtPlusOne[13][0], 0, 0);
 		SetBoneRotation(14, currentData[5] * StandardPose.AtPlusOne[14][0], 0, 0);
 		SetBoneRotation(15, currentData[5] * StandardPose.AtPlusOne[15][0], 0, 0);
-	}
-
-	private void SetBoneRotation(int jointIndex, float xDeg, float yDeg, float zDeg)
-	{
-		if (jointIndex < 0 || jointIndex >= boneNames.Length)
-			return;
-
-		if (!boneMap.ContainsKey(boneNames[jointIndex]))
-			return;
-
-		int boneIdx = boneMap[boneNames[jointIndex]];
-
-		// Create rotation from degrees (convert to radians)
-		Vector3 eulerRadians = new(Mathf.DegToRad(xDeg), Mathf.DegToRad(yDeg), Mathf.DegToRad(zDeg));
-		Quaternion rotation = new(Basis.FromEuler(eulerRadians));
-
-		// Set the bone pose
-		skeleton.SetBonePoseRotation(boneIdx, rotation);
-	}
-
-	private void SendControlHandData()
-	{
-		if (communicationController == null || skeleton == null || boneMap.Count == 0)
-			return;
-
-		List<float> outputData = [];
-
-		// Standard values, through the same conversion the predicted hand publishes with, so
-		// the stream you train on and the stream you drive mean the same thing by +1. They
-		// did not: this divided by a privately-held gain table that was signed the other way,
-		// so a named Fist published [-1,-1,-1,-1,-1,-1] while the predicted hand needed
-		// [+1,-1,+1,+1,+1,+1] to make one. Every model trained here had to have its weights
-		// flipped by hand, and nothing on either wire said so.
-		var thumb2Rot = GetBoneRotationDegrees(1);
-		outputData.Add(StandardPose.Standard(1, 0, thumb2Rot.X)); // Thumb Flexion
-		outputData.Add(StandardPose.Standard(1, 2, thumb2Rot.Z)); // Thumb Abduction
-		outputData.Add(StandardPose.Standard(4, 0, GetBoneRotationDegrees(4).X));
-		outputData.Add(StandardPose.Standard(7, 0, GetBoneRotationDegrees(7).X));
-		outputData.Add(StandardPose.Standard(10, 0, GetBoneRotationDegrees(10).X));
-		outputData.Add(StandardPose.Standard(13, 0, GetBoneRotationDegrees(13).X));
-
-		// Wrist: bone 0, which parents every digit. Was hardcoded to three zeros "for
-		// compatibility" — but the control hand does move it (Movements.WristUpDown,
-		// WristLeftRight), so a recording of those movements captured nothing at all.
-		var wristRot = GetBoneRotationDegrees(0);
-		outputData.Add(StandardPose.Standard(0, 0, wristRot.X)); // Wrist Flexion
-		outputData.Add(StandardPose.Standard(0, 2, wristRot.Z)); // Wrist Abduction
-		outputData.Add(StandardPose.Standard(0, 1, wristRot.Y)); // Wrist Rotation
-
-		communicationController.SendControlData(outputData);
-	}
-
-	private Vector3 GetBoneRotationDegrees(int jointIndex)
-	{
-		if (jointIndex < 0 || jointIndex >= boneNames.Length || !boneMap.ContainsKey(boneNames[jointIndex]))
-			return Vector3.Zero;
-
-		int boneIdx = boneMap[boneNames[jointIndex]];
-		Quaternion rot = skeleton.GetBonePoseRotation(boneIdx);
-		return rot.GetEuler() * (180.0f / Mathf.Pi);
-	}
-
-	/// <summary>Reset all 16 animated joints to their rest pose (neutral
-	/// rotation). Called whenever the hand needs to clear back to neutral -
-	/// stopping a movement, switching driver mode, or releasing freeze.</summary>
-	public void ResetBones()
-	{
-		if (skeleton == null)
-			return;
-
-		foreach (var bone in boneMap.Values)
-		{
-			skeleton.SetBonePoseRotation(bone, Quaternion.Identity);
-		}
-
-		GD.Print("Control hand bones reset");
 	}
 
 	// ========== MOVEMENT CONTROL SYSTEM ==========
@@ -497,7 +297,6 @@ public partial class ControlHandSkeleton : Node3D
 	public string[] GetAvailableMovements() => availableMovements ?? [];
 
 	/// <summary>"AI" or "Classifier".</summary>
-	public string GetModeName() => Mode.ToString();
 
 	/// <summary>
 	/// Cycle the selected movement by <paramref name="delta"/> steps (e.g. -1 /
@@ -508,7 +307,7 @@ public partial class ControlHandSkeleton : Node3D
 	/// the ends of the available-movements list.</param>
 	public void CycleMovement(int delta)
 	{
-		if (!EnableMovementControl || availableMovements == null || availableMovements.Length == 0)
+		if (availableMovements == null || availableMovements.Length == 0)
 			return;
 
 		int n = availableMovements.Length;
@@ -522,13 +321,12 @@ public partial class ControlHandSkeleton : Node3D
 	/// <summary>Start playing the currently-selected movement from rest.</summary>
 	public void StartCurrentMovement()
 	{
-		if (!EnableMovementControl || availableMovements == null || availableMovements.Length == 0)
+		if (availableMovements == null || availableMovements.Length == 0)
 			return;
 
 		animationState = "closing";
 		stateTimer = 0;
 		animationArgument = 0.0f;
-		animationStartTime = DateTime.Now;
 		GD.Print($"▼ START movement: {availableMovements[currentMovementIndex]}");
 	}
 
@@ -550,7 +348,7 @@ public partial class ControlHandSkeleton : Node3D
 	{
 		// Movement commands only apply when the control hand is in Movement mode.
 		if (DriverMode != ControlHandDriverMode.Movement
-			|| !EnableMovementControl || availableMovements == null)
+			|| availableMovements == null)
 			return false;
 
 		int idx = Array.IndexOf(availableMovements, name);
@@ -761,7 +559,7 @@ public partial class ControlHandSkeleton : Node3D
 
 		for (int jointIdx = 0; jointIdx < 16; jointIdx++)
 		{
-			if (jointIdx >= boneNames.Length || !boneMap.ContainsKey(boneNames[jointIdx]))
+			if (jointIdx >= BoneNames.Length || !boneMap.ContainsKey(BoneNames[jointIdx]))
 				continue;
 
 			// Get max flexion (state 0) and rest (state 1) poses
@@ -779,7 +577,7 @@ public partial class ControlHandSkeleton : Node3D
 
 	public string GetCurrentMovementName()
 	{
-		if (!EnableMovementControl || availableMovements == null || currentMovementIndex >= availableMovements.Length)
+		if (availableMovements == null || currentMovementIndex >= availableMovements.Length)
 			return "None";
 
 		return availableMovements[currentMovementIndex];
@@ -826,10 +624,7 @@ public partial class ControlHandSkeleton : Node3D
 				movementPoses[kvp.Key.ToString()] = kvp.Value;
 			}
 
-			// Get movement list based on mode
-			var hardcodedMovements = Mode == MovementMode.AI ?
-				MovementPoses.AIModeMovements :
-				MovementPoses.ClassifierModeMovements;
+			var hardcodedMovements = MovementPoses.AIModeMovements;
 			availableMovements = new string[hardcodedMovements.Length];
 			for (int i = 0; i < hardcodedMovements.Length; i++)
 			{
@@ -855,16 +650,9 @@ public partial class ControlHandSkeleton : Node3D
 	/// </summary>
 	private string[] FilterMovementsByMode(Dictionary<string, float[][][]> poses)
 	{
-		var thisMode = Mode == MovementMode.AI
-			? MovementPoses.AIModeMovements
-			: MovementPoses.ClassifierModeMovements;
-		var otherMode = Mode == MovementMode.AI
-			? MovementPoses.ClassifierModeMovements
-			: MovementPoses.AIModeMovements;
-
 		var otherOnly = new HashSet<string>();
-		foreach (var m in otherMode) otherOnly.Add(m.ToString());
-		foreach (var m in thisMode) otherOnly.Remove(m.ToString());
+		foreach (var m in MovementPoses.ClassifierModeMovements) otherOnly.Add(m.ToString());
+		foreach (var m in MovementPoses.AIModeMovements) otherOnly.Remove(m.ToString());
 
 		var filtered = new List<string>();
 		foreach (var name in MovementConfigLoader.GetMovementNames(poses))

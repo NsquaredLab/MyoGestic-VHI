@@ -598,8 +598,8 @@ def rest_control_hand(v2, aid):
 SOURCE = pathlib.Path(__file__).resolve().parent.parent / "src"
 
 #: A sweep reports `element` as a bone *name*; the pose library is indexed by joint. This
-#: is `PredictedHandSkeleton.boneNames`, read rather than restated.
-BONE_NAMES = re.findall(r'"(WaveBone_\d+)"', (SOURCE / "PredictedHandSkeleton.cs").read_text())
+#: is `HandSkeleton.BoneNames`, read rather than restated — both hands share it.
+BONE_NAMES = re.findall(r'"(WaveBone_\d+)"', (SOURCE / "HandSkeleton.cs").read_text())
 
 #: The flexion DOFs: every advertised control except the thumb's second axis. Not
 #: `endswith(".flexion")` — a single-axis digit carries no suffix, because `index` cannot

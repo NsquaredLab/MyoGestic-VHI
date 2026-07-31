@@ -66,12 +66,6 @@ public partial class LSLCommunicationController : Node
 	/// on connect and reads into the fixed-size buffer.</summary>
 	[Export] public int ExpectedChannels = 9;
 
-	/// <summary>Publish <c>VHI_Control</c> / <c>VHI_Predict</c> when
-	/// <see langword="true"/>; suppress them when <see langword="false"/>.
-	/// Useful when something downstream resolves them but you don't want
-	/// them participating yet.</summary>
-	[Export] public bool EnableOutlets = true;
-
 	private object predictionInlet;   // StreamInlet (MyoGestic_Output) -> predicted hand
 	private object controlPoseInlet;  // StreamInlet (MyoGestic_ControlPose) -> control hand (Stream mode)
 	private object controlOutlet;     // StreamOutlet
@@ -132,15 +126,9 @@ public partial class LSLCommunicationController : Node
 		GD.Print("  Timestamps initialized");
 
 		// Create LSL outlets (optional, can be disabled)
-		if (EnableOutlets)
-		{
-			GD.Print("  Creating LSL outlets...");
-			CreateOutlets();
-		}
-		else
-		{
-			GD.Print("  LSL outlets DISABLED");
-		}
+		GD.Print("  Creating LSL outlets...");
+		CreateOutlets();
+
 		GD.Print("=== LSL Communication Controller _Ready() COMPLETE ===");
 	}
 

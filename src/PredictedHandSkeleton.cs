@@ -18,12 +18,8 @@ namespace Vhi;
 /// node; both this node and the control hand instance the same left-hand FBX.
 /// The current pose is published to the <c>VHI_Predict</c> LSL outlet at 60 Hz.
 /// </summary>
-public partial class PredictedHandSkeleton : Node3D
+public partial class PredictedHandSkeleton : HandSkeleton
 {
-	/// <summary>Path to the <c>Skeleton3D</c> to animate. Left empty, the
-	/// skeleton is auto-discovered inside the FBX child.</summary>
-	[Export] public NodePath SkeletonPath;
-
 	/// <summary>Spherically interpolate (<c>Slerp</c>) toward each incoming
 	/// pose at <see cref="SmoothingSpeed"/> instead of snapping. Smoother on
 	/// the eye, slight latency cost. Toggle live via the control panel or
@@ -34,34 +30,8 @@ public partial class PredictedHandSkeleton : Node3D
 	/// Higher is snappier. Ignored when smoothing is off.</summary>
 	[Export] public float SmoothingSpeed = 5.0f;
 
-	private Skeleton3D skeleton;
 	private LSLCommunicationController communicationController;
 	private List<float> currentData = [];
-
-	// Bone name to index mapping
-	private readonly Dictionary<string, int> boneMap = [];
-
-	// Bone names in the FBX model (WaveBone naming convention)
-	// Based on the Unity hand structure - matches ControlHandSkeleton mapping
-	private string[] boneNames =
-	[
-		"WaveBone_1",   // 0 - wrist
-		"WaveBone_3",   // 1 - thumb2 (proximal)
-		"WaveBone_4",   // 2 - thumb1 (middle)
-		"WaveBone_5",   // 3 - thumb0 (distal)
-		"WaveBone_7",   // 4 - index2 (proximal)
-		"WaveBone_8",   // 5 - index1 (middle)
-		"WaveBone_9",   // 6 - index0 (distal)
-		"WaveBone_12",  // 7 - middle2 (proximal)
-		"WaveBone_13",  // 8 - middle1 (middle)
-		"WaveBone_14",  // 9 - middle0 (distal)
-		"WaveBone_17",  // 10 - ring2 (proximal)
-		"WaveBone_18",  // 11 - ring1 (middle)
-		"WaveBone_19",  // 12 - ring0 (distal)
-		"WaveBone_22",  // 13 - pinkie2 (proximal)
-		"WaveBone_23",  // 14 - pinkie1 (middle)
-		"WaveBone_24"   // 15 - pinkie0 (distal)
-	];
 
 	public override void _Ready()
 	{
@@ -72,69 +42,8 @@ public partial class PredictedHandSkeleton : Node3D
 		communicationController = GetNode<LSLCommunicationController>("/root/Main/LSLCommunicationController");
 		GD.Print("  Communication controller found");
 
-		// Find skeleton
-		if (SkeletonPath != null)
-		{
-			skeleton = GetNode<Skeleton3D>(SkeletonPath);
-		}
-		else
-		{
-			// Try to find skeleton automatically
-			skeleton = FindSkeletonRecursive(this);
-		}
-
-		if (skeleton != null)
-		{
-			GD.Print($"✅ Found Skeleton3D with {skeleton.GetBoneCount()} bones");
-			MapBones();
-		}
-		else
-		{
-			GD.PrintErr("⚠️ No Skeleton3D found! Hand won't animate.");
-		}
-
+		FindAndMapSkeleton();
 		GD.Print("=== Predicted Hand Skeleton Controller _Ready() COMPLETE ===");
-	}
-
-	private Skeleton3D FindSkeletonRecursive(Node node)
-	{
-		if (node is Skeleton3D skel)
-			return skel;
-
-		foreach (Node child in node.GetChildren())
-		{
-			var result = FindSkeletonRecursive(child);
-			if (result != null)
-				return result;
-		}
-		return null;
-	}
-
-	private void MapBones()
-	{
-		boneMap.Clear();
-
-		// First, print all available bone names
-		GD.Print($"\n  === Available bones in skeleton ({skeleton.GetBoneCount()} total) ===");
-		for (int i = 0; i < skeleton.GetBoneCount(); i++)
-		{
-			GD.Print($"  [{i}] {skeleton.GetBoneName(i)}");
-		}
-		GD.Print("  ===============================================\n");
-
-		for (int i = 0; i < boneNames.Length; i++)
-		{
-			int boneIdx = skeleton.FindBone(boneNames[i]);
-			if (boneIdx != -1)
-			{
-				boneMap[boneNames[i]] = boneIdx;
-				GD.Print($"  Mapped {boneNames[i]} → bone index {boneIdx}");
-			}
-			else
-			{
-				GD.PrintErr($"  ⚠️ Bone '{boneNames[i]}' not found in skeleton!");
-			}
-		}
 	}
 
 	public override void _Process(double delta)
@@ -167,7 +76,8 @@ public partial class PredictedHandSkeleton : Node3D
 
 	public override void _PhysicsProcess(double delta)
 	{
-		SendPredictedHandData();
+		if (communicationController != null && skeleton != null && boneMap.Count > 0)
+			communicationController.SendPredictedData(ReadStandardPose());
 	}
 
 	private void MoveBonesDirectly()
@@ -232,33 +142,11 @@ public partial class PredictedHandSkeleton : Node3D
 		SmoothBoneRotation(15, currentData[5] * StandardPose.AtPlusOne[15][0], 0, 0, lerpFactor);
 	}
 
-	private void SetBoneRotation(int jointIndex, float xDeg, float yDeg, float zDeg)
-	{
-		if (jointIndex < 0 || jointIndex >= boneNames.Length)
-			return;
-
-		if (!boneMap.ContainsKey(boneNames[jointIndex]))
-			return;
-
-		int boneIdx = boneMap[boneNames[jointIndex]];
-
-		// Create rotation from degrees (convert to radians)
-		Vector3 eulerRadians = new(Mathf.DegToRad(xDeg), Mathf.DegToRad(yDeg), Mathf.DegToRad(zDeg));
-		Quaternion rotation = new(Basis.FromEuler(eulerRadians));
-
-		// Set the bone pose
-		skeleton.SetBonePoseRotation(boneIdx, rotation);
-	}
-
 	private void SmoothBoneRotation(int jointIndex, float targetXDeg, float targetYDeg, float targetZDeg, float lerpFactor)
 	{
-		if (jointIndex < 0 || jointIndex >= boneNames.Length)
+		if (jointIndex < 0 || jointIndex >= BoneNames.Length
+			|| !boneMap.TryGetValue(BoneNames[jointIndex], out int boneIdx))
 			return;
-
-		if (!boneMap.ContainsKey(boneNames[jointIndex]))
-			return;
-
-		int boneIdx = boneMap[boneNames[jointIndex]];
 
 		// Get current rotation and normalize
 		Quaternion current = skeleton.GetBonePoseRotation(boneIdx).Normalized();
@@ -272,46 +160,6 @@ public partial class PredictedHandSkeleton : Node3D
 
 		// Set the bone pose
 		skeleton.SetBonePoseRotation(boneIdx, newRot);
-	}
-
-	private void SendPredictedHandData()
-	{
-		if (communicationController == null || skeleton == null || boneMap.Count == 0)
-			return;
-
-		List<float> outputData = [];
-
-		// Standard, not rig degrees: StandardPose.Standard is the inverse of the conversion
-		// that rendered the pose, so VHI_Predict speaks the same language as the inlet and a
-		// round-trip through the renderer is the identity. Note this cannot detect a
-		// direction error on its own — an inverse agrees with its forward whichever way the
-		// pair points. The anchors for that live in the contract suite, against the control
-		// hand's named movements.
-		var thumb2Rot = GetBoneRotationDegrees(1);
-		outputData.Add(StandardPose.Standard(1, 0, thumb2Rot.X)); // Thumb Flexion
-		outputData.Add(StandardPose.Standard(1, 2, thumb2Rot.Z)); // Thumb Abduction
-		outputData.Add(StandardPose.Standard(4, 0, GetBoneRotationDegrees(4).X));
-		outputData.Add(StandardPose.Standard(7, 0, GetBoneRotationDegrees(7).X));
-		outputData.Add(StandardPose.Standard(10, 0, GetBoneRotationDegrees(10).X));
-		outputData.Add(StandardPose.Standard(13, 0, GetBoneRotationDegrees(13).X));
-
-		// Wrist: all three axes of bone 0, which parents every digit.
-		var wristRot = GetBoneRotationDegrees(0);
-		outputData.Add(StandardPose.Standard(0, 0, wristRot.X));
-		outputData.Add(StandardPose.Standard(0, 2, wristRot.Z));
-		outputData.Add(StandardPose.Standard(0, 1, wristRot.Y));
-
-		communicationController.SendPredictedData(outputData);
-	}
-
-	private Vector3 GetBoneRotationDegrees(int jointIndex)
-	{
-		if (jointIndex < 0 || jointIndex >= boneNames.Length || !boneMap.ContainsKey(boneNames[jointIndex]))
-			return Vector3.Zero;
-
-		int boneIdx = boneMap[boneNames[jointIndex]];
-		Quaternion rot = skeleton.GetBonePoseRotation(boneIdx);
-		return rot.GetEuler() * (180.0f / Mathf.Pi);
 	}
 
 	// --- standard control (v2) --------------------------------------------------
@@ -368,10 +216,6 @@ public partial class PredictedHandSkeleton : Node3D
 		}
 		return [.. movable];
 	}
-
-	/// <summary>The model's own name for a joint — the rig's identity claim, not a label.</summary>
-	public string BoneNameForJoint(int jointIndex) =>
-		jointIndex >= 0 && jointIndex < boneNames.Length ? boneNames[jointIndex] : $"joint {jointIndex}";
 
 	/// <summary>
 	/// Set one channel of the pose and render it, leaving every other channel alone.

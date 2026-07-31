@@ -475,7 +475,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 				{
 					verdict.Renderable = true;
 					verdict.RendersAs =
-						$"predicted hand: {predictedHand.BoneNameForJoint(slot.Joint)} "
+						$"predicted hand: {HandSkeleton.BoneNameForJoint(slot.Joint)} "
 						+ $"{slot.Axis} axis (MyoGestic_Output channel {slot.Channel})";
 				}
 				else if (ControlPoseRenderable.TryGetValue(address, out int poseChannel))
@@ -733,7 +733,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 					{
 						entry = new SweepObservation
 						{
-							Element = predictedHand.BoneNameForJoint(joint),
+							Element = HandSkeleton.BoneNameForJoint(joint),
 						};
 						observed[joint] = entry;
 					}
