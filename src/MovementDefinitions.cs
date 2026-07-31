@@ -404,10 +404,10 @@ public static class StandardPose
 	/// flexion — the negative half is the direction the name denotes — and it is the one value
 	/// here that should be confirmed by looking at the hand rather than by reading. If it is
 	/// backwards, flip this sign; nothing else needs to change.</para>
-	/// <para><b>Y = -90 is a choice with no rig-side evidence at all.</b> Rotation is
+	/// <para><b>Y = -179 is a choice with no rig-side evidence at all.</b> Rotation is
 	/// pronation/supination, and no movement in the library touches joint 0's Y axis, so
 	/// unlike X (magnitude and sign derived) and Z (magnitude derived, sign chosen) this one
-	/// is picked outright: <c>180°</c> each way, and negative
+	/// is picked outright: <c>179°</c> each way, and negative
 	/// so that standard <c>+1</c> is pronation, palm turning down. There is no forearm to
 	/// carry the motion, so what twists is the hand about its own long axis.</para>
 	/// <para>It is here because it was asked for, and it is the value most worth tuning: change
@@ -425,7 +425,7 @@ public static class StandardPose
 			? 0f
 			: Math.Clamp(standard, -1f, 1f) * Sign[channel];
 
-	/// <summary>Rig multipliers → standard values, in place, for as many as are present.</summary>
+	/// <summary>Standard values → rig multipliers, in place, for as many as are present.</summary>
 	public static void ToRig(List<float> pose)
 	{
 		for (int i = 0; i < pose.Count && i < Sign.Length; i++)

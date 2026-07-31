@@ -164,20 +164,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 		["vhi.prediction.wrist.rotation"] = "wrist rotation \u2014 pronation/supination (bone 0, Y axis). The hand twists about its own long axis; there is no forearm to carry the motion.",
 	};
 
-	/// <summary>
-	/// The continuous channel order VHI reports from <see cref="Declare"/>: index i is
-	/// channel i of the LSL stream, named by its ADDRESS.
-	/// </summary>
-	/// <remarks>
-	/// Addresses rather than bare names, so a client can resolve its own alias to an
-	/// address and the address to a channel without inventing a convention. The explicit
-	/// axis form is used here because it is unambiguous; the short forms name the same
-	/// channels and are found through the manifest.
-	/// <para>
-	/// Six entries, not nine. Channels 6-8 are read by no consumer, so no address claims
-	/// them — naming a dead channel is how the wrong maps spread in the first place.
-	/// </para>
-	/// </remarks>
 	/// <summary>Names that are <b>accepted but not advertised</b>.</summary>
 	/// <remarks>
 	/// <para>
@@ -260,6 +246,19 @@ public class VhiControlService : VhiControl.VhiControlBase
 			.Select(e => e.Key)];
 	}
 
+	/// <summary>
+	/// The continuous channel order VHI reports from <see cref="Declare"/>: index i is
+	/// channel i of the LSL stream, named by its ADDRESS.
+	/// </summary>
+	/// <remarks>
+	/// Addresses rather than bare names, so a client can resolve its own alias to an
+	/// address and the address to a channel without inventing a convention.
+	/// <para>
+	/// Nine entries, not six: every channel either hand exports is rendered, including
+	/// 6-8, which carry wrist flexion, abduction and rotation. There is no dead channel
+	/// left for a name to claim.
+	/// </para>
+	/// </remarks>
 	private static readonly string[] PredictionOrder = AdvertisedOrder(controlPose: false);
 	private static readonly string[] ControlPoseOrder = AdvertisedOrder(controlPose: true);
 
@@ -423,17 +422,18 @@ public class VhiControlService : VhiControl.VhiControlBase
 			{
 				StandardVersion = StandardVersion,
 				ContinuousStreamName = "MyoGestic_Output",
-				// The continuous inlet takes standard values: PredictedHandSkeleton
-				// negates once on ingest, so +1 means the direction the DOF name denotes.
-				// There is one encoding now — the first end-to-end v2 run inverted every
-				// joint precisely because an earlier handshake agreed on names and left
-				// units implied, which is why this stays documented here rather than
-				// assumed.
+				// The continuous inlet takes standard values: PredictedHandSkeleton converts
+				// them to rig units via StandardPose.ToRig, whose Sign is +1 on eight of the
+				// nine channels, so +1 means the direction the DOF name denotes. There is one
+				// encoding now — the first end-to-end v2 run inverted every joint precisely
+				// because an earlier handshake agreed on names and left units implied, which
+				// is why this stays documented here rather than assumed.
 				//
-				// VHI's own *outlets* (VHI_Control / VHI_Predict) deliberately stay in the
-				// rig's units, so sessions recorded before this switch remain readable by
-				// the same decoder. Changing those is a separate decision about recorded
-				// data, not part of this one.
+				// VHI_Predict publishes standard values too: it runs StandardPose.ToStandard,
+				// the inverse conversion, so the round trip through this hand is the identity.
+				// VHI_Control alone stays in the rig's units — the archived corpus and
+				// myogestic.vhi.legacy.decode_pose are pinned to them, and changing that is a
+				// separate decision about recorded data, not part of this one.
 				//
 				// Layer 3 of three, reported so a client can see it — never so it can
 				// mistake it for chatter protection. See SetPresentation.
