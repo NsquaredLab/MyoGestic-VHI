@@ -246,20 +246,46 @@ public static class LSLWrapper
 		}
 	}
 
+	// Resolved once. This is called every frame for every inlet, so a GetMethod lookup here
+	// is a per-frame reflection search that returns the same MethodInfo every time.
+	private static MethodInfo pullSampleMethod;
+
+	// A failing inlet fails on every frame, and it fails until something re-resolves it. One
+	// console write per failure measured 220 a second and ran for as long as the app did —
+	// the same message, forever, drowning the log it was meant to inform. So: say it once,
+	// then at most once per interval with a count of what was skipped.
+	private static readonly TimeSpan PullFailureLogInterval = TimeSpan.FromSeconds(10);
+	private static DateTime lastPullFailureLog = DateTime.MinValue;
+	private static long pullFailuresSinceLog;
+
 	/// <summary>
 	/// Pull a sample from a StreamInlet (non-blocking)
 	/// </summary>
+	/// <remarks>Returns 0.0 on failure, which ends the caller's drain loop for this frame.
+	/// Failures are rate-limited rather than silenced: an inlet whose producer has gone keeps
+	/// failing until the staleness clock re-resolves it, and printing each one buries
+	/// everything else.</remarks>
 	public static double PullSample(object inlet, float[] buffer, double timeout = 0.0)
 	{
 		try
 		{
-			var pullMethod = streamInletType.GetMethod("PullSample", [typeof(float[]), typeof(double)]);
-			object result = pullMethod.Invoke(inlet, [buffer, timeout]);
+			pullSampleMethod ??= streamInletType.GetMethod(
+				"PullSample", [typeof(float[]), typeof(double)]);
+			object result = pullSampleMethod.Invoke(inlet, [buffer, timeout]);
 			return (double)result;
 		}
 		catch (Exception e)
 		{
-			GD.PrintErr($"❌ PullSample failed: {e.Message}");
+			pullFailuresSinceLog++;
+			DateTime now = DateTime.Now;
+			if (now - lastPullFailureLog >= PullFailureLogInterval)
+			{
+				long skipped = pullFailuresSinceLog - 1;
+				string also = skipped > 0 ? $" ({skipped} more since the last message)" : "";
+				GD.PrintErr($"❌ PullSample failed: {e.Message}{also}");
+				lastPullFailureLog = now;
+				pullFailuresSinceLog = 0;
+			}
 			return 0.0;
 		}
 	}
