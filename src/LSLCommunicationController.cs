@@ -68,7 +68,7 @@ public partial class LSLCommunicationController : Node
 	[Export] public int ExpectedChannels = 9;
 
 	private object predictionInlet;   // StreamInlet (MyoGestic_Output) -> predicted hand
-	private object controlPoseInlet;  // StreamInlet (MyoGestic_ControlPose) -> control hand (Stream mode)
+	private object controlPoseInlet;  // StreamInlet (MyoGestic_ControlPose) -> control hand, while live
 	private object controlOutlet;     // StreamOutlet
 	private object predictedOutlet;   // StreamOutlet
 
@@ -104,9 +104,9 @@ public partial class LSLCommunicationController : Node
 	/// <remarks>
 	/// The prediction inlet has had one of these; this one had not, and leaned on the catch
 	/// around its pull instead — which never fires, because the wrapper swallows the
-	/// exception before this file sees it. Presence is now what puts the control hand into
-	/// Stream mode, so "the producer stopped" has to be observable here rather than inferred
-	/// from an error that never arrives.
+	/// exception before this file sees it. Presence is now the only thing that hands the
+	/// control hand to this stream, so "the producer stopped" has to be observable here
+	/// rather than inferred from an error that never arrives.
 	/// <para>It settles two things, not one: <see cref="ControlPoseLive"/> goes false, and
 	/// the inlet itself is dropped so the by-name resolve can find whoever publishes that
 	/// name next. Without the second, the first producer to exit cleanly pinned this inlet

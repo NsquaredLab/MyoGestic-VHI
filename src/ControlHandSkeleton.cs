@@ -40,8 +40,9 @@ public partial class ControlHandSkeleton : HandSkeleton
 
 	/// <summary>Movement cycles per second while the control hand is animating its own
 	/// movements rather than following its pose stream - the closing/opening
-	/// interpolation speed. Live-adjustable via the control panel or the
-	/// gRPC <c>SetSpeed</c> RPC.</summary>
+	/// interpolation speed. Live-adjustable via the control panel, or over gRPC by
+	/// <c>StartRecordingTrajectory</c>'s <c>frequency_hz</c>; there is no
+	/// <c>SetSpeed</c> RPC.</summary>
 	[Export] public float Frequency = 0.5f;
 
 	/// <summary>Seconds held at max flexion in each movement cycle.</summary>

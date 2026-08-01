@@ -327,8 +327,9 @@ public class VhiControlService : VhiControl.VhiControlBase
 				StreamName = "MyoGestic_ControlPose",
 				Channel = channel,
 				Description = "control-hand pose, driven by an operator or a setup script "
-					+ "rather than by a model. Requires the control hand in Stream mode, "
-					+ "which declaring control_pose requests.",
+					+ "rather than by a model. Nothing to request: the control hand renders "
+					+ "this stream while it is delivering, and gives itself back to its own "
+					+ "movements once the stream goes stale.",
 			});
 		}
 		return caps;
