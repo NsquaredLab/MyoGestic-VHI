@@ -29,8 +29,8 @@ namespace Vhi;
 /// Stream resolution blocks ~1 s so it runs on a background <c>Task.Run</c> thread;
 /// results and log lines are marshalled back to Godot's main thread via
 /// <c>CallDeferred</c>. Sample pulls themselves are non-blocking and happen in
-/// <c>_Process</c>. Streams are resolved <i>by name only</i>, so a stream with a
-/// different type or channel count won't be rejected - just yields wrong motion.
+/// <c>_Process</c>. Streams are <i>found</i> by name, but a found stream is only opened
+/// when it is <b>exactly one channel wide</b> — see <see cref="ResolveMissingInletsAsync"/>.
 /// </summary>
 public partial class LSLCommunicationController : Node
 {
@@ -48,7 +48,9 @@ public partial class LSLCommunicationController : Node
 		public bool Control;
 		public int Channel;
 		public object Inlet;
-		public float[] Buffer = new float[1];
+
+		/// <summary>One channel, always: nothing wider is ever opened.</summary>
+		public readonly float[] Buffer = new float[1];
 
 		/// <summary>When this inlet last delivered. <c>MinValue</c> until it does.</summary>
 		public DateTime LastSample = DateTime.MinValue;
@@ -202,9 +204,9 @@ public partial class LSLCommunicationController : Node
 			// --- Pull, and apply on arrival ------------------------------------------
 			//
 			// Latest sample wins within a frame; the value goes straight onto the hand.
-			// Channel 0 because the stream is this DOF and nothing else — a wider producer
-			// is read at 0 and its extra channels ignored, which is the same tolerance the
-			// buffer sizing gives a narrower manifest.
+			// Channel 0 because the stream is this DOF and nothing else — the resolve pass
+			// refused anything that was not exactly one channel wide, so index 0 is not a
+			// guess about an unknown layout, it is the whole sample.
 			if (dof.Inlet != null)
 			{
 				int got = 0;
@@ -335,12 +337,24 @@ public partial class LSLCommunicationController : Node
 				if (dof.Inlet != null || !byName.TryGetValue(dof.Name, out object info))
 					continue;
 
+				// One address, one float32 channel — refused, not tolerated. This used to resize
+				// the buffer to whatever turned up and read element zero of it, which quietly
+				// accepted a nine-channel whole-pose outlet from a client too old to know the
+				// stream had been split up: element zero of that is the thumb, so every DOF would
+				// have rendered the thumb's value and nothing would have said so. A receiver that
+				// advertises an invariant is the thing that has to enforce it.
 				int channelCount = LSLWrapper.GetStreamInfoChannelCount(info);
+				if (channelCount != 1)
+				{
+					CallDeferred(nameof(LogError),
+						$"❌ {dof.Name} is published {channelCount} channels wide, and this "
+						+ "contract is one address per stream, one float32 channel. Not opening it "
+						+ "— publish one stream per DOF, named for the address.");
+					continue;
+				}
 				object inlet = LSLWrapper.CreateStreamInlet(info, recover: false);
 				lock (connectionLock)
 				{
-					if (channelCount > 0 && dof.Buffer.Length != channelCount)
-						dof.Buffer = new float[channelCount];
 					// A new inlet has delivered nothing, and must not inherit the previous
 					// producer's clock: an inlet resolved within the stale window of the old
 					// one's last sample would otherwise read live before a byte arrived, and
@@ -354,8 +368,7 @@ public partial class LSLCommunicationController : Node
 					// it was opened for having a `LastAttempt` that had not landed yet.
 					dof.Inlet = inlet;
 				}
-				CallDeferred(nameof(LogMessage),
-					$"✅ Connected to LSL inlet: {dof.Name} ({channelCount} channels)");
+				CallDeferred(nameof(LogMessage), $"✅ Connected to LSL inlet: {dof.Name}");
 			}
 		}
 		catch (Exception e)
