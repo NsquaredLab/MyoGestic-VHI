@@ -52,13 +52,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`VhiControl` — the one gRPC control service.** An application declares which of
-  VHI's **addresses** it drives (`vhi.prediction.index`, `vhi.control.gesture`),
-  under whatever names its own configuration uses, and VHI answers with what
-  it can render. Neither side hard-codes a channel index. `Declare` returns a per-DOF
-  verdict, the continuous channel order, and whether the renderer blends. A DOF that
-  cannot be rendered is reported with a reason and **never silently ignored** — an
-  ignored joint looks exactly like a joint that is working and holding still.
+- **`VhiControl` — the one gRPC control service, and `GetControlManifest` is its whole
+  contract.** The manifest lists every **address** VHI exports
+  (`vhi.prediction.index`, `vhi.control.gesture`) with what it can render for each: the
+  kind, the range or the states, the LSL stream it is read from, and the channel it
+  occupies there. A client calls it once, unconditionally, before it sends anything,
+  and maps its own configuration's names onto those addresses. There is no per-client
+  negotiation and nothing to declare — the manifest is the same for everyone, and VHI
+  keeps no session state about who is talking to it. Neither side hard-codes a channel
+  index.
+
+  Each pose stream numbers its channels from zero, so a capability publishes
+  `stream_name` beside `channel`: `vhi.prediction.index` and `vhi.control.pose.index`
+  are both channel 2, on different streams and different hands.
+
+  A DOF that cannot be rendered is reported by name with a reason and **never silently
+  ignored** — an ignored joint looks exactly like a joint that is working and holding
+  still.
 - **Discrete DOFs render as control-hand movements.** States resolve case-insensitively
   against the movement names the build actually offers, discovered per call rather than
   from a table, because the movement set changes with the movement mode. A DOF where any
@@ -79,16 +89,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service of their own — a canonical discrete DOF is a *held state*, and a running
   trajectory must not redefine that, so while one runs it owns the control hand and
   discrete DOFs are refused with the reason.
-- **The optional `MyoGestic_ControlPose` inlet is under the same handshake, additively.**
-  `DeclareRequest.control_pose` is a plain bool: unset (what every existing client does)
-  changes nothing at all, and `true` also negotiates the control hand's pose stream and
-  reports its channel order.
+- **The control hand follows the presence of its pose stream, and has no modes.**
+  Publish the optional `MyoGestic_ControlPose` inlet and the control hand renders it;
+  stop, and after `ControlPoseStaleAfterSeconds` (5 s) it stops any running trajectory,
+  returns to rest, and resumes its own named movements. Publishing *is* the request:
+  an inlet nobody reads is indistinguishable from a stream that is not arriving. This
+  is exactly how the predicted hand has always followed `MyoGestic_Output`, and the two
+  hands differing on it was the only reason a mode ever existed. The inlet's addresses
+  are published in the manifest under `vhi.control.pose.*` — a namespace of their own,
+  because they are a separate hand on a separate stream.
 
-  Declaring the stream is also how a client asks for `Stream` mode, since there is no
-  separate mode RPC — an inlet nobody reads is indistinguishable from a stream that is
-  not arriving. Declaring it *together with* a discrete DOF is refused at the handshake:
-  both drive the control hand's bones, and v1 arbitrated that per command via
-  `ControlMode`, where a client only ever saw commands quietly not apply.
+  A stream and a discrete DOF cannot both own those bones, so while the stream is live
+  a discrete DOF is refused **by name**, with
+  `'<movement>' was refused — a control-pose stream is driving the control hand` in
+  `ControlAck.rejected`. v1 arbitrated the same conflict through `ControlMode`, where a
+  client only ever saw commands quietly not apply.
 - **`SetPresentation` — renderer blending, named for what it is.** The third of three
   distinct smoothing layers (continuous smoothing and discrete debounce are the other
   two, both on the MyoGestic side). Appearance only; it cannot make an unstable
@@ -125,10 +140,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GetTrainingState` → `GetRecordingSessionState`) — a recording aid that cannot see what
   the control service already declared to the same hand was two sources of truth for one
   state machine, not two independent responsibilities. The per-capability
-  `ContinuousEncoding` field is gone from the manifest, and `control_pose_encoding`
-  narrows to a plain `control_pose` bool on both `DeclareRequest` and `DeclareReply`: the
-  sign convention it used to carry left the wire entirely once the predicted hand stopped
-  computing one to negate. None of this degrades gracefully — an old MyoGestic against a
+  `ContinuousEncoding` field is gone from the manifest, and no field anywhere names an
+  encoding: the sign convention they used to carry left the wire entirely once the
+  predicted hand stopped computing one to negate. None of this degrades gracefully — an old MyoGestic against a
   new VHI, or the reverse, refuses to link at all: wrong service name, wrong RPC names, a
   field that no longer exists. **MyoGestic and VHI must be upgraded together**; there is
   no staged rollout and no version this pair is backward-compatible with.
@@ -136,12 +150,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **BREAKING: the v1 `VhiControl` service and `proto/myogestic_vhi.proto`.** A client
-  that still speaks v1 receives `UNIMPLEMENTED`, which is exactly the signal v2's
-  `Declare` handshake reads to recognise a build it cannot negotiate with.
+  that still speaks v1 receives `UNIMPLEMENTED` — the same signal a current client gets
+  from `GetControlManifest` against a build too old to answer, and how it recognises a
+  renderer it cannot drive.
 
   Capabilities were split by *kind* rather than moved wholesale: `SetMovement` → a
   canonical discrete DOF; `SetMovement(cycle=true)` and `SetSessionActive` → the
-  recording aid; `SetSmoothing` → `SetPresentation`; `GetState` → `GetTrainingState`.
+  recording-session RPCs; `SetSmoothing` → `SetPresentation`; `GetState` →
+  `GetRecordingSessionState`.
   `Freeze`, `SetSpeed`, `SetChirality` and `SetControlMode` were **not** replaced: each
   was a transport concept with no consumer, and `SetChirality` never worked — its handler
   always returned `applied=false`.
@@ -150,17 +166,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The pose stream describes itself.** A producer that labels its LSL channels with
-  control addresses may send **however many controls it drives, in any order** — two
-  channels carrying `vhi.prediction.index` and `vhi.prediction.middle` is a complete
-  stream, not a truncated nine. VHI reads the labels from the sender's own stream
-  description and places each value by name.
-
-  Unlabelled producers are unaffected: the wire *is* the pose order and is read
-  positionally, exactly as before. Labels that are not addresses this hand renders — a
-  producer naming its channels for a human — also fall back to positional rather than
-  routing on a partial match, because dropping the channels that did not resolve would
-  misattribute every later one.
+- **A channel is an address, and both ends read it from one table.** The manifest says
+  `vhi.prediction.index` is channel 2 and a producer writes it there; VHI reads its
+  inlets positionally and reconstructs nothing. Reading a sender's channel labels back
+  instead meant asking the inlet for its stream info, which is the only thing that
+  starts liblsl's `info_receiver` thread — and cancelling that thread mid-request
+  crashed the renderer. It bought a producer the right to send a narrower frame, which
+  saved three floats.
 - **The wrist renders.** `wrist.flexion` and `wrist.abduction` on both hands, channels 6
   and 7. Bone 0 is the common ancestor of all five digit chains, so turning it turns the
   whole hand — it was mapped, named "wrist", and never written to.
@@ -185,15 +197,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The suffix appears exactly where it carries information. The bare form is still accepted,
   so a declaration using it renders — but it is no longer advertised, and a client that
   validates against the manifest will refuse it.
-- **`Declare` named controls the manifest did not advertise.** Its channel order was a
-  hand-maintained literal, and after the aliases were trimmed it went on reporting five
-  `.flexion` names the manifest had dropped — so a client building its frame from
-  `continuous_channel_order` was handed addresses its own loader would reject. Both orders
-  are derived from the same tables the manifest is built from now.
-- **The control-pose order reported the *predicted* hand's addresses.** Both orders came
-  from the prediction table, so a client declaring a control-pose stream was told its
-  channels were `vhi.prediction.*` — the other hand's controls, which it would then have
-  routed onto this one. One test asserted this and passed.
+- **The manifest advertises each control once, and the aliases stay accepted.**
+  `vhi.prediction.index.flexion` is `vhi.prediction.index` on the same channel, so
+  publishing both put eleven capabilities in the manifest for six controls and forced
+  every client listing them to explain the duplication. The longer spellings still
+  resolve on the wire; they are simply not advertised. The thumb is the exception in the
+  other direction — it has two axes, so `thumb.flexion` is advertised and a bare `thumb`
+  is the alias.
 - **A canonical `+1` extended every digit instead of flexing it.** Both hands converted
   canonical values by negating all nine channels on ingest, reasoning that "the flexion
   gains are negative". That is backwards: the gain table *is*
@@ -211,11 +221,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than from a sweep. That mattered: the old expectation table had been filled in *from* the
   negating renderer, so the suite agreed with the rig while both disagreed with the DOF
   names. Restoring the blanket negation fails 11 assertions.
-- **The canonical conversion is no longer gated, and no longer claims to be.** The ingest
-  comment said it was "gated behind the handshake" while negating regardless of what a
-  client declared. The conversion is unconditional now, with no field left to say
-  otherwise: it must not be possible for the same `+1` to render two ways depending on
-  what was said during `Declare`.
+- **The canonical conversion is unconditional, and no longer claims otherwise.** The
+  ingest comment said it was "gated behind the handshake" while negating regardless of
+  what a client sent. There is one encoding and no field left to name another: it must
+  not be possible for the same `+1` to render two ways.
 - **An over-range pose sample could invert a joint.** The gRPC path clamped to `[-1, 1]`;
   the LSL path did not. Past `±90°` the Euler round-trip used to read a bone back wraps and
   changes sign, so a sample beyond `±1.06` on an `85°` gain flipped the read-back. Both
