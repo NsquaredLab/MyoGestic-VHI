@@ -680,6 +680,65 @@ def test_direction_is_the_same_on_every_repeat(v2):
     assert runs[0] == runs[1] == runs[2], runs
 
 
+# --- one vocabulary: accepted, not advertised ------------------------------------
+#
+# Declare used to answer both halves of this. It is gone; the manifest and SetControl
+# now carry one half each, and the two tests below are the whole claim.
+
+
+def test_the_manifest_advertises_the_control_pose_channels_a_client_indexes_by(v2):
+    """The manifest is the whole contract now — there is no Declare to double-check it.
+
+    These are the channel numbers a client actually writes `MyoGestic_ControlPose`
+    floats to, read off `GetControlManifest` rather than restated: a client that indexed
+    by a different number would drive the wrong finger. The five aliases
+    (`vhi.control.pose.thumb`, and `.flexion` on the four single-axis digits) resolve
+    just as well — see the next test — but must not show up here, or a client that
+    enumerates the manifest would see two names for the same channel.
+    """
+    stub, pb2 = v2
+    manifest = stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=10.0)
+    control_pose = {
+        c.address: c.channel
+        for c in manifest.capabilities
+        if c.stream_name == "MyoGestic_ControlPose"
+    }
+    assert control_pose == {
+        "vhi.control.pose.thumb.flexion": 0,
+        "vhi.control.pose.thumb.abduction": 1,
+        "vhi.control.pose.index": 2,
+        "vhi.control.pose.middle": 3,
+        "vhi.control.pose.ring": 4,
+        "vhi.control.pose.little": 5,
+        "vhi.control.pose.wrist.flexion": 6,
+        "vhi.control.pose.wrist.abduction": 7,
+        "vhi.control.pose.wrist.rotation": 8,
+    }
+    for alias in [
+        "vhi.control.pose.thumb",
+        "vhi.control.pose.index.flexion",
+        "vhi.control.pose.middle.flexion",
+        "vhi.control.pose.ring.flexion",
+        "vhi.control.pose.little.flexion",
+    ]:
+        assert alias not in control_pose, f"{alias} is an alias and must not be advertised"
+
+
+def test_an_alias_is_still_accepted_though_unadvertised(v2):
+    """The rename is not a removal: a client sending the old name keeps rendering.
+
+    `vhi.prediction.thumb` is accepted but not advertised — the same asymmetry as the
+    control-pose test above, from the other side. `resolve()` on the client side refuses
+    what the manifest omits, so this is what a client reaches only by sending the alias
+    directly — but the renderer must not be the thing that breaks it.
+    """
+    stub, pb2 = v2
+    ack = stub.SetControl(
+        pb2.SetControlRequest(continuous={"vhi.prediction.thumb": 0.0}), timeout=10.0
+    )
+    assert ack.applied, dict(ack.rejected)
+
+
 # --- the wrist ------------------------------------------------------------------
 
 
