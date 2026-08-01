@@ -7,49 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **Both hands bent the wrong way, and `VHI_Control` published the opposite of
-  `VHI_Predict`.** Standard `+1` extended a digit instead of flexing it, and the
-  ground-truth stream you train on called a fist `-1` while the prediction stream you
-  drive needed `+1`. Every model trained against VHI needed its weights flipped by hand,
-  and nothing on either wire said so.
-
-  The root cause was that `MovementPoses` is not what the rig renders.
-  `ApplyMovementPose` interpolated with `-Mathf.Sin(argument)`, so a held `Fist` put bone
-  4 at `+85°` while the table read `-85`. **Positive X is flexion on this rig.** Both
-  skeletons had privately copied those raw rows as their gain tables, and so had the
-  contract suite's direction gate — every check agreed with every other and all of them
-  disagreed with the hand. Four fingers curling backwards still look fist-shaped; the
-  thumb is the only digit whose flexion is not symmetric front-to-back, and it is where
-  the error was finally visible.
-
-  `StandardPose.AtPlusOne` is now the only place that knows what a standard value means in
-  degrees; neither skeleton owns a sign. `MovementPoses` is in rig-native degrees and the
-  animation interpolates plainly — which also fixes a movement whose rest pose is not
-  zero, where `rest + (max - rest) * -1` was not an interpolation at all
-  (`Movements.Thumb`'s middle joint reached `+35°` instead of `55°`).
-
-  The direction anchor is no longer derived from anything the renderer also reads. It
-  holds the movement whose *name* says what it is — `Movements.Index` is index flexion
-  because a human called it that — and asserts what `VHI_Control` publishes.
-
-### Changed
-
-- **`VHI_Control` publishes standard values.** A held `Fist` is
-  `[1, -1, 1, 1, 1, 1, …]`: five flexions and an *ad*ducted thumb. It previously published
-  the rig's own units, opposite on five channels. The outlets advertise
-  `pose_convention = "standard"` and the control outlet's `source_id` is now
-  `control_hand_002_standard`, so the conventions are distinguishable on the wire.
-  Recordings made before this are readable through `myogestic.vhi.legacy.decode_pose`,
-  which is an **archive reader only** — putting a current frame through it inverts it.
-- **`VHI_Control` fills the wrist channels.** They were hardcoded to three zeros "for
-  compatibility", so a recording of `WristUpDown` or `WristLeftRight` captured nothing.
-- **`movements.toml` declares its convention and is migrated once.** A file without a
-  `convention` key is Unity-signed, and is rewritten in place in rig-native degrees with a
-  `.unity-signed.bak` copy beside it. Converting on every load instead would leave a file
-  on disk whose numbers mean the opposite of what they say.
-
 ### Added
 
 - **`VhiControl` — the one gRPC control service, and `GetControlManifest` is its whole
@@ -86,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   movement so the recorded pose stream sweeps a continuous range instead of snapping
   between held states; `GetRecordingSessionState` reports session state plus the
   movement names a trajectory may use. These RPCs live on `VhiControl` rather than a
-  service of their own — a canonical discrete DOF is a *held state*, and a running
+  service of their own — a standard discrete DOF is a *held state*, and a running
   trajectory must not redefine that, so while one runs it owns the control hand and
   discrete DOFs are refused with the reason.
 - **The control hand follows the presence of its pose stream, and has no modes.**
@@ -117,16 +74,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING: the continuous LSL inlet takes canonical values.** `MyoGestic_Output` now
+- **`VHI_Control` publishes standard values.** A held `Fist` is
+  `[1, -1, 1, 1, 1, 1, …]`: five flexions and an *ad*ducted thumb. It previously published
+  the rig's own units, opposite on five channels. The outlets advertise
+  `pose_convention = "standard"` and the control outlet's `source_id` is now
+  `control_hand_002_standard`, so the conventions are distinguishable on the wire.
+  Sessions recorded before this are in the old units: convert them once with
+  `myogestic.tools.migrate_vhi_sessions`, which stamps `pose_convention` into the session
+  so a reader never has to guess.
+- **`VHI_Control` fills the wrist channels.** They were hardcoded to three zeros "for
+  compatibility", so a recording of `WristUpDown` or `WristLeftRight` captured nothing.
+- **`movements.toml` declares its convention and is migrated once.** A file without a
+  `convention` key is Unity-signed, and is rewritten in place in rig-native degrees with a
+  `.unity-signed.bak` copy beside it. Converting on every load instead would leave a file
+  on disk whose numbers mean the opposite of what they say.
+- **BREAKING: the continuous LSL inlet takes standard values.** `MyoGestic_Output` now
   carries values where `+1` means the direction the DOF name denotes, so `+1` on index
-  flexion *flexes*. v1 expected the renderer's own convention, where flexion was
-  negative. There is exactly one encoding now, so nothing negotiates it: the field that
-  once announced it is gone, and a client simply sends canonical values.
+  flexion *flexes*. v1 expected the renderer's own units of the day — the Unity-signed
+  gain table, in which flexion was negative — so a v1 frame and a standard one of the
+  same sign render opposite hands. There is exactly one encoding now, so nothing
+  negotiates it: the field that
+  once announced it is gone, and a client simply sends standard values.
 
-  `VHI_Control` deliberately stays in the renderer's own units: the archived reference
-  sessions and `myogestic.vhi.legacy.decode_pose` are pinned to them, so every session
-  recorded before this release stays readable by the same decoder. `VHI_Predict` does
-  not stay in those units — see Fixed, below.
+  **All four streams are standard**, inlets and outlets alike — see `VHI_Control`
+  above and `VHI_Predict` below. Nothing on the wire is in rig units any more.
 - **`SweepControl`'s expectation is axis-aware.** Thumb abduction drives all three thumb
   bones through one channel, but the distal bone's Z gain is `0` — a channel-wide
   expectation reported a correct sweep as a mismatch.
@@ -155,7 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   renderer it cannot drive.
 
   Capabilities were split by *kind* rather than moved wholesale: `SetMovement` → a
-  canonical discrete DOF; `SetMovement(cycle=true)` and `SetSessionActive` → the
+  standard discrete DOF; `SetMovement(cycle=true)` and `SetSessionActive` → the
   recording-session RPCs; `SetSmoothing` → `SetPresentation`; `GetState` →
   `GetRecordingSessionState`.
   `Freeze`, `SetSpeed`, `SetChirality` and `SetControlMode` were **not** replaced: each
@@ -166,6 +137,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Both hands bent the wrong way, and `VHI_Control` published the opposite of
+  `VHI_Predict`.** Standard `+1` extended a digit instead of flexing it, and the
+  ground-truth stream you train on called a fist `-1` while the prediction stream you
+  drive needed `+1`. Every model trained against VHI needed its weights flipped by hand,
+  and nothing on either wire said so.
+
+  The root cause was that `MovementPoses` is not what the rig renders.
+  `ApplyMovementPose` interpolated with `-Mathf.Sin(argument)`, so a held `Fist` put
+  `WaveBone_7` at `+85°` while the table read `-85`. **Positive X is flexion on this
+  rig.** Both skeletons had privately copied those raw rows as their gain tables, and so had the
+  contract suite's direction gate — every check agreed with every other and all of them
+  disagreed with the hand. Four fingers curling backwards still look fist-shaped; the
+  thumb is the only digit whose flexion is not symmetric front-to-back, and it is where
+  the error was finally visible.
+
+  `StandardPose.AtPlusOne` is now the only place that knows what a standard value means in
+  degrees; neither skeleton owns a sign. `MovementPoses` is in rig-native degrees and the
+  animation interpolates plainly — which also fixes a movement whose rest pose is not
+  zero, where `rest + (max - rest) * -1` was not an interpolation at all
+  (`Movements.Thumb`'s middle joint reached `+35°` instead of `55°`).
+
+  **Two vocabularies, and every sentence in this release says which it is in.** *Rig-native
+  degrees* are what a bone is actually rotated by; *standard values* are the `[-1, 1]`
+  domain on the wire. `StandardPose.AtPlusOne` maps between them and
+  `StandardPose.Standard` is a plain divide by it, so the two **agree in sign**: positive
+  X is flexion in degrees, and standard `+1` flexes. Only one thing was ever in the other
+  sign — the Unity-authored `MovementPoses` rows, which `ApplyMovementPose` negated on the
+  way to the bone. Those rows are rig-native now, so nothing in this repository is
+  Unity-signed and no sentence here needs to be read twice.
+
+  The direction anchor is no longer derived from anything the renderer also reads. It
+  holds the movement whose *name* says what it is — `Movements.Index` is index flexion
+  because a human called it that — and asserts what `VHI_Control` publishes.
 - **A channel is an address, and both ends read it from one table.** The manifest says
   `vhi.prediction.index` is channel 2 and a producer writes it there; VHI reads its
   inlets positionally and reconstructs nothing. Reading a sender's channel labels back
@@ -177,12 +181,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and 7. Bone 0 is the common ancestor of all five digit chains, so turning it turns the
   whole hand — it was mapped, named "wrist", and never written to.
 
-  The X extreme is derived: `Movements.WristUpDown` defines ±30° and negative X is flexion
-  throughout this rig, so canonical `+1` is `-30°`. The Z **magnitude** is derived from
-  `Movements.WristLeftRight` (±20°) but its **sign is a choice** — "left/right" names an
-  axis, not a direction, and nothing in the library, the rig or the docs settles which side
-  is abduction. It is taken by analogy with flexion and marked as such in
-  `Vhi.StandardPose`; flipping it is one sign and a failing test.
+  **All three wrist numbers are calibrations, not derivations** (`StandardPose.Wrist`,
+  in rig-native degrees). A bone's local basis is its own, so nothing about the fingers
+  constrains which way joint 0 turns — an earlier reading derived X from the digits and
+  got it wrong twice over.
+
+  **X = +30.** `Movements.WristUpDown` gives the magnitude as ±30°; the sign says
+  standard `+1` flexes, matching the digits. **Z = +20.** `Movements.WristLeftRight`
+  gives ±20° and names neither side — "left/right" says which axis, not which is
+  abduction — so the sign is taken by analogy with flexion and marked as such. Flipping
+  either is one number in `Vhi.StandardPose` and a failing test.
 
   `wrist.rotation` renders too, on channel 8, and it is the one control here with **no
   rig-side evidence at all** — no movement in the library touches joint 0's Y axis, so both
@@ -204,12 +212,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve on the wire; they are simply not advertised. The thumb is the exception in the
   other direction — it has two axes, so `thumb.flexion` is advertised and a bare `thumb`
   is the alias.
-- **A canonical `+1` extended every digit instead of flexing it.** Both hands converted
-  canonical values by negating all nine channels on ingest, reasoning that "the flexion
+- **A standard `+1` extended every digit instead of flexing it.** Both hands converted
+  standard values by negating all nine channels on ingest, reasoning that "the flexion
   gains are negative". That is backwards: the gain table *is*
   `MovementPoses[Movements.Fist]`, the fully-closed hand, so a multiplier of `+1` already
-  puts a digit at max flexion — bone 7 at `-85°`, where `IndexExtension` puts it at
-  `+20°`. Negating it rendered `+85°`, an opening hand.
+  puts a digit at max flexion — `WaveBone_7` at `+85°` in rig-native degrees, where
+  `IndexExtension` puts it at `-20°`. Negating it rendered `-85°`, an opening hand.
 
   The rule now lives in one place, `Vhi.StandardPose`, beside the pose library that
   justifies it: `+1` for the five flexion channels, `-1` for thumb abduction alone,
@@ -221,7 +229,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than from a sweep. That mattered: the old expectation table had been filled in *from* the
   negating renderer, so the suite agreed with the rig while both disagreed with the DOF
   names. Restoring the blanket negation fails 11 assertions.
-- **The canonical conversion is unconditional, and no longer claims otherwise.** The
+- **The standard conversion is unconditional, and no longer claims otherwise.** The
   ingest comment said it was "gated behind the handshake" while negating regardless of
   what a client sent. There is one encoding and no field left to name another: it must
   not be possible for the same `+1` to render two ways.
@@ -229,10 +237,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the LSL path did not. Past `±90°` the Euler round-trip used to read a bone back wraps and
   changes sign, so a sample beyond `±1.06` on an `85°` gain flipped the read-back. Both
   paths clamp now.
-- `VHI_Predict` publishes canonical values, so pushing `+1` on `MyoGestic_Output` and
+- `VHI_Predict` publishes standard values, so pushing `+1` on `MyoGestic_Output` and
   reading that stream returns `+1` — the renderer is the identity rather than a sign flip.
-  `VHI_Control` is deliberately unchanged: the archived reference sessions are permanently
-  in raw rig units and their reader is pinned to that.
+  `VHI_Control` publishes standard values too, so a fist is the same
+  `[1, -1, 1, 1, 1, 1, 0, 0, 0]` on the stream you train from and the one you drive.
 - `tools/gen_api_docs.sh` no longer hard-codes the `Myogestic.Vhi.V1` namespace in its
   post-processing globs, so a namespace bump does not leave it dying partway with a
   `FileNotFoundError` after having already regenerated the tree.
