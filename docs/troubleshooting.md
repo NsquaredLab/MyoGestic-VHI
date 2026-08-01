@@ -46,33 +46,48 @@ Read the reason in `ControlAck.rejected["vhi.control.gesture"]`:
 - *"no movement matches state …"* - the name isn't in the current movement set. Call
   `GetRecordingSessionState` and use a name from `available_movements`; remember the
   set depends on `Mode` (`AI` vs `Classifier`).
-- *"a control-pose stream is driving the control hand"* - something is publishing
-  `MyoGestic_ControlPose`, and a stream and a movement cannot both own the bones.
-  Stop publishing and the hand is yours again five seconds later. Watch for a *stale
-  outlet left by an earlier process* - it keeps repeating its last sample and looks
-  exactly like a live producer. See
+- *"a control-pose stream is driving the control hand"* - something is publishing at
+  least one `vhi.control.pose.*` stream, and a stream and a movement cannot both own the
+  bones. **Any one of the nine is enough**, so look for all of them, not just the one you
+  were driving. Stop publishing every one and the hand is yours again five seconds later.
+  Watch for a *stale outlet left by an earlier process* - it keeps repeating its last
+  sample and looks exactly like a live producer. See
   [What drives the control hand](concepts/control-hand-drivers.md).
 - *"a recording trajectory is running …"* - stop it with `StopRecordingTrajectory`
   first; a recording is being aligned against it.
 
 ## The predicted hand isn't moving
 
-- Is a stream named `MyoGestic_Output` actually being published? Check with an
-  LSL viewer or `tests/test_all_streams.py`.
-- Does it have **9 float channels**? VHI sizes its sample buffer to
-  `ExpectedChannels` (9) and logs the channel count on connect - it does *not*
-  reject a mismatched stream, so the wrong shape just yields wrong or no
-  motion. Check the `✅ Connected to LSL inlet … (N channels)` log line.
-- Stream names are case-sensitive and matched exactly.
+- Are streams named for the DOFs you drive actually being published?
+  `vhi.prediction.index` and its siblings — the **stream name is the address**, exactly
+  as `GetControlManifest` reports it in `stream_name`. Check with an LSL viewer or
+  `tests/test_all_streams.py`.
+- Stream names are case-sensitive and matched exactly. A typo is not an error anywhere:
+  VHI simply goes on looking for a name nobody publishes.
+- Look for the `✅ Connected to LSL inlet <name> (N channels)` line per DOF. VHI resolves
+  by name only and does *not* reject a mismatched stream, so a wide producer is read at
+  channel 0 and its other channels ignored.
+
+## Only some fingers move
+
+That is not a fault. Each DOF is its own stream and a DOF nobody publishes **holds what
+it was last commanded to** — there is no frame, so nothing waits for the DOFs that did
+not deliver. Publish the missing addresses, or push `0` on them to put them at rest;
+going silent is a different statement from commanding rest.
+
+If a DOF is stuck where a *previous* run left it, its producer is likely still alive:
+an LSL outlet repeats its last sample at its own rate, so a leftover process keeps that
+one DOF pinned. Kill old producers before measuring anything.
 
 ## No LSL streams found at all
 
 - Confirm the producer is running and on the same machine/subnet.
-- Check the stream **name** matches what VHI resolves (`PredictionStreamName`
-  / `ControlPoseStreamName`).
+- Check the stream **name** matches an address VHI exports — read `stream_name` off
+  `GetControlManifest` rather than typing it. There is no configurable inlet name any
+  more; the address *is* the name.
 - LSL uses multicast for discovery - a restrictive firewall or VPN can block
-  it. VHI retries resolution every few seconds, so starting the producer late
-  is fine once discovery works.
+  it. VHI runs one resolve every ~5 s covering every name still missing (never one per
+  DOF), so starting the producer late is fine once discovery works.
 
 ## The control hand cycles when you wanted it held (or vice versa)
 

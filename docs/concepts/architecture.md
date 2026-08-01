@@ -23,10 +23,10 @@ Each piece is one `Node` with one job:
 
 | Node | Responsibility |
 |---|---|
-| `LSLCommunicationController` | Resolves the LSL inlets, pulls samples, publishes the `VHI_Control` / `VHI_Predict` outlets. See [LSL streams](lsl-streams.md). |
+| `LSLCommunicationController` | Resolves one inlet per DOF, applies each sample to its hand as it arrives, and publishes the `VHI_Control` / `VHI_Predict` outlets. See [LSL streams](lsl-streams.md). |
 | `GrpcControlServer` | Hosts the `VhiControl` gRPC service in-process. See [gRPC control plane](grpc-control.md). |
 | `ControlHandSkeleton` | Drives the control hand - predefined movements, streamed pose, or idle. See [The two hands](hands.md). |
-| `PredictedHandSkeleton` | Drives the predicted hand from the `MyoGestic_Output` stream, with optional smoothing. |
+| `PredictedHandSkeleton` | Renders the predicted hand from its per-DOF `vhi.prediction.*` streams, with optional blending. |
 | `ControlPanelUI` | Runtime sliders/toggles for speed, hold/rest times, smoothing, plus buttons to load or open the movement-config TOML. |
 
 !!! note "`LSLWrapper`"
@@ -54,10 +54,10 @@ index  joint              FBX bone
 
 At `_Ready()` each skeleton builds a `boneName → boneIndex` map by
 `FindBone`-ing those names. Poses are applied as per-joint Euler rotations
-(degrees → radians → quaternion → `SetBonePoseRotation`). A 9-DOF input vector
-(see [LSL streams](lsl-streams.md)) is expanded across these 16 joints by
-per-joint maximum-flexion limits carried over from the original Unity
-implementation.
+(degrees → radians → quaternion → `SetBonePoseRotation`). Each hand holds the nine
+standard values it was last commanded to, and those nine (see
+[LSL streams](lsl-streams.md)) are expanded across these 16 joints by the per-joint
+gains in `Vhi.StandardPose.AtPlusOne` — the degrees each joint reaches at standard `+1`.
 
 ## Threading model
 

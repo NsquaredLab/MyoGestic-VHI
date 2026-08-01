@@ -31,8 +31,8 @@ On first run VHI:
   **predicted** hands,
 - starts the [gRPC control server](concepts/grpc-control.md) on
   `127.0.0.1:50051`,
-- begins resolving its [LSL inlets](concepts/lsl-streams.md)
-  (`MyoGestic_Output`, `MyoGestic_ControlPose`).
+- begins resolving its [LSL inlets](concepts/lsl-streams.md) - one per DOF,
+  named `vhi.prediction.*` and `vhi.control.pose.*`.
 
 You should see a console line like:
 
@@ -62,14 +62,16 @@ ways to get motion:
 
 === "LSL stream (predicted hand)"
 
-    Send a mock 9-channel stream named `MyoGestic_Output` and the **predicted
-    hand** follows it:
+    Publish the nine `vhi.prediction.*` streams - one per DOF, one channel each -
+    and the **predicted hand** follows them:
 
     ```bash
     python tests/test_lsl_sender.py
     ```
 
-    See [LSL streams](concepts/lsl-streams.md) for the channel layout.
+    A real client publishes only the DOFs it drives; this script publishes all nine
+    so the patterns have a whole hand to animate. See
+    [LSL streams](concepts/lsl-streams.md) for the names.
 
 === "gRPC (control hand)"
 

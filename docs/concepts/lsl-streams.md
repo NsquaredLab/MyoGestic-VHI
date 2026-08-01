@@ -10,20 +10,45 @@ its peer can start in any order.
 
 ## Inlets - what VHI consumes
 
-| Stream name | Drives | Shape | Rate |
+**One stream per DOF.** Every control VHI can be driven with is its own LSL
+stream, named for its own address and **one channel wide**:
+
+| Stream family | Drives | Shape | Rate |
 |---|---|---|---|
-| `MyoGestic_Output` | the **predicted** hand | 9 × `float32` | ~32 Hz (the producer's pace) |
-| `MyoGestic_ControlPose` | the **control** hand ([while it is delivering](control-hand-drivers.md)) | 9 × `float32` | ~32 Hz (the producer's pace) |
+| `vhi.prediction.*` - nine streams | the **predicted** hand | 1 × `float32` each | the producer's pace (~32 Hz from MyoGestic) |
+| `vhi.control.pose.*` - nine streams | the **control** hand ([while any is delivering](control-hand-drivers.md)) | 1 × `float32` each | the producer's pace |
 
-The two inlets are **independent**: `MyoGestic_Output` only ever drives the
-predicted hand, `MyoGestic_ControlPose` only ever drives the control hand.
-(Producing `MyoGestic_ControlPose` is optional - most setups never publish it,
-and the control hand plays its named movements instead.)
+The two families are **independent**: `vhi.prediction.*` only ever drives the
+predicted hand, `vhi.control.pose.*` only ever drives the control hand. Every
+individual stream is optional too - producing the control-pose family at all is
+unusual, and most setups let the control hand play its named movements instead.
 
-The inlet rate is **whatever the producer pushes**. MyoGestic's default
-prediction loop runs at ~32 Hz, but VHI itself doesn't impose or assume a
-rate - it consumes whatever arrives, smooths between samples (see
+The stream name *is* the address `GetControlManifest` publishes, so a client
+reads the name it must publish under rather than agreeing on a layout. See
+[the LSL reference](../reference/lsl-reference.md#inlets-consumed-by-vhi) for
+all eighteen names.
+
+The inlet rate is **whatever the producer pushes**, per stream. MyoGestic's
+default prediction loop runs at ~32 Hz, but VHI itself doesn't impose or assume
+a rate - it applies whatever arrives, optionally blends toward it (see
 [`SetPresentation`](grpc-control.md)), and renders at its own physics tick.
+
+### Nothing waits for a whole pose
+
+A sample is applied to the hand the moment it arrives, and a DOF nobody is
+driving holds what it was last commanded to. There is no frame to fill in and
+nothing that blocks on one.
+
+That is the reason for the shape rather than a concession to missing data. The
+DOFs are independently actuated, may come from different producers, and may
+update at different rates, so **a hand whose index has moved and whose thumb has
+not is a real pose**, not a corrupt one. Two producers can each own some DOFs of
+the same hand without contending — a model driving the fingers and a data glove
+driving the wrist, say — which is the capability this shape exists for.
+
+The corollary: pushing `0` is how you put a DOF back at rest. Going silent is a
+different statement, and on the control hand the *last* stream going silent
+releases the whole hand back to its own movements.
 
 ## Outlets - what VHI publishes
 
@@ -32,15 +57,19 @@ rate - it consumes whatever arrives, smooths between samples (see
 | `VHI_Control` | the **control** hand's current pose | 60 Hz |
 | `VHI_Predict` | the **predicted** hand's current pose | 60 Hz |
 
+Each outlet carries its hand's **whole nine-channel pose**, and that has not
+changed with the per-DOF inlets: a read-back is a recording, and a recording
+wants one row per instant rather than nine independently timed ones.
+
 These let the rest of the experiment record what VHI is actually showing - for
 example, MyoGestic consumes `VHI_Control` as a regression target (the
-control-hand kinematics the model should learn to reproduce). Outlets can be
+control-hand kinematics the model should learn to reproduce). Both outlets are
 always published.
 
 !!! info "Input rate ≠ display rate"
-    The inlets carry the **predicted-pose timeline** (whatever the model
-    produces, ~32 Hz). The outlets carry the **displayed-pose timeline**
-    (whatever VHI is rendering, 60 Hz). They are not the same signal: the
+    The inlets carry the **commanded timeline**, one per DOF, at whatever rate
+    each producer pushes (~32 Hz for a MyoGestic model). The outlets carry the
+    **displayed-pose timeline** (whatever VHI is rendering, 60 Hz). They are not the same signal: the
     outlets are an interpolated, smoothed, mode-aware view of what reached
     the screen. For frame-accurate experiment recording, treat `VHI_Predict`
     / `VHI_Control` as the authoritative record of what the participant *saw*,
@@ -64,24 +93,21 @@ always published.
     to MyoGestic directly (it issues the commands), and the actual kinematics
     are already in `VHI_Control`.
 
-## The channel layout
+## The nine DOFs
 
-Every VHI pose vector — in or out — is 9 `float32` channels, and **all nine are read**:
-thumb flexion and abduction, one flexion channel per finger, then wrist flexion, abduction
-and rotation. The wrist is bone 0, the common ancestor of all five digit chains, so it
-turns the whole hand.
+A hand is nine degrees of freedom: thumb flexion and abduction, one flexion DOF per
+finger, then wrist flexion, abduction and rotation. **All nine render.** The wrist is
+bone 0, the common ancestor of all five digit chains, so it turns the whole hand.
 
-A stream does not have to be nine wide, either. A producer that labels its channels with
-control addresses may send however many it drives, in any order, and VHI places them by
-name; see [the inbound streams](#inlets-what-vhi-consumes).
-
-Values are normalised against per-joint maximum-flexion limits, and VHI expands the six
-DOFs across the 16 animated joints internally (see [Architecture](architecture.md)).
+Which nine they are is the only thing both directions share. Inbound each is a stream of
+its own; outbound all nine are channels of one pose. Values are standard — `[-1, 1]`,
+`+1` the direction the DOF's name denotes — and VHI expands them across the 16 animated
+joints internally by per-joint gains (see [Architecture](architecture.md)).
 
 !!! important "One authoritative map, and it is not on this page"
-    The exact channel-to-bone mapping and — critically — **which sign convention each
-    stream uses** live in
-    [the LSL reference](../reference/lsl-reference.md#the-channel-layout). This page
+    The exact DOF-to-bone mapping, the outlet channel numbers, and — critically — **which
+    sign convention applies** live in
+    [the LSL reference](../reference/lsl-reference.md#the-nine-dofs). This page
     deliberately does not restate them.
 
     That is not tidiness. This map was previously written out in several places and they
@@ -89,8 +115,8 @@ DOFs across the 16 animated joints internally (see [Architecture](architecture.m
     in a fist where recordings show `-1.0`. Duplicating it is how it drifts, so there is
     now one copy.
 
-    Every stream is standard as of 2.0: `+1` is the direction the channel's name denotes,
-    on the two inlets and both outlets alike. `VHI_Control` was the exception and it was a
+    Everything is standard as of 2.0: `+1` is the direction the DOF's name denotes, on the
+    inbound streams and both outlets alike. `VHI_Control` was the exception and it was a
     bug — it published the renderer's own units, opposite on five channels, so a fist read
     `-1` on the stream you train from and `+1` on the one you drive. Recordings from before
     the fix are converted by `myogestic.tools.migrate_vhi_sessions`; the outlets advertise

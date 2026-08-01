@@ -8,12 +8,12 @@ that they stand alone.
   off Godot's main thread.
 - **[The two hands](hands.md)** - the control hand vs. the predicted hand:
   what each one is for and what drives it.
-- **[LSL streams](lsl-streams.md)** - the two inlets VHI consumes and the two
-  outlets it publishes, with the 9-DOF channel layout.
+- **[LSL streams](lsl-streams.md)** - the per-DOF inlets VHI consumes, the two
+  whole-pose outlets it publishes, and why the two directions differ in shape.
 - **[gRPC control plane](grpc-control.md)** - why discrete commands go over
   gRPC while continuous poses stay on LSL, and how the in-process server works.
 - **[What drives the control hand](control-hand-drivers.md)** - stream presence
-  decides between the pose stream and the movement state machine; what each one
+  decides between the pose streams and the movement state machine; what each one
   refuses while the other is live.
 - **[Movements](movements.md)** - the predefined movement set, the AI vs.
   Classifier modes, and the TOML config that defines the poses.

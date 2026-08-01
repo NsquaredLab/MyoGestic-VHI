@@ -10,13 +10,17 @@ LSL inlets and outlets - see [LSL streams](lsl-reference.md).
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
-| `PredictionStreamName` | `string` | `MyoGestic_Output` | Inlet name for the predicted-hand pose stream. |
-| `ControlPoseStreamName` | `string` | `MyoGestic_ControlPose` | Inlet name for the control-hand pose stream. |
-| `ControlOutletName` | `string` | `VHI_Control` | Outlet name for the control-hand pose. |
-| `PredictedOutletName` | `string` | `VHI_Predict` | Outlet name for the predicted-hand pose. |
-| `ExpectedChannels` | `int` | `9` | Channel count for the inlets/outlets. |
-| `PredictionStaleAfterSeconds` | `float` | `5.0` | Silence after which the prediction inlet is assumed dead and dropped. |
-| `ControlPoseStaleAfterSeconds` | `float` | `5.0` | Silence after which the control-pose stream counts as gone: the inlet is dropped and the control hand [returns to its own movements](../concepts/control-hand-drivers.md). |
+| `ControlOutletName` | `string` | `VHI_Control` | Outlet name for the control-hand pose read-back. |
+| `PredictedOutletName` | `string` | `VHI_Predict` | Outlet name for the predicted-hand pose read-back. |
+| `ExpectedChannels` | `int` | `9` | Channel count of the two **outlets**. The inlets are one channel each and are not configured here. |
+| `PredictionStaleAfterSeconds` | `float` | `5.0` | Silence after which a prediction DOF's inlet is assumed dead and dropped. Per DOF, on its own clock. |
+| `ControlPoseStaleAfterSeconds` | `float` | `5.0` | Silence after which a control-pose DOF's inlet counts as gone: it is dropped, and stops counting toward the control hand being stream-driven. When the last one goes, the hand [returns to its own movements](../concepts/control-hand-drivers.md). |
+
+!!! note "The inlet names are not configurable"
+    There is no `PredictionStreamName` or `ControlPoseStreamName` field any more. Each
+    DOF's inlet is named for that DOF's address — the same name `GetControlManifest`
+    publishes — so renaming one on this side would only make the manifest lie. See
+    [LSL streams](lsl-reference.md#inlets-consumed-by-vhi).
 
 ## `GrpcControlServer`
 

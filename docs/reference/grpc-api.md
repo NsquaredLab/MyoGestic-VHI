@@ -24,7 +24,7 @@ while a recording trajectory is deliberately sweeping the control hand.
 
 | RPC | Request | Returns | Notes |
 |---|---|---|---|
-| `GetControlManifest` | `GetControlManifestRequest` | `ControlManifest` | Every address VHI exports, each with its kind, its range or its states, its `stream_name` and its `channel`. **Call this first**, unconditionally — there is nothing else to open, declare or negotiate. |
+| `GetControlManifest` | `GetControlManifestRequest` | `ControlManifest` | Every address VHI exports, each with its kind, its range or its states, and the `stream_name` to publish it under (this renderer gives every streamed DOF a stream of its own, so `stream_name` is the address and `channel` is `0`). **Call this first**, unconditionally — there is nothing else to open, declare or negotiate. |
 | `SetControl` | `SetControlRequest` | `ControlAck` | Command one frame: `continuous` by name, `discrete` by state. Refusals are named in `rejected`, never silent. |
 | `SweepControl` | `SweepControlRequest` | `SweepControlReply` | Drive one DOF across its range; reports which rig elements moved and the signed degrees, read back off the skeleton. |
 | `SetPresentation` | `SetPresentationRequest` | `ControlAck` | Renderer blending. Appearance only — never a substitute for a client-side debounce. |
@@ -35,8 +35,8 @@ while a recording trajectory is deliberately sweeping the control hand.
 
 While a recording trajectory runs it **owns** the control hand: `SetControl`'s discrete
 DOFs are refused with the reason rather than interrupting the trajectory a recording is
-being aligned against. A live `MyoGestic_ControlPose` stream owns it the same way, and
-refuses the same commands — see
+being aligned against. A live `vhi.control.pose.*` stream owns it the same way — any one
+of the nine is enough — and refuses the same commands. See
 [What drives the control hand](../concepts/control-hand-drivers.md). Continuous DOFs are
 unaffected either way; they drive the predicted hand.
 

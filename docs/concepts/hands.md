@@ -5,28 +5,30 @@ VHI renders two hands. They look identical but answer different questions.
 | | **Predicted hand** | **Control hand** |
 |---|---|---|
 | Question it answers | "What does the model *predict*?" | "What movement is being *cued*?" |
-| Driven by | the `MyoGestic_Output` LSL stream | predefined movements (gRPC / keyboard), **or** a streamed pose |
+| Driven by | the `vhi.prediction.*` LSL streams, one per DOF | predefined movements (gRPC / keyboard), **or** the `vhi.control.pose.*` streams |
 | Node | `PredictedHandSkeleton` | `ControlHandSkeleton` |
-| Published as | `VHI_Predict` (LSL, 60 Hz) | `VHI_Control` (LSL, 60 Hz) |
+| Published as | `VHI_Predict` (LSL, 60 Hz, 9 channels) | `VHI_Control` (LSL, 60 Hz, 9 channels) |
 
 ## Predicted hand
 
-The predicted hand is the simple one: it consumes a continuous 9-DOF pose from
-the `MyoGestic_Output` LSL inlet and applies it to the bones every frame.
-Optionally it **smooths** the incoming pose (`EnableSmoothing` /
-`SmoothingSpeed`) - a per-frame spherical interpolation toward the target,
-useful when the model output is noisy or arrives below display rate.
+The predicted hand is the simple one: each of its nine DOFs arrives on a stream
+of its own (`vhi.prediction.index` and its eight siblings) and is applied to the
+bones the moment it arrives. A DOF nobody is publishing holds what it was last
+commanded to, so a producer driving one finger moves one finger and the rest
+hold. Optionally the hand **blends** toward the commanded pose (`EnableSmoothing`
+/ `SmoothingSpeed`) - a per-frame spherical interpolation, useful when the model
+output is noisy or arrives below display rate.
 
 That's it. It has no state machine and no commands - it is a pure
-visualisation of whatever is on the stream.
+visualisation of whatever is on those streams.
 
 ## Control hand
 
 The control hand is the experimenter's reference. It has **two drivers** (see
 [What drives the control hand](control-hand-drivers.md)):
 
-- **The `MyoGestic_ControlPose` stream** - a continuous pose applied to the bones
-  every frame, exactly like the predicted hand's. For custom poses that aren't in
+- **The `vhi.control.pose.*` streams** - one per DOF, each applied to the bones as
+  it arrives, exactly like the predicted hand's. For custom poses that aren't in
   the predefined set. See [Stream a custom pose](../how-to/stream-a-custom-pose.md).
 - **A predefined-movement state machine** - it selects a named movement from the
   [movement set](movements.md) and either snaps to the movement's end pose or plays
@@ -34,11 +36,13 @@ The control hand is the experimenter's reference. It has **two drivers** (see
   by [standard discrete DOFs](grpc-control.md), a recording trajectory, or the
   keyboard.
 
-Only one is active at a time, and **stream presence** decides: while a control-pose
-sample has arrived within the last five seconds the stream drives the hand, and the
-state machine does not run. So they never fight over the bones, and a client that
-stops publishing gets the movement state machine back without asking. While the
-stream is live, discrete DOFs and recording trajectories are **refused by name**.
+Only one is active at a time, and **stream presence** decides: while a sample has
+arrived on **any** control-pose stream within the last five seconds the streams drive
+the hand, and the state machine does not run. One DOF is enough — a producer driving a
+single finger has still taken the hand. So they never fight over the bones, and a client
+that stops publishing all of them gets the movement state machine back without asking.
+While any stream is live, discrete DOFs and recording trajectories are **refused by
+name**.
 
 ### Sessions and keyboard authority
 

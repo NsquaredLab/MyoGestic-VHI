@@ -41,9 +41,14 @@ source. MyoGestic vendors a copy and regenerates its Python stubs from it.
 ### `GetControlManifest` is the whole contract
 
 DOFs are addressed **by name**, and `GetControlManifest` publishes every address VHI
-exports along with what it can render for each — the kind, the range, the states, the
-LSL stream, and the channel a streamed value lands on. Neither side hard-codes a
-channel index, and neither side keeps a table the other has to be kept in sync with.
+exports along with what it can render for each — the kind, the range, the states, and
+the LSL stream it is read from. Neither side hard-codes a stream layout, and neither
+side keeps a table the other has to be kept in sync with.
+
+For this renderer each streamed control is a stream of its own, so the manifest reports
+`stream_name` = the address and `channel` = `0`. A client publishes under the name it
+read; there is no positional layout left to get wrong, and nothing links one DOF's
+stream to another's.
 
 A client calls it **once, unconditionally, before it sends anything**. There is no
 per-client negotiation, no declared subset, and nothing to declare: the manifest is
@@ -51,10 +56,10 @@ the same for every client, and VHI keeps no session state about who is talking t
 The sequence is:
 
 1. `GetControlManifest` — one call. Map your own model-output names onto the
-   addresses it lists, and read each capability's `stream_name` and `channel`.
-2. Then either **publish** the pose stream that capability named, writing each value
-   to the channel it named, or **send** `SetControl` for held states and low-rate
-   updates. Both work immediately; nothing has to be opened first.
+   addresses it lists, and read each capability's `stream_name`.
+2. Then either **publish** the stream that capability named, one per DOF you drive, or
+   **send** `SetControl` for held states and low-rate updates. Both work immediately;
+   nothing has to be opened first, and you publish only the DOFs you actually drive.
 
 `SweepControl`, `SetPresentation` and the recording RPCs are optional extras on top.
 
@@ -132,8 +137,8 @@ refused with a reason rather than being allowed to interrupt the trajectory a re
 is being aligned against. Continuous DOFs are unaffected — they drive the *predicted*
 hand.
 
-A live `MyoGestic_ControlPose` stream owns the hand the same way, and refuses the same
-commands for the same reason — see
+A live `vhi.control.pose.*` stream owns the hand the same way — any one of the nine is
+enough — and refuses the same commands for the same reason. See
 [What drives the control hand](control-hand-drivers.md). Both are **command-time**
 refusals carried in `ControlAck.rejected`: there is no setup call left at which a
 client could be told in advance, and none would help, because the answer depends on
@@ -153,7 +158,7 @@ what is arriving at the moment of the command.
 
 | RPC | Purpose |
 |---|---|
-| `GetControlManifest` | every address VHI exports, with its kind, range, states, stream and channel. Call it first |
+| `GetControlManifest` | every address VHI exports, with its kind, range, states, and the stream to publish it under. Call it first |
 | `SetControl` | command one standard frame — continuous values and discrete states |
 | `SweepControl` | drive one DOF across its range and report which bones moved, in signed degrees |
 | `SetPresentation` | renderer blending (appearance only — layer 3 of three) |

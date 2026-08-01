@@ -12,16 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`VhiControl` — the one gRPC control service, and `GetControlManifest` is its whole
   contract.** The manifest lists every **address** VHI exports
   (`vhi.prediction.index`, `vhi.control.gesture`) with what it can render for each: the
-  kind, the range or the states, the LSL stream it is read from, and the channel it
-  occupies there. A client calls it once, unconditionally, before it sends anything,
-  and maps its own configuration's names onto those addresses. There is no per-client
-  negotiation and nothing to declare — the manifest is the same for everyone, and VHI
-  keeps no session state about who is talking to it. Neither side hard-codes a channel
-  index.
+  kind, the range or the states, and the LSL stream it is read from. A client calls it
+  once, unconditionally, before it sends anything, and maps its own configuration's names
+  onto those addresses. There is no per-client negotiation and nothing to declare — the
+  manifest is the same for everyone, and VHI keeps no session state about who is talking
+  to it. Neither side hard-codes a stream layout.
 
-  Each pose stream numbers its channels from zero, so a capability publishes
-  `stream_name` beside `channel`: `vhi.prediction.index` and `vhi.control.pose.index`
-  are both channel 2, on different streams and different hands.
+  Every streamed capability reports `stream_name` = its own address and `channel` = `0`,
+  because every DOF is a stream of its own: a client reads the name it must publish under
+  and there is no position to get wrong. `vhi.control.gesture` is the one control that
+  never touches LSL — it reports an empty `stream_name` and `channel` = `-1`.
 
   A DOF that cannot be rendered is reported by name with a reason and **never silently
   ignored** — an ignored joint looks exactly like a joint that is working and holding
@@ -45,15 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service of their own — a standard discrete DOF is a *held state*, and a running
   trajectory must not redefine that, so while one runs it owns the control hand and
   discrete DOFs are refused with the reason.
-- **The control hand follows the presence of its pose stream, and has no modes.**
-  Publish the optional `MyoGestic_ControlPose` inlet and the control hand renders it;
-  stop, and after `ControlPoseStaleAfterSeconds` (5 s) it stops any running trajectory,
-  returns to rest, and resumes its own named movements. Publishing *is* the request:
-  an inlet nobody reads is indistinguishable from a stream that is not arriving. This
-  is exactly how the predicted hand has always followed `MyoGestic_Output`, and the two
-  hands differing on it was the only reason a mode ever existed. The inlet's addresses
-  are published in the manifest under `vhi.control.pose.*` — a namespace of their own,
-  because they are a separate hand on a separate stream.
+- **The control hand follows the presence of its pose streams, and has no modes.**
+  Publish any of the optional `vhi.control.pose.*` streams and the control hand renders
+  it; stop publishing all of them, and after `ControlPoseStaleAfterSeconds` (5 s) it
+  stops any running trajectory, returns to rest, and resumes its own named movements.
+  Publishing *is* the request: an inlet nobody reads is indistinguishable from a stream
+  that is not arriving. This is exactly how the predicted hand has always followed its
+  own streams, and the two hands differing on it was the only reason a mode ever existed.
+  `vhi.control.pose.*` is a namespace of its own, because it is a separate hand serving a
+  separate purpose from `vhi.prediction.*`.
 
   A stream and a discrete DOF cannot both own those bones, so while the stream is live
   a discrete DOF is refused **by name**, with
@@ -120,22 +120,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `convention` key is Unity-signed, and is rewritten in place in rig-native degrees with a
   `.unity-signed.bak` copy beside it. Converting on every load instead would leave a file
   on disk whose numbers mean the opposite of what they say.
-- **BREAKING: the continuous LSL inlet takes standard values.** `MyoGestic_Output` now
-  carries values where `+1` means the direction the DOF name denotes, so `+1` on index
-  flexion *flexes*. v1 expected the renderer's own units of the day — the Unity-signed
-  gain table, in which flexion was negative — so a v1 frame and a standard one of the
-  same sign render opposite hands. There is exactly one encoding now, so nothing
-  negotiates it: the field that
-  once announced it is gone, and a client simply sends standard values.
+- **BREAKING: the continuous LSL inlets take standard values.** Every inbound stream now
+  carries values where `+1` means the direction the DOF name denotes, so `+1` on
+  `vhi.prediction.index` *flexes*. v1 expected the renderer's own units of the day — the
+  Unity-signed gain table, in which flexion was negative — so a v1 sample and a standard
+  one of the same sign render opposite hands. There is exactly one encoding now, so
+  nothing negotiates it: the field that once announced it is gone, and a client simply
+  sends standard values.
 
-  **All four streams are standard**, inlets and outlets alike — see `VHI_Control`
+  **Every stream is standard**, inlets and outlets alike — see `VHI_Control`
   above and `VHI_Predict` below. Nothing on the wire is in rig units any more.
 - **`SweepControl`'s expectation is axis-aware.** Thumb abduction drives all three thumb
   bones through one channel, but the distal bone's Z gain is `0` — a channel-wide
   expectation reported a correct sweep as a mismatch.
-- The `MyoGestic_Output` inlet is documented with its **verified** channel map. Channel 0
-  is thumb *flexion* and channel 1 thumb *abduction*; the previous documentation had
-  those swapped. Channels 6-8 are the wrist — see Fixed, below.
+- The nine DOFs are documented from a **verified** map. `thumb.flexion` and
+  `thumb.abduction` are two distinct DOFs and the previous documentation had them
+  swapped, calling the first thumb *rotation*; the three wrist DOFs are live, not the dead
+  channels 6-8 they were described as — see Fixed, below. They are read-back channels 0,
+  1 and 6-8 on `VHI_Control` / `VHI_Predict`; inbound they are streams of their own.
 - **BREAKING: the control plane collapsed to one gRPC service, and none of this has a
   compatibility window.** `VhiTrainingAid` is gone; its RPCs move onto `VhiControl` and
   lose "training" from their names in the process (`StartTrainingProgram` →
@@ -281,8 +283,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the LSL path did not. Past `±90°` the Euler round-trip used to read a bone back wraps and
   changes sign, so a sample beyond `±1.06` on an `85°` gain flipped the read-back. Both
   paths clamp now.
-- `VHI_Predict` publishes standard values, so pushing `+1` on `MyoGestic_Output` and
-  reading that stream returns `+1` — the renderer is the identity rather than a sign flip.
+- `VHI_Predict` publishes standard values, so pushing `+1` on `vhi.prediction.index` and
+  reading channel 2 of that stream returns `+1` — the renderer is the identity rather
+  than a sign flip.
   `VHI_Control` publishes standard values too, so a fist is the same
   `[1, -1, 1, 1, 1, 1, 0, 0, 0]` on the stream you train from and the one you drive.
 - `tools/gen_api_docs.sh` no longer hard-codes the `Myogestic.Vhi.V1` namespace in its

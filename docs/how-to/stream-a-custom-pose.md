@@ -2,121 +2,148 @@
 
 By default the control hand plays *named* [movements](../concepts/movements.md).
 When you need to drive it with an **arbitrary, runtime-generated** pose - a
-data glove, another model, a generated trajectory - publish a continuous LSL
-stream and [the hand follows it](../concepts/control-hand-drivers.md).
+data glove, another model, a generated trajectory - publish the control-pose LSL
+streams and [the hand follows them](../concepts/control-hand-drivers.md).
 
 ## When to use this
 
 | You have… | Use… |
 |---|---|
 | a fixed set of gestures you can name | [a custom movement in the TOML config](add-a-custom-movement.md) |
-| a raw 9-DOF pose generated every frame, with no name | **this** - a control-pose stream |
+| continuous values for one or more DOFs, generated at runtime | **this** - the control-pose streams |
+
+## The shape: one stream per DOF
+
+The control hand exports nine DOFs, and **each is its own LSL stream, one channel
+wide, named for its own address**:
+
+```text
+vhi.control.pose.thumb.flexion      vhi.control.pose.wrist.flexion
+vhi.control.pose.thumb.abduction    vhi.control.pose.wrist.abduction
+vhi.control.pose.index              vhi.control.pose.wrist.rotation
+vhi.control.pose.middle
+vhi.control.pose.ring
+vhi.control.pose.little
+```
+
+Three consequences shape everything below:
+
+- **Publish only the DOFs you drive.** There is no frame to fill in. A DOF nobody
+  publishes holds what it was last commanded to, so a glove that only tracks fingers
+  never has to invent a wrist value.
+- **Any one of them takes the hand.** The control hand is stream-driven while *any*
+  control-pose stream has delivered within the last five seconds. Driving a single
+  finger is enough.
+- **Two producers can share one hand.** They own different DOFs, run at different
+  rates, and never have to agree on anything — which is the capability this shape
+  exists for.
 
 ## The two steps
 
-### 1. Read the manifest for the channels you write to
+### 1. Read the manifest for the stream names
 
 There is nothing to declare and no mode to request. The one thing you need from VHI is
-which channel of `MyoGestic_ControlPose` each control lands on, and
-`GetControlManifest` publishes that:
+the name to publish each control under, and `GetControlManifest` publishes that:
 
 ```python
-from myogestic.controls import load_control_map, resolve
 from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
 client = vhi.control_client()
 
-# See what the control hand exports, and on which channel of which stream.
+# What the control hand exports, and the stream name for each.
 for cap in client.capabilities() or ():
     if cap.address.startswith("vhi.control.pose."):
         print(cap.address, cap.stream_name, cap.channel)
-
-# `vhi.control.pose.*` is the control hand's own namespace — distinct from
-# `vhi.prediction.*`, and on its own stream. `resolve` checks your map against the
-# manifest and raises on an address this build does not export, so a typo surfaces
-# here rather than as a joint that never moves.
-controls = resolve(
-    load_control_map({"dofs": {"my_index": "vhi.control.pose.index"}}),
-    client.capabilities(),
-)
+        # -> vhi.control.pose.index  vhi.control.pose.index  0
 ```
 
-Hand `controls` to a `ControlBus` with `VhiTarget(vhi.control_outlet(),
-client=client, stream="control_pose")` if you want the bus to place your values on the
-right channels for you — or build the frame yourself, as below.
+`stream_name` is the address and `channel` is `0` for every one of them: publish under
+the name you read, one channel wide, and there is no positional layout to get wrong.
 
-Both pose streams number their channels from zero, so read `stream_name` alongside
-`channel` — `vhi.prediction.index` and `vhi.control.pose.index` are both channel 2, on
-different streams and different hands.
+`vhi.control.pose.*` is the control hand's own namespace — deliberately distinct from
+`vhi.prediction.*`, and on separate streams. Nothing can route a model's output into
+the hand that output is supposed to be the ground truth *for*.
 
-There is one convention on this stream: standard values, where `+1` is the direction
-each channel's name denotes. VHI converts them to its own rig units internally, so a
-producer never chooses an encoding — it only chooses whether to publish.
+There is one convention on these streams: **standard** values in `[-1, 1]`, where `+1`
+is the direction the DOF's name denotes and `0` is rest. VHI converts to its own rig
+units internally, so a producer never chooses an encoding — it only chooses whether to
+publish.
 
-### 2. Push poses to the `control_outlet`
-
-`InterfaceSpec.control_outlet()` gives you an LSL outlet wired to the
-`MyoGestic_ControlPose` stream (9 channels, 32 Hz):
+### 2. Publish an outlet per DOF, and push
 
 ```python
-import numpy as np
+from pylsl import StreamInfo, StreamOutlet
 
-pose_outlet = vhi.control_outlet()
+def dof_outlet(address, rate=32):
+    """One single-channel LSL outlet, named for the DOF it drives."""
+    info = StreamInfo(
+        name=address,          # straight off the manifest's stream_name
+        type="MyoGestic_Control",
+        channel_count=1,
+        nominal_srate=rate,
+        channel_format="float32",
+        source_id=f"my-glove:{address}",
+    )
+    return StreamOutlet(info)
 
-# Push a 9-DOF pose every frame. Channel layout (see LSL streams):
-#   [thumb_flex, thumb_abd, index, middle, ring, pinky, wrist_flex, wrist_abd, wrist_rot]
-pose = np.array([0, 0, 0.5, 0.5, 0.5, 0.5, 0, 0, 0], dtype=np.float32)
-pose_outlet.push(pose)
+index = dof_outlet("vhi.control.pose.index")
+thumb = dof_outlet("vhi.control.pose.thumb.flexion")
+
+index.push_sample([0.5])   # half-flexed; the control hand is now stream-driven
+thumb.push_sample([1.0])   # and the thumb follows, on its own timeline
 ```
 
-The control hand applies whatever is on the stream, exactly like the predicted
-hand applies `MyoGestic_Output`. That is the whole activation: the hand renders the
-stream while samples keep arriving, and no call anywhere turns it on. The two inlets
-are independent - streaming to the control hand does not touch the predicted hand.
+That is the whole activation: the hand renders each sample as it arrives, and no call
+anywhere turns it on. The prediction streams are untouched — driving the control hand
+does not touch the predicted hand.
 
 ## Notes
 
-- The pose vector is the same [9-DOF layout](../concepts/lsl-streams.md) used
-  everywhere in VHI: 6 finger DOFs plus 3 (usually-zero) wrist DOFs,
-  normalised so `1.0` is full flexion.
-- **Keep pushing.** After five seconds of silence
-  (`ControlPoseStaleAfterSeconds`) VHI treats the producer as gone: the hand stops any
-  running trajectory, returns to rest, and resumes its own movements. Push at your
-  loop rate even when the pose has not changed, exactly as you would for
-  `MyoGestic_Output`.
+- **Keep pushing.** After five seconds of silence on a stream
+  (`ControlPoseStaleAfterSeconds`) VHI drops that inlet and looks for the name again.
+  When the *last* control-pose stream goes quiet the producer counts as gone: the hand
+  stops any running trajectory, clears every DOF to rest, and resumes its own movements.
+  Push at your loop rate even when the value has not changed.
+- **`0` rests a DOF; silence does not.** A DOF holds its last commanded value. Stopping
+  one stream while the others keep going leaves that DOF exactly where it was.
 - **Discrete DOFs are refused while you are streaming.** `SetControl` comes back with
   `applied = false` and the reason in `rejected` — two drivers, one hand. Stop
-  streaming if you want named movements back.
-- `VHI_Control` still publishes the control hand's *actual* pose, so a streamed
-  pose round-trips into the recording just like a played movement does.
+  publishing every control-pose stream if you want named movements back.
+- `VHI_Control` still publishes the control hand's *actual* pose as a whole
+  **nine-channel** stream at 60 Hz, so a streamed pose round-trips into the recording
+  just like a played movement does. The read-back shape did not change with the
+  per-DOF inlets: a recording wants one row per instant.
+- Driving this from MyoGestic rather than raw `pylsl`? Point your control map at the
+  `vhi.control.pose.*` addresses and let `VhiTarget` resolve them against the manifest —
+  see [Drive VHI from MyoGestic](drive-from-myogestic.md).
 
 ## Use case: 9-DOF model-robustness validation
 
-A control-pose stream is the right tool for **systematically testing a myocontrol
+The control-pose streams are the right tool for **systematically testing a myocontrol
 model across the full 9-DOF pose space** - including multi-DOF activations
 that no single named movement covers. The pattern is:
 
 ```python
 import time
 from itertools import product
-import numpy as np
+
 from myogestic.vhi import virtual_hand
+from pylsl import StreamInfo, StreamOutlet
 
 vhi = virtual_hand()
 client = vhi.control_client()
 recording = vhi.recording_client()
-pose_outlet = vhi.control_outlet()
 
-# 1. Orchestration over gRPC. Nothing here turns the stream on — the only call is
+# 1. Orchestration over gRPC. Nothing here turns the streams on — the only call is
 #    the manifest, and it is a read.
-CHANNEL = {
-    cap.address: cap.channel
+STREAM = {
+    cap.address: cap.stream_name
     for cap in client.capabilities() or ()
-    if cap.stream_name == vhi.control_pose_stream_name
+    if cap.address.startswith("vhi.control.pose.")
 }
-DIGITS = [                              # the six finger DOFs, in whatever order
-    "vhi.control.pose.thumb.flexion",   # you like — CHANNEL places them
+DIGITS = [                              # the six finger DOFs; the order is yours to
+    "vhi.control.pose.thumb.flexion",   # pick, because nothing here is positional
     "vhi.control.pose.thumb.abduction",
     "vhi.control.pose.index",
     "vhi.control.pose.middle",
@@ -125,42 +152,50 @@ DIGITS = [                              # the six finger DOFs, in whatever order
 ]
 recording.set_recording_session(True)   # gate VHI's keyboard - MyoGestic owns the hand
 
-# 2. Continuous pose injection over LSL. The first sample is the activation.
+# 2. One outlet per DOF under test. The wrist is never published, so it holds at rest
+#    for the whole sweep without anything having to write zeros to it.
+outlets = {
+    address: StreamOutlet(
+        StreamInfo(STREAM[address], "MyoGestic_Control", 1, 32, "float32", f"sweep:{address}")
+    )
+    for address in DIGITS
+}
+
+# 3. Continuous injection over LSL. The first sample is the activation.
 LEVELS = [0.0, 0.5, 1.0]                # rest / half / full flexion per DOF
                                         # (standard: +1 flexes)
 SETTLE_S = 0.5                          # well inside the 5 s stale window
 
 for combo in product(LEVELS, repeat=len(DIGITS)):    # 3^6 = 729 multi-DOF poses
-    pose = np.zeros(9, dtype=np.float32)             # wrist channels stay at rest
     for address, level in zip(DIGITS, combo):
-        pose[CHANNEL[address]] = level
-    pose_outlet.push(pose)
+        outlets[address].push_sample([level])
     time.sleep(SETTLE_S)
     # Your model's prediction at this moment is recorded on its own LSL
     # outlet; line it up with VHI_Control post-hoc via XDF timestamps.
 
-# 3. Tear down. Stop pushing and the hand releases itself five seconds later.
+# 4. Tear down. Stop pushing and the hand releases itself five seconds later.
 recording.stop_trajectory()             # no-op unless one was started
 recording.set_recording_session(False)
 ```
 
 `SETTLE_S` is half a second, comfortably inside the five-second stale window, so the
 hand stays stream-driven for the whole sweep without anything holding it there. And no
-channel index is written down anywhere: `CHANNEL` comes from the manifest, so a build
-that renumbers its pose layout moves this loop with it.
+stream name is written down anywhere: `STREAM` comes from the manifest, so a build that
+renames a DOF moves this loop with it.
 
 Two planes, two roles - this is the whole design:
 
 | Plane | What it carries here | Role |
 |---|---|---|
-| **gRPC** | `GetControlManifest` (the channels), `SetRecordingSession`, `GetRecordingSessionState` | discovery, setup, assertions |
-| **LSL** (`MyoGestic_ControlPose`) | the 9-DOF test poses themselves | continuous data, and the only thing that activates the hand |
+| **gRPC** | `GetControlManifest` (the stream names), `SetRecordingSession`, `GetRecordingSessionState` | discovery, setup, assertions |
+| **LSL** (`vhi.control.pose.*`) | the test poses themselves, one stream per DOF | continuous data, and the only thing that activates the hand |
 
 Two LSL records line everything up offline:
 
 - `VHI_Control` is the **ground truth** the participant saw - record this and
   align it to your model's prediction outlet via [XDF](../concepts/lsl-streams.md).
-- `MyoGestic_ControlPose` (your test injection) and the model's output are
+  It is a whole nine-channel pose per sample, which is exactly what makes it the record.
+- Your injected `vhi.control.pose.*` streams and the model's output are
   what you compare. Robust models track the injected pose with bounded error
   across all combos; brittle models fail on combos no single named movement
   covers.

@@ -1,13 +1,14 @@
 # Upgrading to VHI 2.0
 
 VHI 2.0 replaces the v1 gRPC control plane with the **standard control vocabulary**, and
-changes the convention of the continuous LSL stream it reads. Both are breaking, and
-both are detectable — nothing degrades silently.
+replaces the two nine-channel pose inlets with **one LSL stream per DOF**, standard-signed.
+All of it is breaking, and all of it is detectable — nothing degrades silently.
 
 !!! danger "Read this before updating a running experiment"
-    A v1 client talking to VHI 2.0 gets `UNIMPLEMENTED` on every control call, and a
-    client that streams the old pose convention will render **every joint inverted**.
-    Update MyoGestic and VHI together, or run the compatibility path described below.
+    A v1 client talking to VHI 2.0 gets `UNIMPLEMENTED` on every control call. A client
+    still publishing `MyoGestic_Output` or `MyoGestic_ControlPose` moves nothing at all —
+    those names no longer resolve to anything. And a client that streams the old pose
+    convention will render **every joint inverted**. Update MyoGestic and VHI together.
 
 ## What changed, and why
 
@@ -18,10 +19,41 @@ channel 0 as thumb *rotation* and channels 6-8 as a wrist. Neither was true.
 
 v2 replaces that with a **manifest**. `GetControlManifest` lists every address VHI
 exports — `vhi.prediction.index`, `vhi.control.gesture` — each with its kind, its
-range or its states, the LSL stream it is read from and the channel it occupies there.
-A client fetches it once, maps its own names onto those addresses, and sends. Nothing
-hard-codes a channel index on either side, and nothing is negotiated: the manifest is
-the same for every client, and VHI keeps no per-client state.
+range or its states, and the LSL stream it is read from. A client fetches it once, maps
+its own names onto those addresses, and sends. Nothing hard-codes a stream layout on
+either side, and nothing is negotiated: the manifest is the same for every client, and
+VHI keeps no per-client state.
+
+### One stream per DOF, applied on arrival
+
+`MyoGestic_Output` and `MyoGestic_ControlPose` are **gone**. Every control VHI exports is
+now its own LSL stream, named for its own address and **one channel wide**:
+
+| v1 / early v2 | current |
+|---|---|
+| `MyoGestic_Output`, 9 channels, positional | `vhi.prediction.index`, `vhi.prediction.thumb.flexion`, … — nine streams, 1 channel each |
+| `MyoGestic_ControlPose`, 9 channels, positional | `vhi.control.pose.index`, `vhi.control.pose.thumb.flexion`, … — nine streams, 1 channel each |
+| `channel` on the capability told you where to write in the frame | `stream_name` on the capability tells you what to publish under; `channel` is `0` |
+
+**There is no whole-pose frame any more and nothing waits for one.** A sample is applied
+the moment it arrives, and the DOFs that did not deliver hold what they were last
+commanded to. That is the point rather than a tolerance: the DOFs are independently
+actuated, may come from different producers, and may update at different rates, so a hand
+whose index has moved and whose thumb has not is a real pose. **Two producers can each
+own some DOFs of the same hand without contending** — the capability this shape exists
+for.
+
+Two practical consequences for a migrating client:
+
+- **Publish only what you drive.** You no longer have to invent values for DOFs you do
+  not control, and `0` is now a deliberate command for "rest this DOF" rather than filler.
+- **The control hand follows *any* one of its nine streams.** A producer driving a single
+  DOF takes the hand. The falling edge is the *last* one going quiet.
+
+!!! success "The read-back outlets are unaffected"
+    `VHI_Control` and `VHI_Predict` still publish each hand's whole **nine-channel** pose
+    at 60 Hz, with the same labels, source IDs and metadata. A read-back is a recording,
+    and a recording wants one row per instant. Nothing in a recording pipeline changes.
 
 | v1 | current | Why it moved |
 |---|---|---|
@@ -52,11 +84,12 @@ v1 had a `SetControlMode` RPC, and an intermediate v2 draft had a
 a side effect of declaring a control-pose stream. Both are gone, along with the
 `DriverMode` Inspector field and the `SetDriverMode` method behind it.
 
-What decides now is **stream presence**: the control hand renders
-`MyoGestic_ControlPose` while a sample has arrived within the last five seconds, and
-runs its own movement state machine otherwise. Publish, and it follows; stop, and it
-returns to rest on its own. That is exactly how the predicted hand has always followed
-`MyoGestic_Output` — the two hands differing on it was the only reason a mode existed.
+What decides now is **stream presence**: the control hand renders its
+`vhi.control.pose.*` streams while a sample has arrived on any of them within the last
+five seconds, and runs its own movement state machine otherwise. Publish, and it follows;
+stop publishing all of them, and it returns to rest on its own. That is exactly how the
+predicted hand has always followed its own streams — the two hands differing on it was
+the only reason a mode existed.
 
 The refusals moved with it. A discrete DOF sent while the stream is driving comes back
 as `ControlAck.applied = false` with `rejected["vhi.control.gesture"]` reading
@@ -64,10 +97,10 @@ as `ControlAck.applied = false` with `rejected["vhi.control.gesture"]` reading
 **command-time** rejection now, not a setup-time one — there is no setup call left to
 carry it. See [What drives the control hand](concepts/control-hand-drivers.md).
 
-### The continuous stream is now standard
+### The continuous streams are now standard
 
-`MyoGestic_Output` carries **standard** values: `+1` means the direction the DOF name
-denotes, so `+1` on index flexion *flexes*. v1 took raw rig units — the pose multipliers
+The `vhi.prediction.*` streams carry **standard** values: `+1` means the direction the DOF
+name denotes, so `+1` on `vhi.prediction.index` *flexes*. v1 took raw rig units — the pose multipliers
 the renderer applies to its per-bone gains — and named no channel, so what a value meant
 was a matter of matching tables.
 
@@ -89,14 +122,14 @@ handshake that carried it.
     `source_id` moved to `control_hand_002_standard`.
 
     `VHI_Predict` publishes **standard** values, so pushing `+1` on
-    `MyoGestic_Output` and reading `VHI_Predict` gives `+1` back — the renderer is the
-    identity rather than a sign flip. Nothing archived depends on that stream, which is
-    what makes the change safe to make.
+    `vhi.prediction.index` and reading `VHI_Predict` channel 2 gives `+1` back — the
+    renderer is the identity rather than a sign flip. Nothing archived depends on that
+    stream, which is what makes the change safe to make.
 
-    The optional `MyoGestic_ControlPose` inlet is standard too, unconditionally. There
-    is nothing to opt into: publish the stream and the control hand follows it, stop and
-    it returns to its own movements five seconds later. See
-    [the LSL reference](reference/lsl-reference.md#myogestic_controlpose-is-standard-always).
+    The optional `vhi.control.pose.*` streams are standard too, unconditionally. There
+    is nothing to opt into: publish one and the control hand follows it, stop publishing
+    them all and it returns to its own movements five seconds later. See
+    [the LSL reference](reference/lsl-reference.md#the-control-pose-streams-are-standard-always).
 
 ## Upgrade steps
 
@@ -161,25 +194,29 @@ by it, and calling it twice costs one extra RPC.
    `recording.start_trajectory(movement, frequency_hz=...)`. Call `stop_trajectory()` in
    teardown — it is idempotent.
 4. **Replace `set_smoothing`** with `control_client().set_presentation(blend=...)`.
-5. **Delete any hand-built 9-float frame.** It is correct for exactly one convention and
-   silently inverted on the other. Push standard values through the bus instead.
+5. **Delete any hand-built 9-float frame, and the stream it went to.** There is no frame
+   any more: `MyoGestic_Output` and `MyoGestic_ControlPose` do not exist, each DOF has a
+   stream of its own, and a frame assembled by position is correct for nothing. Push
+   standard values through the bus and let it publish under the manifest's stream names.
 6. **Drop `freeze`, `set_speed`, `set_chirality`, `set_control_mode`.** They have no
    equivalent by design.
 7. **Stop asking for `Stream` mode.** Whatever selected it — a `control_pose=True`
-   flag, a `DriverMode`, a `set_control_mode` call — just delete it. Publishing
-   `vhi.control_outlet()` is the whole request, and `VhiTarget(..., stream="control_pose")`
-   is how the bus drives that stream instead of `MyoGestic_Output`.
+   flag, a `DriverMode`, a `set_control_mode` call — just delete it. Publishing any
+   `vhi.control.pose.*` stream is the whole request; which hand you drive is now decided
+   by which addresses your control map points at.
 
 ### If you use VHI directly
 
 Generate stubs from `proto/myogestic_vhi.proto`, then:
 
 1. Call `GetControlManifest` once, unconditionally, before you send anything.
-2. For each control you drive, read the capability's `stream_name` and `channel` and
-   build your frame *from those* — never from a remembered order. Both pose streams
-   number their channels from zero, so a channel means nothing without its stream.
-3. Publish that stream, and/or call `SetControl` for held states. Nothing has to be
-   opened, declared or requested first.
+2. For each control you drive, read the capability's `stream_name` — never a remembered
+   name — and create **one single-channel LSL outlet under it**. For this renderer
+   `stream_name` is the address itself and `channel` is `0`; read them anyway, so a
+   target that packs its controls differently does not break you.
+3. Push each DOF on its own outlet, at whatever rate you have values for it, and/or call
+   `SetControl` for held states. Nothing has to be opened, declared or requested first,
+   and you publish only the DOFs you drive — the rest hold where they are.
 
 An `UNIMPLEMENTED` on step 1 is a renderer too old to drive. Read
 `ControlAck.rejected` on every `SetControl`: a refusal is always named, and a name

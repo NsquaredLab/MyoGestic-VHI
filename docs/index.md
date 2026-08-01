@@ -20,7 +20,7 @@ model predicts for it, frame by frame.
 
 ## How it fits together
 
-![How VHI fits together with MyoGestic: MyoGestic's Operator GUI sends discrete commands over gRPC to VHI's Control hand; its Myocontrol model sends the MyoGestic_Output LSL stream to the Predicted hand; VHI publishes VHI_Control and VHI_Predict back over LSL.](images/architecture.svg){ style="max-width:780px;width:100%;display:block;margin:1em auto;" }
+![How VHI fits together with MyoGestic: MyoGestic's Operator GUI sends discrete commands over gRPC to VHI's Control hand; its Myocontrol model publishes one LSL stream per DOF, vhi.prediction.index and its siblings, to the Predicted hand; VHI publishes VHI_Control and VHI_Predict back over LSL.](images/architecture.svg){ style="max-width:780px;width:100%;display:block;margin:1em auto;" }
 
 VHI splits its communication by *what kind of data it is*:
 
@@ -29,11 +29,15 @@ VHI splits its communication by *what kind of data it is*:
 - **Discrete commands** ("play this movement", "freeze", "switch mode") flow
   over **gRPC** - typed, acknowledged, with presence signalling.
 
-MyoGestic can also drive the **control hand** continuously over LSL via the
-optional `MyoGestic_ControlPose` inlet - useful for streaming custom poses
+Every DOF is its own LSL stream, named for its own address and one channel wide, so a
+producer publishes only what it drives and the rest hold where they are - two producers
+can even own different DOFs of the same hand.
+
+MyoGestic can also drive the **control hand** continuously over LSL, via the
+optional `vhi.control.pose.*` streams - useful for streaming custom poses
 (data gloves, trajectory generators, …) instead of playing a named movement.
-Publishing that stream is the whole activation: the hand follows it while it is
-delivering and returns to its own movements when it stops - see
+Publishing any one of them is the whole activation: the hand follows while samples keep
+arriving and returns to its own movements when they stop - see
 [What drives the control hand](concepts/control-hand-drivers.md).
 
 See [gRPC control plane](concepts/grpc-control.md) for the why behind the

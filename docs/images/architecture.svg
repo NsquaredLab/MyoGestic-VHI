@@ -7,7 +7,7 @@
     MyoGestic (Python) contains an Operator GUI and a Myocontrol model.
     Virtual Hand Interface (Godot / C#) contains a Control hand and a Predicted hand.
     The Operator GUI sends discrete commands to the Control hand over gRPC.
-    The Myocontrol model sends the MyoGestic_Output stream to the Predicted hand over LSL at about 32 Hz.
+    The Myocontrol model publishes one LSL stream per DOF, named vhi.prediction.index and its siblings, to the Predicted hand at about 32 Hz.
     Virtual Hand Interface publishes VHI_Control and VHI_Predict back to MyoGestic over LSL at 60 Hz.
   </desc>
   <defs>
@@ -61,8 +61,8 @@
 
   <!-- Forward edge 2: Myocontrol model -> Predicted hand (LSL) -->
   <path class="edge" d="M260 214 L520 214" marker-end="url(#vhi-arrow)"/>
-  <text class="text-body" x="390" y="203" font-size="13" text-anchor="middle">MyoGestic_Output</text>
-  <text class="text-faint" x="390" y="231" font-size="11" text-anchor="middle">LSL at ~32 Hz</text>
+  <text class="text-body" x="390" y="203" font-size="13" text-anchor="middle">vhi.prediction.*</text>
+  <text class="text-faint" x="390" y="231" font-size="11" text-anchor="middle">one LSL stream per DOF, ~32 Hz</text>
 
   <!-- Return edge: VHI -> MyoGestic (VHI_Control / VHI_Predict outlets, dashed). -->
   <path class="edge-dash" d="M520 159 L260 159" marker-end="url(#vhi-arrow-faint)"/>
