@@ -130,9 +130,9 @@ def test_setcontrol_rejects_an_unknown_name(v2):
 def test_setcontrol_rejects_a_non_finite_value(v2, bad):
     """A non-finite value becomes a full-scale deflection once multiplied by a gain."""
     stub, pb2 = v2
-    ack = stub.SetControl(pb2.SetControlRequest(continuous={"vhi.prediction.index.flexion": bad}), timeout=10.0)
+    ack = stub.SetControl(pb2.SetControlRequest(continuous={"vhi.prediction.index": bad}), timeout=10.0)
     assert not ack.applied
-    assert "vhi.prediction.index.flexion" in ack.rejected
+    assert "vhi.prediction.index" in ack.rejected
 
 
 # --- SweepControl: the rig itself ----------------------------------------------
@@ -185,7 +185,7 @@ def test_the_extension_half_is_the_exact_mirror(v2, name):
 def test_a_one_directional_sweep_leaves_the_other_half_alone(v2):
     stub, pb2 = v2
     reply = stub.SweepControl(
-        pb2.SweepControlRequest(name="vhi.prediction.index.flexion", duration_s=1.0, both_directions=False),
+        pb2.SweepControlRequest(name="vhi.prediction.index", duration_s=1.0, both_directions=False),
         timeout=25.0,
     )
     assert reply.completed, reply.message
@@ -208,7 +208,7 @@ def test_the_hand_is_left_at_rest_after_a_sweep(v2):
     """A verification tool must not leave a limb deflected."""
     stub, pb2 = v2
     stub.SweepControl(
-        pb2.SweepControlRequest(name="vhi.prediction.index.flexion", duration_s=1.0, both_directions=True),
+        pb2.SweepControlRequest(name="vhi.prediction.index", duration_s=1.0, both_directions=True),
         timeout=25.0,
     )
     after = stub.SweepControl(
@@ -385,7 +385,7 @@ def test_continuous_control_is_unaffected_by_a_running_trajectory(aid, v2):
         pb2.StartRecordingTrajectoryRequest(movement=movements[1]), timeout=10.0
     )
     ack = control_stub.SetControl(
-        pb2.SetControlRequest(continuous={"vhi.prediction.index.flexion": 0.5}), timeout=10.0
+        pb2.SetControlRequest(continuous={"vhi.prediction.index": 0.5}), timeout=10.0
     )
     assert ack.applied, dict(ack.rejected)
 
@@ -409,7 +409,7 @@ def test_blending_does_not_change_the_commanded_value(v2):
             pb2.SetPresentationRequest(blend=blend, blend_speed=25.0), timeout=10.0
         ).applied
         reply = stub.SweepControl(
-            pb2.SweepControlRequest(name="vhi.prediction.index.flexion", duration_s=1.5, both_directions=True),
+            pb2.SweepControlRequest(name="vhi.prediction.index", duration_s=1.5, both_directions=True),
             timeout=25.0,
         )
         assert reply.completed, reply.message
@@ -702,7 +702,7 @@ def test_direction_is_the_same_on_every_repeat(v2):
     assert runs[0] == runs[1] == runs[2], runs
 
 
-# --- one vocabulary: accepted, not advertised ------------------------------------
+# --- one vocabulary, and only one ------------------------------------------------
 #
 # Declare used to answer both halves of this. It is gone; the manifest and SetControl
 # now carry one half each, and the two tests below are the whole claim.
@@ -713,10 +713,9 @@ def test_the_manifest_advertises_the_control_pose_channels_a_client_indexes_by(v
 
     These are the channel numbers a client actually writes `MyoGestic_ControlPose`
     floats to, read off `GetControlManifest` rather than restated: a client that indexed
-    by a different number would drive the wrong finger. The five aliases
-    (`vhi.control.pose.thumb`, and `.flexion` on the four single-axis digits) resolve
-    just as well — see the next test — but must not show up here, or a client that
-    enumerates the manifest would see two names for the same channel.
+    by a different number would drive the wrong finger. Exactly nine, one per channel:
+    an equality rather than a subset, because a second name for one channel is the thing
+    this vocabulary is not allowed to grow back.
     """
     stub, pb2 = v2
     manifest = stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=10.0)
@@ -736,29 +735,34 @@ def test_the_manifest_advertises_the_control_pose_channels_a_client_indexes_by(v
         "vhi.control.pose.wrist.abduction": 7,
         "vhi.control.pose.wrist.rotation": 8,
     }
-    for alias in [
-        "vhi.control.pose.thumb",
-        "vhi.control.pose.index.flexion",
-        "vhi.control.pose.middle.flexion",
-        "vhi.control.pose.ring.flexion",
-        "vhi.control.pose.little.flexion",
-    ]:
-        assert alias not in control_pose, f"{alias} is an alias and must not be advertised"
 
 
-def test_an_alias_is_still_accepted_though_unadvertised(v2):
-    """The rename is not a removal: a client sending the old name keeps rendering.
+#: A spelling VHI used to accept unadvertised -> the one address that replaces it.
+#: Both directions of the retired convention: a suffix that carried no information on a
+#: single-axis digit, and a bare thumb that had to guess between two axes.
+RETIRED = {
+    "vhi.prediction.index.flexion": "vhi.prediction.index",
+    "vhi.prediction.thumb": "vhi.prediction.thumb.flexion",
+}
 
-    `vhi.prediction.thumb` is accepted but not advertised — the same asymmetry as the
-    control-pose test above, from the other side. `resolve()` on the client side refuses
-    what the manifest omits, so this is what a client reaches only by sending the alias
-    directly — but the renderer must not be the thing that breaks it.
+
+def test_a_retired_spelling_is_refused_and_the_refusal_names_its_replacement(v2):
+    """The inverse of the alias test this replaces, and the migration path itself.
+
+    These two rendered yesterday and are refused today, which is the visible cost of
+    there being one vocabulary instead of two. What makes that safe is not the refusal
+    but its text: a client that used a working name must be told the new one, because it
+    cannot otherwise tell a retired spelling from a typo. The refusal is derived from the
+    live table, so a name can never be suggested that the manifest does not also carry.
     """
     stub, pb2 = v2
-    ack = stub.SetControl(
-        pb2.SetControlRequest(continuous={"vhi.prediction.thumb": 0.0}), timeout=10.0
-    )
-    assert ack.applied, dict(ack.rejected)
+    for retired, canonical in RETIRED.items():
+        ack = stub.SetControl(
+            pb2.SetControlRequest(continuous={retired: 0.0}), timeout=10.0
+        )
+        assert not ack.applied, f"{retired} was still accepted"
+        why = ack.rejected[retired]
+        assert canonical in why, f"{retired} was refused without naming {canonical}: {why}"
 
 
 # --- the wrist ------------------------------------------------------------------

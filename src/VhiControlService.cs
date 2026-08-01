@@ -83,13 +83,13 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// </remarks>
 	private static readonly Dictionary<string, (int Channel, int Joint, Axis Axis)> Renderable = new()
 	{
-		// This table is the *resolver*, not the vocabulary. It lists every spelling that
-		// resolves; what a client discovers is what is left after removing
-		// <see cref="Aliases"/> — nine addresses per stream, one per channel.
+		// One spelling per control, and it is the spelling the manifest advertises: this
+		// table and <see cref="GetControlManifest"/> are the same vocabulary, so a name
+		// that resolves here is a name a client can discover.
 		//
-		// Canonical, and the only ones advertised. The suffix appears exactly where it
-		// carries information: these four digits bend one way, so `index` cannot mean
-		// anything else, while the thumb and the wrist name their axes.
+		// The suffix appears exactly where it carries information: these four digits bend
+		// one way, so `index` cannot mean anything else, while the thumb and the wrist
+		// name their axes.
 		["vhi.prediction.index"] = (2, 4, Axis.X),
 		["vhi.prediction.middle"] = (3, 7, Axis.X),
 		["vhi.prediction.ring"] = (4, 10, Axis.X),
@@ -102,23 +102,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 		["vhi.prediction.wrist.flexion"] = (6, 0, Axis.X),
 		["vhi.prediction.wrist.abduction"] = (7, 0, Axis.Z),
 		["vhi.prediction.wrist.rotation"] = (8, 0, Axis.Y),
-
-		// Aliases. Each is a second spelling of a channel already named above, accepted so
-		// a map resolves instead of being refused over punctuation, and hidden from the
-		// manifest so discovery returns one name per control. <see cref="Aliases"/> is the
-		// list, and the manifest filters on it.
-		//
-		// A bare `thumb` is here rather than above because the thumb is the one digit
-		// where a bare name would have to guess, and guessing is what a manifest exists to
-		// remove. It resolves to flexion, its primary axis.
-		//
-		// Two spellings reaching one control is also why a capability publishes its own
-		// channel rather than letting a client infer it from position in a list.
-		["vhi.prediction.thumb"] = (0, 1, Axis.X),
-		["vhi.prediction.index.flexion"] = (2, 4, Axis.X),
-		["vhi.prediction.middle.flexion"] = (3, 7, Axis.X),
-		["vhi.prediction.ring.flexion"] = (4, 10, Axis.X),
-		["vhi.prediction.little.flexion"] = (5, 13, Axis.X),
 	};
 
 	/// <summary>
@@ -127,9 +110,8 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// </summary>
 	/// <remarks>
 	/// <para>
-	/// Same canonical-plus-alias shape as <see cref="Renderable"/>: the bare digit names
-	/// and the thumb's two axes are advertised, the four <c>&lt;digit&gt;.flexion</c>
-	/// spellings and a bare <c>thumb</c> are accepted and hidden. See <see cref="Aliases"/>.
+	/// Same one-name-per-control shape as <see cref="Renderable"/>: the bare digit names
+	/// for the four single-axis digits, and an explicit axis on the thumb and the wrist.
 	/// </para>
 	/// <para>
 	/// A deliberately separate namespace from <c>vhi.prediction.*</c>, because these are a
@@ -147,17 +129,12 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// </remarks>
 	private static readonly Dictionary<string, int> ControlPoseRenderable = new()
 	{
-		["vhi.control.pose.thumb"] = 0,
 		["vhi.control.pose.thumb.flexion"] = 0,
 		["vhi.control.pose.thumb.abduction"] = 1,
 		["vhi.control.pose.index"] = 2,
-		["vhi.control.pose.index.flexion"] = 2,
 		["vhi.control.pose.middle"] = 3,
-		["vhi.control.pose.middle.flexion"] = 3,
 		["vhi.control.pose.ring"] = 4,
-		["vhi.control.pose.ring.flexion"] = 4,
 		["vhi.control.pose.little"] = 5,
-		["vhi.control.pose.little.flexion"] = 5,
 		["vhi.control.pose.wrist.flexion"] = 6,
 		["vhi.control.pose.wrist.abduction"] = 7,
 		["vhi.control.pose.wrist.rotation"] = 8,
@@ -166,65 +143,45 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// <summary>What each address renders, for the manifest's description field.</summary>
 	private static readonly Dictionary<string, string> Describes = new()
 	{
-		["vhi.prediction.thumb"] = "thumb flexion (bones 1-3, X axis) — the primary axis, and what the short address means",
 		["vhi.prediction.index"] = "index flexion (bones 4-6)",
 		["vhi.prediction.middle"] = "middle flexion (bones 7-9)",
 		["vhi.prediction.ring"] = "ring flexion (bones 10-12)",
 		["vhi.prediction.little"] = "little flexion (bones 13-15)",
 		["vhi.prediction.thumb.flexion"] = "thumb flexion (bones 1-3, X axis)",
 		["vhi.prediction.thumb.abduction"] = "thumb abduction (bones 1-3, Z axis). The distal bone's Z gain is 0, so two of the three thumb bones move.",
-		["vhi.prediction.index.flexion"] = "index flexion (bones 4-6)",
-		["vhi.prediction.middle.flexion"] = "middle flexion (bones 7-9)",
-		["vhi.prediction.ring.flexion"] = "ring flexion (bones 10-12)",
-		["vhi.prediction.little.flexion"] = "little flexion (bones 13-15)",
 		["vhi.prediction.wrist.flexion"] = "wrist flexion (bone 0, X axis). Bone 0 parents every digit, so the whole hand turns with it.",
 		["vhi.prediction.wrist.abduction"] = "wrist abduction (bone 0, Z axis). Bone 0 parents every digit, so the whole hand turns with it.",
 		["vhi.prediction.wrist.rotation"] = "wrist rotation \u2014 pronation/supination (bone 0, Y axis). The hand twists about its own long axis; there is no forearm to carry the motion.",
 	};
 
-	/// <summary>Names that are <b>accepted but not advertised</b>.</summary>
+	/// <summary>Why an address does not resolve, naming a near spelling when one exists.</summary>
 	/// <remarks>
 	/// <para>
-	/// Every control here is already reachable under a shorter address on the same channel:
-	/// <c>vhi.prediction.index.flexion</c> is <c>vhi.prediction.index</c>. Publishing both put
-	/// eleven capabilities in the manifest for six controls, which forced every client that
-	/// lists them to explain the duplication — MyoGestic's map editor had to print a channel
-	/// number in each row so a reader could tell which two rows meant one finger.
+	/// VHI used to accept a second spelling of five controls — <c>vhi.prediction.index.flexion</c>
+	/// for <c>vhi.prediction.index</c>, a bare <c>vhi.prediction.thumb</c> for its two axes —
+	/// without advertising any of them. Two vocabularies for one set of controls is one more
+	/// than a renderer can keep in step, so there is now exactly one: what the manifest says.
 	/// </para>
 	/// <para>
-	/// So the manifest names each control once. <see cref="Renderable"/> still resolves these,
-	/// because <c>SetControl</c> and <c>SweepControl</c> read that table
-	/// directly: a client that already sends an axis form keeps working on the wire.
-	/// </para>
-	/// <para>
-	/// <b>Extension is not in here, and is not missing.</b> A continuous control is signed —
-	/// <c>+1</c> flexes and <c>-1</c> extends the same control — so there is no separate
-	/// extension address to advertise or hide. The <c>ThumbExtension</c> that exists is a
-	/// <i>movement preset</i> on <c>vhi.control.gesture</c>, which is a held state rather than
-	/// a number. <c>thumb.abduction</c> stays advertised because it is a genuinely different
-	/// control: its own channel, its own axis.
+	/// Which makes the refusal the migration path, and it has to carry the new spelling. The
+	/// candidates are derived from <see cref="Renderable"/> — a retired name differs from a
+	/// live one by one trailing segment, in either direction — rather than kept in a table of
+	/// old names, which would be the second vocabulary again under another name.
 	/// </para>
 	/// </remarks>
-	/// <remarks>
-	/// <para>The thumb is the exception in the other direction: <c>thumb</c> alone is the
-	/// alias and <c>thumb.flexion</c> is advertised. A digit with one axis needs no suffix —
-	/// <c>index</c> cannot mean anything but flexion — but the thumb has two, and a bare
-	/// <c>thumb</c> does not say which. The suffix appears exactly where it carries
-	/// information.</para>
-	/// </remarks>
-	private static readonly HashSet<string> Aliases =
-	[
-		"vhi.prediction.thumb",
-		"vhi.prediction.index.flexion",
-		"vhi.prediction.middle.flexion",
-		"vhi.prediction.ring.flexion",
-		"vhi.prediction.little.flexion",
-		"vhi.control.pose.thumb",
-		"vhi.control.pose.index.flexion",
-		"vhi.control.pose.middle.flexion",
-		"vhi.control.pose.ring.flexion",
-		"vhi.control.pose.little.flexion",
-	];
+	private static string NotRenderable(string name)
+	{
+		List<string> near = Renderable.Keys
+			.Where(address => address.StartsWith(name + ".", StringComparison.Ordinal)
+				|| name.StartsWith(address + ".", StringComparison.Ordinal))
+			.OrderBy(address => address, StringComparer.Ordinal)
+			.ToList();
+		// Both, when both are near: a bare `thumb` had to pick one of two axes, and saying
+		// which two exist is the answer that stops the client from having to guess again.
+		return near.Count > 0
+			? $"not renderable — did you mean {string.Join(" or ", near)}? See GetControlManifest"
+			: "not renderable — see GetControlManifest";
+	}
 
 	/// <summary>
 	/// Resolve a standard discrete state to one of this hand's movement names, or
@@ -277,10 +234,10 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// <para>
 	/// One absence is deliberate and worth stating, because it would otherwise be
 	/// discovered as a joint that silently does nothing: there is no bare
-	/// <c>vhi.prediction.thumb</c> beyond flexion. The thumb has two axes, so the short
-	/// address is declared to mean flexion (its primary axis, and legacy channel 0) and
-	/// abduction is addressed explicitly. Silently picking one of two axes is exactly the
-	/// guesswork the manifest exists to remove.
+	/// <c>vhi.prediction.thumb</c>. The thumb has two axes, so both are addressed
+	/// explicitly and neither answers to the short name. Silently picking one of two axes
+	/// is exactly the guesswork the manifest exists to remove — and a name the manifest
+	/// does not carry is refused, with the axis spellings named in the refusal.
 	/// </para>
 	/// <para>
 	/// The rig does have a wrist prediction control: bone 0 parents every digit, and
@@ -295,10 +252,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 		var caps = new List<ControlCapability>();
 		foreach ((string address, (int channel, int _, Axis _)) in Renderable)
 		{
-			if (Aliases.Contains(address))
-			{
-				continue;   // accepted, not advertised — see Aliases
-			}
 			caps.Add(new ControlCapability
 			{
 				Address = address,
@@ -313,10 +266,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 		}
 		foreach ((string address, int channel) in ControlPoseRenderable)
 		{
-			if (Aliases.Contains(address))
-			{
-				continue;   // accepted, not advertised — see Aliases
-			}
 			caps.Add(new ControlCapability
 			{
 				Address = address,
@@ -387,7 +336,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 				// manifest publishes them.
 				if (!Renderable.TryGetValue(name, out var slot))
 				{
-					ack.Rejected[name] = "not renderable — see GetControlManifest";
+					ack.Rejected[name] = NotRenderable(name);
 					ack.Applied = false;
 					continue;
 				}
@@ -504,7 +453,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 			return new SweepControlReply
 			{
 				Completed = false,
-				Message = $"{request.Name} is not renderable — see GetControlManifest",
+				Message = $"{request.Name} is {NotRenderable(request.Name)}",
 			};
 		}
 

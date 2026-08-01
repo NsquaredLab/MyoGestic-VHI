@@ -206,12 +206,11 @@ smoothly, which is arguably worse because it looks deliberate.
 
 `SweepControl` exists for this. It drives one named DOF across its range and reports
 which rig elements moved and by how many **signed** degrees, read back off the skeleton
-— so "does `vhi.prediction.index.flexion` curl the index finger, in the flexion
-direction" is a
+— so "does `vhi.prediction.index` curl the index finger, in the flexion direction" is a
 machine-checkable question rather than something you watch for:
 
 ```python
-reply = vhi.control_client().sweep("vhi.prediction.index.flexion")
+reply = vhi.control_client().sweep("vhi.prediction.index")
 for observation in reply.observed:
     print(observation.element, observation.degrees_at_hi, observation.degrees_at_lo)
 ```

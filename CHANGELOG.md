@@ -33,9 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it is a DOF that silently does nothing some of the time.
 - **`SweepControl` — verification without a human at the screen.** Drives one named DOF
   across its range and reports which rig elements moved and by how many *signed* degrees,
-  read back off the skeleton. Turns "does `vhi.prediction.index.flexion` curl the index
-  finger, in the
-  flexion direction" into an assertion. It reports the model's own bone names, so a
+  read back off the skeleton. Turns "does `vhi.prediction.index` curl the index finger,
+  in the flexion direction" into an assertion. It reports the model's own bone names, so a
   re-rig surfaces as a changed name rather than as a hand moving the wrong finger.
 - **Recording-session coordination lives on the same service, deliberately not on the
   control plane.** `SetRecordingSession` gates VHI's local keyboard off so a recording
@@ -200,18 +199,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(-180°, +180°]`, so at exactly half a turn the pose is correct while the **read-back
   inverts** — a commanded `+1` reports as `-1`. Measured, not assumed. One degree short and
   the round-trip is exact at every value.
-- **`thumb` is now `thumb.flexion`.** The thumb has two axes and a bare name did not say
-  which; a single-axis digit keeps its bare name, because `index` cannot mean anything else.
-  The suffix appears exactly where it carries information. The bare form is still accepted,
-  so a declaration using it renders — but it is no longer advertised, and a client that
-  validates against the manifest will refuse it.
-- **The manifest advertises each control once, and the aliases stay accepted.**
-  `vhi.prediction.index.flexion` is `vhi.prediction.index` on the same channel, so
-  publishing both put eleven capabilities in the manifest for six controls and forced
-  every client listing them to explain the duplication. The longer spellings still
-  resolve on the wire; they are simply not advertised. The thumb is the exception in the
-  other direction — it has two axes, so `thumb.flexion` is advertised and a bare `thumb`
-  is the alias.
+- **BREAKING: one address per control, and the manifest names it.** The suffix appears
+  exactly where it carries information: a digit that bends one way keeps its bare name,
+  because `index` cannot mean anything else, while the thumb and the wrist name their
+  axes. Five second spellings that VHI accepted without ever advertising them are gone,
+  and sending one is now **refused**:
+
+  | Retired | Send instead |
+  | --- | --- |
+  | `vhi.prediction.index.flexion` | `vhi.prediction.index` |
+  | `vhi.prediction.middle.flexion` | `vhi.prediction.middle` |
+  | `vhi.prediction.ring.flexion` | `vhi.prediction.ring` |
+  | `vhi.prediction.little.flexion` | `vhi.prediction.little` |
+  | `vhi.prediction.thumb` | `vhi.prediction.thumb.flexion` (or `.abduction`) |
+
+  The same five spellings on `vhi.control.pose.*` are gone from the resolver too; they
+  were never reachable over `SetControl`, and the control-pose stream is written by
+  channel.
+
+  **The manifest does not change** — it never carried these — so a client that already
+  resolves against `GetControlManifest` is unaffected, and one that hard-coded a spelling
+  by analogy is told what to send: a refused address whose replacement differs by one
+  trailing segment comes back as `not renderable — did you mean vhi.prediction.index?
+  See GetControlManifest`, with the suggestion read out of the live table rather than out
+  of a list of retired names, which would be the second vocabulary again.
 - **A standard `+1` extended every digit instead of flexing it.** Both hands converted
   standard values by negating all nine channels on ingest, reasoning that "the flexion
   gains are negative". That is backwards: the gain table *is*

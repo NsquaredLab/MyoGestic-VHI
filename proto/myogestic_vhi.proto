@@ -76,7 +76,7 @@ message GetControlManifestRequest {}
 // That is the whole point of shipping a manifest rather than a naming convention. A
 // convention has to be kept in sync by hand on both sides; a manifest is read.
 message ControlCapability {
-  // Stable dotted address, e.g. "vhi.prediction.index.flexion". Namespaced by target
+  // Stable dotted address, e.g. "vhi.prediction.index". Namespaced by target
   // so addresses from different targets cannot collide in one client configuration.
   string address = 1;
 
@@ -116,10 +116,9 @@ message ControlCapability {
   // held state travels over gRPC and occupies no channel at all.
   //
   // This is the address-to-channel map, published per capability rather than inferred
-  // from position in a list, so a target may publish its controls in any order, leave
-  // gaps, and — if it wants to — name one control under more than one address. A client
-  // resolves its own alias to an address and the address to a channel, and never has to
-  // guess an index.
+  // from position in a list, so a target may publish its controls in any order and
+  // leave gaps. A client resolves its own model-output name to an address and the
+  // address to a channel, and never has to guess an index.
   //
   // Read it together with stream_name: this renderer publishes two pose streams and both
   // number their channels from zero, so a channel means nothing on its own.
