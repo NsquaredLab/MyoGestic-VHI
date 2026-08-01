@@ -119,6 +119,14 @@ public partial class ControlHandSkeleton : HandSkeleton
 		// same contract LSLCommunicationController keeps for the predicted hand's buffer.
 		if (wasControlPoseLive)
 		{
+			// StopRecordingTrajectory first, because StopToRest only resets the animation:
+			// it leaves RecordingTrajectoryActive set, and GetRecordingSessionState would
+			// go on reporting trajectory_running=true for a hand that is sitting at rest —
+			// a pipeline would keep aligning EMG against a trajectory that is not running.
+			// Reachable: start a trajectory, a control-pose producer appears and takes the
+			// hand, then goes stale. Its inner SetMovement("Rest") passes the presence
+			// guard because ControlPoseLive is already false by the time we are here.
+			StopRecordingTrajectory();
 			StopToRest();
 			wasControlPoseLive = false;
 		}

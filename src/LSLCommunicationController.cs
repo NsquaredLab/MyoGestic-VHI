@@ -79,11 +79,13 @@ public partial class LSLCommunicationController : Node
 
 	/// <summary>When the prediction inlet last delivered a sample.</summary>
 	/// <remarks>
-	/// The only reliable way this renderer learns a producer is gone. liblsl does not say:
-	/// with recovery on it hides the loss, and with recovery off a zero-timeout pull on a
-	/// dead stream still just returns "no samples" rather than raising. Either way the inlet
-	/// looks alive forever, which left the by-name search below unreachable and the hand
-	/// frozen on its last pose.
+	/// The only reliable way this renderer learns a producer is gone. With liblsl's recovery
+	/// on, the loss is hidden outright. With it off liblsl <i>does</i> raise on the next pull
+	/// — but <see cref="LSLWrapper.PullSample"/> catches every exception, logs it and returns
+	/// <c>0.0</c>, so what reaches the drain loop below is indistinguishable from "no samples
+	/// this frame". The <c>catch</c> around that loop cannot fire from a failing pull, and an
+	/// inlet whose producer died looks alive forever. Read that before concluding the catch
+	/// covers this: it is the wrapper, not liblsl, that decides what this file gets to see.
 	/// </remarks>
 	private DateTime lastPredictionSample = DateTime.Now;
 
@@ -100,10 +102,15 @@ public partial class LSLCommunicationController : Node
 
 	/// <summary>Silence after which the control-pose inlet is assumed gone.</summary>
 	/// <remarks>
-	/// The prediction inlet has had one of these; this one had not, and was dropped only
-	/// when a pull raised. Presence is now what puts the control hand into Stream mode, so
-	/// "the producer stopped" needs to be observable rather than inferred from an error
-	/// that a quiet-but-alive outlet never raises.
+	/// The prediction inlet has had one of these; this one had not, and leaned on the catch
+	/// around its pull instead — which never fires, because the wrapper swallows the
+	/// exception before this file sees it. Presence is now what puts the control hand into
+	/// Stream mode, so "the producer stopped" has to be observable here rather than inferred
+	/// from an error that never arrives.
+	/// <para>It settles two things, not one: <see cref="ControlPoseLive"/> goes false, and
+	/// the inlet itself is dropped so the by-name resolve can find whoever publishes that
+	/// name next. Without the second, the first producer to exit cleanly pinned this inlet
+	/// to a corpse for the life of the process.</para>
 	/// </remarks>
 	[Export] public float ControlPoseStaleAfterSeconds = 5.0f;
 
@@ -247,6 +254,41 @@ public partial class LSLCommunicationController : Node
 			}
 		}
 
+		// --- Drop a control-pose inlet that has gone quiet, so it can be re-resolved ---
+		//
+		// The prediction inlet has always had this; this one had only the catch above, and
+		// that catch is dead code: LSLWrapper.PullSample swallows the exception and returns
+		// 0.0, so a lost producer reaches the drain loop as "no samples" and nothing here
+		// ever drops the inlet. Measured — a producer exiting cleanly logs liblsl's "Stream
+		// transmission broke off" and then "PullSample failed (1449 more since the last
+		// message)", while `🔍 Searching for MyoGestic_ControlPose` is never printed again.
+		// ControlPoseLive went false and the hand released, so the bug hid behind correct
+		// behaviour: the dead inlet was still held, the field never read null, and the
+		// by-name resolve above never ran. The next producer to publish
+		// MyoGestic_ControlPose was invisible until VHI was restarted. Presence is the
+		// whole mechanism now that Declare is gone, and presence has to be able to notice
+		// the *second* producer.
+		//
+		// The clock: lastControlPoseSample is DateTime.MinValue until this inlet actually
+		// delivers something, so judging it on that alone would drop every fresh inlet on
+		// its first frame. lastControlPoseAttempt is when this inlet's connect started —
+		// no attempt begins while an inlet is held, so it stays pinned there — which makes
+		// it exactly the grace period a fresh inlet is owed. ControlPoseLive still reads
+		// lastControlPoseSample alone: holding an inlet is not the stream delivering.
+		if (controlPoseInlet != null && !isShuttingDown)
+		{
+			var quietSince = lastControlPoseSample > lastControlPoseAttempt
+				? lastControlPoseSample : lastControlPoseAttempt;
+			if ((DateTime.Now - quietSince).TotalSeconds >= ControlPoseStaleAfterSeconds)
+			{
+				GD.Print(
+					$"⏱️ No {ControlPoseStreamName} samples for "
+					+ $"{ControlPoseStaleAfterSeconds:F0}s — dropping the inlet and looking again.");
+				DropInlet(ref controlPoseInlet);
+				receivedDataControl.Clear();
+			}
+		}
+
 		// Presence, evaluated every frame: an inlet that exists but has gone quiet is a
 		// producer that stopped, and the hand should go back to its own movements rather
 		// than hold the last streamed pose forever.
@@ -356,6 +398,14 @@ public partial class LSLCommunicationController : Node
 		lock (connectionLock)
 		{
 			controlPoseInlet = inlet;
+			// A new inlet has delivered nothing. Without this it inherits the previous
+			// producer's clock, so an inlet resolved within ControlPoseStaleAfterSeconds of
+			// the old one's last sample reads ControlPoseLive before a byte arrives, and
+			// SetMovement / SetSpeed / SetFrozen / StartRecordingTrajectory are all refused
+			// with no driver present. One StopToRest flicker when a producer is replaced is
+			// the right trade: something else is taking the hand.
+			if (inlet != null)
+				lastControlPoseSample = DateTime.MinValue;
 			if (inlet != null && controlPoseBuffer.Length != width)
 				controlPoseBuffer = new float[width];
 			isConnectingControlPose = false;

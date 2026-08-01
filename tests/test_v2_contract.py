@@ -403,9 +403,11 @@ def test_blending_does_not_change_the_commanded_value(v2):
     stub, pb2 = v2
     readings = {}
     for blend in (False, True):
-        stub.SetPresentation(
+        # `applied` is asserted because the rest of this test compares two sweeps, and a
+        # SetPresentation that quietly became a no-op would make them match trivially.
+        assert stub.SetPresentation(
             pb2.SetPresentationRequest(blend=blend, blend_speed=25.0), timeout=10.0
-        )
+        ).applied
         reply = stub.SweepControl(
             pb2.SweepControlRequest(name="vhi.prediction.index.flexion", duration_s=1.5, both_directions=True),
             timeout=25.0,
@@ -434,7 +436,7 @@ def test_the_recording_state_reports_the_current_movement(v2, aid, movements):
 # --- the control-pose stream: negotiated, not flipped ----------------------------
 
 
-def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet):
+def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet, movements):
     """Publish MyoGestic_ControlPose and the control hand renders it. No handshake.
 
     The predicted hand has always worked this way — publish MyoGestic_Output and it
@@ -463,6 +465,19 @@ def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet):
             if sample and sample[2] > 0.9:
                 break
         assert sample, "VHI_Control never delivered a sample"
+        # The other half of the guard swap, and the safety property in it: two drivers,
+        # one hand. While this outlet is live, a movement command must be refused — not
+        # applied and then overwritten sixty times a second by the stream, which would
+        # leave a client believing it holds a hand it does not.
+        stub, request_pb2 = v2
+        outlet.push_sample(frame)  # keep the stream inside its stale window for the RPC
+        ack = stub.SetControl(
+            request_pb2.SetControlRequest(discrete={"vhi.control.gesture": movements[0]}),
+            timeout=10.0,
+        )
+        assert ack.applied is False, (
+            f"a movement was accepted while MyoGestic_ControlPose was driving the hand: {ack}"
+        )
     finally:
         del outlet
     assert sample[2] == pytest.approx(1.0, abs=0.05), f"index not driven: {sample}"
