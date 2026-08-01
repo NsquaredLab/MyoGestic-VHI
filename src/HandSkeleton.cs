@@ -10,7 +10,7 @@ namespace Vhi;
 /// Two hands, one FBX, one bone map, one set of rotations. This existed twice, member for
 /// member, and the copies were the reason a direction bug could be fixed in one hand and
 /// not the other. What differs is only what drives the joints — a movement state machine
-/// on one, an LSL inlet on the other — and which outlet the read-back goes to.
+/// on one, a set of per-DOF LSL inlets on the other — and which outlet the read-back goes to.
 /// </remarks>
 public abstract partial class HandSkeleton : Node3D
 {
@@ -42,6 +42,111 @@ public abstract partial class HandSkeleton : Node3D
 
 	protected Skeleton3D skeleton;
 	protected readonly Dictionary<string, int> boneMap = [];
+
+	/// <summary>Which joints each pose channel drives.</summary>
+	/// <remarks>
+	/// The nine channels of a hand pose: 0-1 the thumb's two axes, 2-5 the four single-axis
+	/// digits, 6-8 the wrist's three. A channel is an <i>internal</i> slot now — a DOF arrives
+	/// on a stream of its own and lands here — so nothing outside VHI indexes by these numbers.
+	/// </remarks>
+	protected static readonly Dictionary<int, int[]> JointsByChannel = new()
+	{
+		[0] = [1, 2, 3],
+		[1] = [1, 2, 3],
+		[2] = [4, 5, 6],
+		[3] = [7, 8, 9],
+		[4] = [10, 11, 12],
+		[5] = [13, 14, 15],
+		// The wrist drives one joint on three axes — flexion, abduction, rotation.
+		[6] = [0],
+		[7] = [0],
+		[8] = [0],
+	};
+
+	/// <summary>The nine standard values this hand was last commanded to.</summary>
+	/// <remarks>
+	/// Standard: <c>+1</c> is the direction the DOF's name denotes, <c>0</c> is rest. It stays
+	/// standard right up to <see cref="RenderPose"/>, which multiplies by
+	/// <see cref="StandardPose.AtPlusOne"/> — no sign is applied anywhere else.
+	/// <para>It is a <i>held</i> pose, not a frame: each channel keeps its last commanded value
+	/// until something commands that channel again. Nine DOFs arriving on nine streams at nine
+	/// rates is the normal case, and a hand whose index has moved and whose thumb has not is a
+	/// real pose rather than a half-delivered one.</para>
+	/// </remarks>
+	protected readonly List<float> pose = [0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f];
+
+	/// <summary>Put <see cref="pose"/> on the rig, snapping to it.</summary>
+	protected void RenderPose()
+	{
+		if (skeleton == null || boneMap.Count == 0)
+			return;
+
+		// Wrist (channels 6, 7, 8: flexion, abduction, rotation). Joint 0 parents every
+		// digit, so the whole hand turns with it.
+		SetBoneRotation(0, pose[6] * StandardPose.AtPlusOne[0][0], pose[8] * StandardPose.AtPlusOne[0][1], pose[7] * StandardPose.AtPlusOne[0][2]);
+
+		// Thumb (channels 0 and 1: flexion and abduction).
+		SetBoneRotation(1, pose[0] * StandardPose.AtPlusOne[1][0], 0, pose[1] * StandardPose.AtPlusOne[1][2]);
+		SetBoneRotation(2, pose[0] * StandardPose.AtPlusOne[2][0], 0, pose[1] * StandardPose.AtPlusOne[2][2]);
+		SetBoneRotation(3, pose[0] * StandardPose.AtPlusOne[3][0], 0, pose[1] * StandardPose.AtPlusOne[3][2]);
+
+		// Index (channel 2)
+		SetBoneRotation(4, pose[2] * StandardPose.AtPlusOne[4][0], 0, 0);
+		SetBoneRotation(5, pose[2] * StandardPose.AtPlusOne[5][0], 0, 0);
+		SetBoneRotation(6, pose[2] * StandardPose.AtPlusOne[6][0], 0, 0);
+
+		// Middle (channel 3)
+		SetBoneRotation(7, pose[3] * StandardPose.AtPlusOne[7][0], 0, 0);
+		SetBoneRotation(8, pose[3] * StandardPose.AtPlusOne[8][0], 0, 0);
+		SetBoneRotation(9, pose[3] * StandardPose.AtPlusOne[9][0], 0, 0);
+
+		// Ring (channel 4)
+		SetBoneRotation(10, pose[4] * StandardPose.AtPlusOne[10][0], 0, 0);
+		SetBoneRotation(11, pose[4] * StandardPose.AtPlusOne[11][0], 0, 0);
+		SetBoneRotation(12, pose[4] * StandardPose.AtPlusOne[12][0], 0, 0);
+
+		// Pinky (channel 5)
+		SetBoneRotation(13, pose[5] * StandardPose.AtPlusOne[13][0], 0, 0);
+		SetBoneRotation(14, pose[5] * StandardPose.AtPlusOne[14][0], 0, 0);
+		SetBoneRotation(15, pose[5] * StandardPose.AtPlusOne[15][0], 0, 0);
+	}
+
+	/// <summary>Show the commanded pose. Overridden by a hand that interpolates toward it.</summary>
+	/// <remarks>Not <c>Show</c>: that is <see cref="Node3D"/>'s, and it makes the node visible.</remarks>
+	protected virtual void ShowPose() => RenderPose();
+
+	/// <summary>
+	/// Command one channel and show it, leaving every other channel where it was.
+	/// </summary>
+	/// <remarks>
+	/// The only way a value reaches either hand: one DOF, applied when it arrives. Its
+	/// callers are the per-DOF LSL inlets and <c>VhiControlService.SetControl</c>, and a
+	/// client driving both will fight itself over whichever channels they share.
+	/// </remarks>
+	/// <param name="channel">A pose channel, 0-8. Anything else is ignored.</param>
+	/// <param name="standard">A standard value; clamped to <c>[-1, 1]</c> before it is stored.</param>
+	public void SetStandardValue(int channel, float standard)
+	{
+		if (skeleton == null || boneMap.Count == 0 || !JointsByChannel.ContainsKey(channel))
+			return;
+		pose[channel] = StandardPose.Clamp(standard);
+		ShowPose();
+	}
+
+	/// <summary>Every channel back to standard rest, snapped to immediately.</summary>
+	/// <remarks>
+	/// Also the neutraliser: a zero pose renders every animated joint to identity, so this
+	/// is what a hand released back to its own movements is put through. It has to clear
+	/// <see cref="pose"/> and not just the rig — otherwise the next single DOF to arrive
+	/// would call <see cref="RenderPose"/> and bring a departed producer's other eight
+	/// values back with it.
+	/// </remarks>
+	public void RestStandardPose()
+	{
+		for (int i = 0; i < pose.Count; i++)
+			pose[i] = 0f;
+		RenderPose();
+	}
 
 	/// <summary>Find the rig inside the FBX child and map the 16 animated bones.</summary>
 	protected void FindAndMapSkeleton()
@@ -95,15 +200,6 @@ public abstract partial class HandSkeleton : Node3D
 			|| !boneMap.TryGetValue(BoneNames[jointIndex], out int boneIdx))
 			return Vector3.Zero;
 		return skeleton.GetBonePoseRotation(boneIdx).GetEuler() * (180.0f / Mathf.Pi);
-	}
-
-	/// <summary>Every animated joint back to neutral.</summary>
-	public void ResetBones()
-	{
-		if (skeleton == null)
-			return;
-		foreach (int bone in boneMap.Values)
-			skeleton.SetBonePoseRotation(bone, Quaternion.Identity);
 	}
 
 	/// <summary>The rig's current pose as the nine standard values that would produce it.</summary>

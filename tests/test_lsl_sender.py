@@ -5,16 +5,9 @@ LSL Test Sender for Virtual Hand Interface
 This script sends test data to the Godot hand visualization via LSL.
 It simulates EMG predictions with smooth sinusoidal movements.
 
-Data format (9 channels):
-- 0: Thumb flexion (0-1)
-- 1: Thumb abduction (0-1)
-- 2: Index flexion (0-1)
-- 3: Middle flexion (0-1)
-- 4: Ring flexion (0-1)
-- 5: Pinky flexion (0-1)
-- 6: Wrist flexion (0-1)
-- 7: Wrist abduction (0-1)
-- 8: Wrist rotation (0-1)
+One outlet per DOF, named for its address and one channel wide — the shape VHI
+subscribes to. A real client publishes only the DOFs it drives; this one publishes all
+nine so the patterns below have a whole hand to animate.
 """
 
 import time
@@ -29,39 +22,38 @@ except ImportError:
 FREQUENCY = 32
 
 
-def create_outlet():
-    """Create an LSL outlet for hand predictions."""
-    info = StreamInfo(
-        name="MyoGestic_Output",
-        type="MyoGestic_9DVector",
-        channel_count=9,
-        nominal_srate=FREQUENCY,
-        channel_format="float32", # type: ignore
-        source_id="test_emg_001",
-    )
+#: The prediction addresses, in the order `generate_test_pattern` fills its array.
+#: These are stream *names* — VHI publishes them in GetControlManifest, and one is all a
+#: client needs to drive one DOF. Nothing is labelled, because a stream carries one thing.
+ADDRESSES = [
+    "vhi.prediction.thumb.flexion",
+    "vhi.prediction.thumb.abduction",
+    "vhi.prediction.index",
+    "vhi.prediction.middle",
+    "vhi.prediction.ring",
+    "vhi.prediction.little",
+    "vhi.prediction.wrist.flexion",
+    "vhi.prediction.wrist.abduction",
+    "vhi.prediction.wrist.rotation",
+]
 
-    # Add channel labels
-    channels = info.desc().append_child("channels")
-    labels = [
-        "ThumbFlexion",
-        "ThumbAbduction",
-        "IndexFlexion",
-        "MiddleFlexion",
-        "RingFlexion",
-        "PinkyFlexion",
-        "WristFlexion",
-        "WristAbduction",
-        "WristRotation",
-    ]
 
-    for label in labels:
-        channels.append_child("channel").append_child_value("label", label)
-
-    outlet = StreamOutlet(info)
-    print(f"✅ Created LSL outlet: {info.name()} ({info.type()})")
-    print(f"   Channels: {info.channel_count()}")
-    print(f"   Sampling rate: {info.nominal_srate()} Hz")
-    return outlet
+def create_outlets():
+    """One single-channel outlet per prediction DOF."""
+    outlets = []
+    for address in ADDRESSES:
+        info = StreamInfo(
+            name=address,
+            type="MyoGestic_Control",
+            channel_count=1,
+            nominal_srate=FREQUENCY,
+            channel_format="float32", # type: ignore
+            source_id=f"test_emg_001:{address}",
+        )
+        outlets.append(StreamOutlet(info))
+    print(f"✅ Created {len(outlets)} LSL outlets, one per DOF")
+    print(f"   Sampling rate: {FREQUENCY} Hz")
+    return outlets
 
 
 def generate_test_pattern(t, pattern="wave"):
@@ -131,8 +123,8 @@ def main():
     print("LSL Hand Prediction Test Sender")
     print("=" * 50)
 
-    # Create outlet
-    outlet = create_outlet()
+    # Create outlets
+    outlets = create_outlets()
 
     # Available patterns
     patterns = ["wave", "fist", "pinch", "individual", "random"]
@@ -158,7 +150,8 @@ def main():
 
             # Generate and send sample
             sample = generate_test_pattern(current_time, patterns[current_pattern_idx])
-            outlet.push_sample(sample.tolist())
+            for outlet, value in zip(outlets, sample.tolist()):
+                outlet.push_sample([value])
 
             sample_count += 1
 

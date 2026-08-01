@@ -17,6 +17,12 @@ skeleton. That turns three claims into assertions:
 What they cannot check is that ``WaveBone_7`` is the bone a human calls the index
 finger. That is the FBX's business; pinning the *name* means a re-rig shows up here
 as a failure rather than as a hand that moves the wrong finger.
+
+The second group drives the rig over LSL rather than gRPC, and the shape they assert is
+**one stream per DOF**: a stream named ``vhi.prediction.index``, one channel wide, is the
+index and nothing else. There is no whole-pose frame, so these publish a stream per DOF
+they want to move and nothing at all for the ones they do not — which is what lets two
+producers drive one hand without agreeing on anything.
 """
 
 from __future__ import annotations
@@ -436,29 +442,28 @@ def test_the_recording_state_reports_the_current_movement(v2, aid, movements):
 # --- the control-pose stream: negotiated, not flipped ----------------------------
 
 
-def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet, movements):
-    """Publish MyoGestic_ControlPose and the control hand renders it. No handshake.
+def test_the_control_hand_follows_one_control_pose_stream(v2, control_inlet, movements):
+    """Publish `vhi.control.pose.index` and the control hand follows it. No handshake.
 
-    The predicted hand has always worked this way — publish MyoGestic_Output and it
-    moves. The control hand required a Declare(control_pose=true) whose only effect was
-    a mode flip, so the same idea needed a ceremony on one stream and not the other.
+    One stream, one DOF, one channel — and the *only* one that exists here, which is the
+    property the test is for: nothing waits for a whole-pose frame, so a producer that
+    drives one finger takes the hand. Presence is "any control-pose stream is delivering",
+    because requiring all nine would mean a single-DOF producer never took it at all.
 
-    Covers both edges: while the outlet is delivering, the hand renders it; once the
-    outlet is gone and `ControlPoseStaleAfterSeconds` has elapsed, the hand must give
-    itself back to its own movements rather than hold the last streamed pose forever —
-    otherwise a producer that dies mid-recording leaves `VHI_Control` emitting a
-    plausible held gesture indistinguishable from an operator deliberately holding it.
+    Covers both edges: while the outlet is delivering, the hand follows it; once the outlet
+    is gone and `ControlPoseStaleAfterSeconds` has elapsed, the hand must give itself back
+    to its own movements rather than hold the last streamed value forever — otherwise a
+    producer that dies mid-recording leaves `VHI_Control` emitting a plausible held gesture
+    indistinguishable from an operator deliberately holding it.
     """
     pylsl = pytest.importorskip("pylsl")
-    info = pylsl.StreamInfo("MyoGestic_ControlPose", "Control", 9, 60, "float32", "presence")
+    info = pylsl.StreamInfo("vhi.control.pose.index", "Control", 1, 60, "float32", "presence")
     outlet = pylsl.StreamOutlet(info)
-    frame = [0.0] * 9
-    frame[2] = 1.0  # index flexion
     sample = None
     try:
         deadline = time.time() + 25.0
         while time.time() < deadline:
-            outlet.push_sample(frame)
+            outlet.push_sample([1.0])
             control_inlet.flush()
             time.sleep(0.5)
             sample, _ = control_inlet.pull_sample(timeout=2.0)
@@ -470,13 +475,13 @@ def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet, mov
         # applied and then overwritten sixty times a second by the stream, which would
         # leave a client believing it holds a hand it does not.
         stub, request_pb2 = v2
-        outlet.push_sample(frame)  # keep the stream inside its stale window for the RPC
+        outlet.push_sample([1.0])  # keep the stream inside its stale window for the RPC
         ack = stub.SetControl(
             request_pb2.SetControlRequest(discrete={"vhi.control.gesture": movements[0]}),
             timeout=10.0,
         )
         assert ack.applied is False, (
-            f"a movement was accepted while MyoGestic_ControlPose was driving the hand: {ack}"
+            f"a movement was accepted while a control-pose stream was driving the hand: {ack}"
         )
         # `applied is False` alone would also pass if the state simply failed to
         # resolve, or if the movement list were empty — neither of which is the
@@ -488,6 +493,11 @@ def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet, mov
     finally:
         del outlet
     assert sample[2] == pytest.approx(1.0, abs=0.05), f"index not driven: {sample}"
+    # The eight DOFs nobody published are at rest, not at some half-delivered value: a
+    # stream that does not exist commands nothing, and nothing was waiting for it.
+    assert all(abs(v) < 0.05 for i, v in enumerate(sample) if i != 2), (
+        f"a DOF with no stream anywhere moved: {sample}"
+    )
 
     # Falling edge. The outlet above is gone, so ControlPoseLive drops once
     # ControlPoseStaleAfterSeconds of silence has passed — read from the C# rather than
@@ -708,33 +718,62 @@ def test_direction_is_the_same_on_every_repeat(v2):
 # now carry one half each, and the two tests below are the whole claim.
 
 
-def test_the_manifest_advertises_the_control_pose_channels_a_client_indexes_by(v2):
+def test_every_capability_names_its_own_stream_at_channel_zero(v2):
     """The manifest is the whole contract now — there is no Declare to double-check it.
 
-    These are the channel numbers a client actually writes `MyoGestic_ControlPose`
-    floats to, read off `GetControlManifest` rather than restated: a client that indexed
-    by a different number would drive the wrong finger. Exactly nine, one per channel:
-    an equality rather than a subset, because a second name for one channel is the thing
-    this vocabulary is not allowed to grow back.
+    One stream per DOF, named by the address, one channel wide. A client reads the name it
+    must publish under straight off `stream_name`, and the channel is 0 because there is
+    nothing else on that stream — so there is no positional layout left to get wrong, and
+    no way to drive the wrong finger by counting from the wrong end.
+
+    Exactly eighteen, one per address, an equality rather than a subset: a second name for
+    one control is the thing this vocabulary is not allowed to grow back, and so is a
+    second control sharing one stream.
     """
     stub, pb2 = v2
     manifest = stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=10.0)
-    control_pose = {
-        c.address: c.channel
+    streamed = {
+        c.address: (c.stream_name, c.channel)
         for c in manifest.capabilities
-        if c.stream_name == "MyoGestic_ControlPose"
+        if c.kind == pb2.CONTINUOUS
     }
-    assert control_pose == {
-        "vhi.control.pose.thumb.flexion": 0,
-        "vhi.control.pose.thumb.abduction": 1,
-        "vhi.control.pose.index": 2,
-        "vhi.control.pose.middle": 3,
-        "vhi.control.pose.ring": 4,
-        "vhi.control.pose.little": 5,
-        "vhi.control.pose.wrist.flexion": 6,
-        "vhi.control.pose.wrist.abduction": 7,
-        "vhi.control.pose.wrist.rotation": 8,
+    assert streamed == {
+        address: (address, 0)
+        for address in (
+            "vhi.prediction.thumb.flexion",
+            "vhi.prediction.thumb.abduction",
+            "vhi.prediction.index",
+            "vhi.prediction.middle",
+            "vhi.prediction.ring",
+            "vhi.prediction.little",
+            "vhi.prediction.wrist.flexion",
+            "vhi.prediction.wrist.abduction",
+            "vhi.prediction.wrist.rotation",
+            "vhi.control.pose.thumb.flexion",
+            "vhi.control.pose.thumb.abduction",
+            "vhi.control.pose.index",
+            "vhi.control.pose.middle",
+            "vhi.control.pose.ring",
+            "vhi.control.pose.little",
+            "vhi.control.pose.wrist.flexion",
+            "vhi.control.pose.wrist.abduction",
+            "vhi.control.pose.wrist.rotation",
+        )
     }
+
+
+def test_a_held_state_still_names_no_stream(v2):
+    """The one capability that is not a stream, and must not read as channel 0 of one.
+
+    Channel 0 is now a *real* channel on eighteen streams, so a discrete control left at
+    proto3's default would read as the thumb's own stream rather than as "not streamed".
+    """
+    stub, pb2 = v2
+    manifest = stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=10.0)
+    gesture = next(c for c in manifest.capabilities if c.address == "vhi.control.gesture")
+    assert gesture.kind == pb2.DISCRETE
+    assert gesture.channel == -1, "a held state travels over gRPC and occupies no channel"
+    assert gesture.stream_name == ""
 
 
 #: A spelling VHI used to accept unadvertised -> the one address that replaces it.
@@ -842,34 +881,39 @@ def test_wrist_rotation_pins_a_choice_not_a_derivation(v2):
     assert abs(observed[0].degrees_at_hi) < 180.0
 
 
-# --- a channel is an address ------------------------------------------------------
+# --- a stream is an address, and two producers can share a hand -------------------
 
 
-def test_a_pose_frame_lands_on_the_channel_the_manifest_names(v2):
-    """Write channel 2 and the index moves. No labels, no routing, no negotiation.
+def test_two_producers_drive_two_dofs_of_one_hand(v2):
+    """The capability that motivated the shape. Two outlets, two DOFs, no contention.
 
-    `vhi.prediction.index` *is* channel 2 — the manifest says so and both ends read it
-    from that one table. This used to be negotiable: a client could compact its frame and
-    label the channels, and the renderer worked out the mapping by asking the stream for
-    its labels. Asking meant liblsl's `info()`, the only thing that starts an
-    `info_receiver` thread, and cancelling one mid-request is what crashed this renderer
-    three times. The compaction saved three floats a frame.
+    `vhi.prediction.index` *is* the index, and `vhi.prediction.middle` *is* the middle —
+    the manifest says so and each is a stream of its own, so neither producer has to know
+    the other exists, agree on a frame layout, or send a value for a DOF it does not
+    drive. Nothing is compacted, labelled or negotiated: the stream name carries the whole
+    routing decision.
+
+    It also pins what "applied on arrival" means at the far end: these two push at
+    different times and neither ever sends a nine-float frame, yet both DOFs hold, and the
+    seven with no producer anywhere stay at rest.
     """
     pylsl = pytest.importorskip("pylsl")
-    # No declaration: the manifest already says vhi.prediction.index is channel 2 and
-    # vhi.prediction.middle is channel 3, and both ends read that from one table — that
-    # is the whole claim this test makes.
 
-    info = pylsl.StreamInfo("MyoGestic_Output", "Control", 9, 60, "float32", "pose-frame")
-    outlet = pylsl.StreamOutlet(info)
-    frame = [0.0] * 9
-    frame[2] = 1.0   # index
-    frame[3] = 1.0   # middle
+    def outlet(address):
+        return pylsl.StreamOutlet(
+            pylsl.StreamInfo(address, "Control", 1, 60, "float32", f"producer:{address}")
+        )
+
+    index = outlet("vhi.prediction.index")
+    middle = outlet("vhi.prediction.middle")
     predict, sample = None, None
     try:
         deadline = time.time() + 25.0
         while time.time() < deadline:
-            outlet.push_sample(frame)
+            # Deliberately out of step: two producers, two rates, no shared clock.
+            index.push_sample([1.0])
+            time.sleep(0.05)
+            middle.push_sample([1.0])
             if predict is None:
                 found = [s for s in pylsl.resolve_streams(wait_time=1.0)
                          if s.name() == "VHI_Predict"]
@@ -879,15 +923,125 @@ def test_a_pose_frame_lands_on_the_channel_the_manifest_names(v2):
             predict.flush()
             time.sleep(0.5)
             sample, _ = predict.pull_sample(timeout=2.0)
-            if sample and sample[2] > 0.9:
+            if sample and sample[2] > 0.9 and sample[3] > 0.9:
                 break
             time.sleep(0.2)
         assert sample, "VHI_Predict never delivered a sample"
     finally:
         if predict is not None:
             predict.close_stream()
-        del outlet
+        del index
+        del middle
 
     assert sample[2] == pytest.approx(1.0, abs=0.05), f"index not driven: {sample}"
     assert sample[3] == pytest.approx(1.0, abs=0.05), f"middle not driven: {sample}"
     assert abs(sample[0]) < 0.05 and abs(sample[1]) < 0.05, f"thumb moved: {sample}"
+
+
+def test_a_dof_holds_while_a_second_one_moves(v2):
+    """A hand whose index has moved and whose thumb has not is a real pose.
+
+    There is no whole-pose frame any more, so a DOF that stops being published is not a
+    gap to be filled — it holds what it was last commanded to, for as long as its own
+    stream keeps the hand claimed. The old shape could not express this: every frame
+    restated all nine values, so "not sending the thumb" and "sending the thumb at rest"
+    were the same wire bytes.
+    """
+    pylsl = pytest.importorskip("pylsl")
+    thumb = pylsl.StreamOutlet(
+        pylsl.StreamInfo("vhi.prediction.thumb.flexion", "Control", 1, 60, "float32", "held")
+    )
+    index = pylsl.StreamOutlet(
+        pylsl.StreamInfo("vhi.prediction.index", "Control", 1, 60, "float32", "moving")
+    )
+    predict, sample = None, None
+    try:
+        deadline = time.time() + 25.0
+        while time.time() < deadline:
+            thumb.push_sample([1.0])
+            index.push_sample([1.0])
+            if predict is None:
+                found = [s for s in pylsl.resolve_streams(wait_time=1.0)
+                         if s.name() == "VHI_Predict"]
+                if found:
+                    predict = pylsl.StreamInlet(found[0])
+                continue
+            predict.flush()
+            time.sleep(0.5)
+            sample, _ = predict.pull_sample(timeout=2.0)
+            if sample and sample[0] > 0.9 and sample[2] > 0.9:
+                break
+        assert sample, "VHI_Predict never delivered a sample"
+
+        # The thumb goes quiet; only the index keeps sending, and it moves. Well inside
+        # PredictionStaleAfterSeconds, so the thumb's inlet is still held — what is being
+        # asserted is that a silent DOF holds, not what a dropped one does.
+        for _ in range(20):
+            index.push_sample([0.0])
+            time.sleep(0.05)
+        predict.flush()
+        time.sleep(0.5)
+        sample, _ = predict.pull_sample(timeout=5.0)
+        assert sample is not None
+    finally:
+        if predict is not None:
+            predict.close_stream()
+        del thumb
+        del index
+
+    assert sample[2] == pytest.approx(0.0, abs=0.05), f"index did not follow: {sample}"
+    assert sample[0] == pytest.approx(1.0, abs=0.05), (
+        f"the thumb dropped to {sample[0]:+.2f} when it stopped being published — a DOF "
+        "nobody commanded must hold, not be filled in from a frame that no longer exists"
+    )
+
+
+def test_a_prediction_dof_recovers_when_its_producer_is_replaced(v2):
+    """Staleness drops one inlet, and only that one, so a new producer is seen.
+
+    The clock is the whole signal: `LSLWrapper.PullSample` swallows every exception, so a
+    producer that exited and one that is idle look identical here. Each per-DOF inlet gets
+    its own clock — a pass that opens somebody else's inlet must not extend this one's
+    grace, or a dead DOF would be pinned to a corpse for the life of the process.
+    """
+    pylsl = pytest.importorskip("pylsl")
+    stale_after_s = float(
+        re.search(
+            r"PredictionStaleAfterSeconds = ([\d.]+)f",
+            (SOURCE / "LSLCommunicationController.cs").read_text(),
+        ).group(1)
+    )
+
+    def drive(value, seconds):
+        out = pylsl.StreamOutlet(
+            pylsl.StreamInfo("vhi.prediction.ring", "Control", 1, 60, "float32", f"p{value}")
+        )
+        try:
+            deadline = time.time() + seconds
+            while time.time() < deadline:
+                out.push_sample([value])
+                time.sleep(0.05)
+        finally:
+            del out
+
+    drive(1.0, 12.0)
+    # Gone. Past the stale window, the inlet is dropped rather than held open on a corpse.
+    time.sleep(stale_after_s + 2.0)
+    drive(-1.0, 15.0)
+
+    found = [s for s in pylsl.resolve_streams(wait_time=5.0) if s.name() == "VHI_Predict"]
+    assert found, "VHI_Predict did not resolve"
+    predict = pylsl.StreamInlet(found[0])
+    try:
+        predict.flush()
+        time.sleep(0.5)
+        sample, _ = predict.pull_sample(timeout=5.0)
+    finally:
+        predict.close_stream()
+    assert sample is not None
+    assert sample[4] == pytest.approx(-1.0, abs=0.05), (
+        f"ring reads {sample[4]:+.2f} — the second producer was never seen, so the first "
+        "one's inlet was still held after it went away"
+    )
+
+

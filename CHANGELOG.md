@@ -73,6 +73,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: one LSL stream per DOF, replacing the two nine-channel pose inlets.**
+  `MyoGestic_Output` and `MyoGestic_ControlPose` are gone. Every control VHI exports is
+  now its own stream, named by its own address and **one channel wide**:
+  `vhi.prediction.index`, `vhi.prediction.thumb.flexion`, `vhi.control.pose.index`, and
+  their siblings — the same names `GetControlManifest` has always published. Each
+  capability reports `stream_name` = its own address and `channel` = `0`, so a client
+  reads the name it must publish under straight off the manifest and there is no
+  positional layout left to get wrong.
+
+  **There is no whole-pose frame any more and nothing waits for one.** A sample is
+  applied to the hand the moment it arrives, and the DOFs that did not deliver hold what
+  they were last commanded to. The DOFs are independently actuated, may come from
+  different producers and may update at different rates — nothing links them, so a hand
+  whose index has moved and whose thumb has not is a real pose rather than a
+  half-delivered one. Two producers, one publishing the thumb and one the index, drive
+  the same hand without contending or agreeing on anything, which is the capability this
+  shape exists for.
+
+  `ControlPoseLive` now means **any** control-pose stream is delivering. Requiring all
+  nine would mean a producer that drives one DOF never took the control hand at all,
+  which is the case worth supporting; the falling edge is the *last* stream going quiet,
+  which is when the hand is genuinely unclaimed and `StopToRest` is right. Each inlet
+  keeps its own staleness clock and is dropped on its own, so a producer replaced on one
+  DOF is picked up without disturbing the eight beside it.
+
+  The two read-back outlets are **unchanged**: `VHI_Control` and `VHI_Predict` still
+  publish each hand's whole nine-channel pose at 60 Hz. A recording wants one row per
+  instant.
+
+  Resolution is one liblsl resolve per retry interval however many inlets are missing —
+  the pass asks once and matches every wanted name against that one answer. Never more
+  than one resolve in flight, and the count cannot grow with the number of DOFs.
+
 - **`VHI_Control` publishes standard values.** A held `Fist` is
   `[1, -1, 1, 1, 1, 1, …]`: five flexions and an *ad*ducted thumb. It previously published
   the rig's own units, opposite on five channels. The outlets advertise

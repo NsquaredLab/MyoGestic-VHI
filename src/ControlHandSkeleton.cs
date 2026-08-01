@@ -8,15 +8,15 @@ namespace Vhi;
 /// <summary>
 /// The "control" hand - the ground-truth / cued hand on the left of the scene.
 ///
-/// Follows the presence of its <c>MyoGestic_ControlPose</c> LSL stream, exactly as the
-/// predicted hand follows <c>MyoGestic_Output</c>: whichever is live drives the hand,
+/// Follows the presence of its <c>vhi.control.pose.*</c> LSL streams, exactly as the
+/// predicted hand follows <c>vhi.prediction.*</c>: whichever is live drives the hand,
 /// checked fresh every frame rather than switched by a handshake.
 /// <list type="bullet">
-///   <item><description><b>Stream live</b>: ignores its own movement state machine and
-///     renders the streamed 9-DOF pose (consumed via
-///     <see cref="LSLCommunicationController"/>).</description></item>
-///   <item><description><b>Stream absent</b> (the default at startup, and again once the
-///     stream goes stale): plays a named predefined movement through the state machine
+///   <item><description><b>Some stream live</b>: ignores its own movement state machine and
+///     holds whatever its DOFs were last commanded to, each one applied as it arrived
+///     (pushed in by <see cref="LSLCommunicationController"/>).</description></item>
+///   <item><description><b>Every stream absent</b> (the default at startup, and again once
+///     they go stale): plays a named predefined movement through the state machine
 ///     <i>waiting → closing → holding → opening → resting</i>, and listens for
 ///     ←/→/↑/↓ keyboard input to cycle/start/stop. Movement poses come from the TOML
 ///     loaded via <see cref="MovementConfigLoader"/>; the available set is filtered by
@@ -52,7 +52,6 @@ public partial class ControlHandSkeleton : HandSkeleton
 	[Export] public float RestTime = 1.0f;
 
 	private LSLCommunicationController communicationController;
-	private List<float> currentData = [];
 	// Set on every live frame, read on the next non-live one, so _Process can tell a
 	// falling edge (the stream just went stale) from an already-stale stream.
 	private bool wasControlPoseLive = false;
@@ -104,13 +103,9 @@ public partial class ControlHandSkeleton : HandSkeleton
 		// Declare had a side effect.
 		if (communicationController != null && communicationController.ControlPoseLive)
 		{
-			currentData = communicationController.GetReceivedDataControl();
-			// Standard values mean +1 is the direction the channel's name denotes. They stay
-			// standard from here: MoveBonesFromStream multiplies by StandardPose.AtPlusOne,
-			// so only the domain clamp is owed.
-			StandardPose.Clamp(currentData);
-			if (currentData.Count >= 9 && skeleton != null)
-				MoveBonesFromStream();
+			// Nothing to render here: each DOF was put on the rig by `SetStandardValue` the
+			// moment its sample arrived, and holds until that DOF is commanded again. What
+			// this branch does is *not* run the state machine, so the two never fight.
 			wasControlPoseLive = true;
 			return;
 		}
@@ -140,41 +135,6 @@ public partial class ControlHandSkeleton : HandSkeleton
 	{
 		if (communicationController != null && skeleton != null && boneMap.Count > 0)
 			communicationController.SendControlData(ReadStandardPose());
-	}
-
-	private void MoveBonesFromStream()
-	{
-		if (skeleton == null || boneMap.Count == 0)
-			return;
-
-
-		// Wrist (indices 6, 7, 8: flexion, abduction, rotation)
-		SetBoneRotation(0, currentData[6] * StandardPose.AtPlusOne[0][0], currentData[8] * StandardPose.AtPlusOne[0][1], currentData[7] * StandardPose.AtPlusOne[0][2]);
-
-		// Thumb (uses indices 0 and 1: flexion and abduction)
-		SetBoneRotation(1, currentData[0] * StandardPose.AtPlusOne[1][0], 0, currentData[1] * StandardPose.AtPlusOne[1][2]);
-		SetBoneRotation(2, currentData[0] * StandardPose.AtPlusOne[2][0], 0, currentData[1] * StandardPose.AtPlusOne[2][2]);
-		SetBoneRotation(3, currentData[0] * StandardPose.AtPlusOne[3][0], 0, currentData[1] * StandardPose.AtPlusOne[3][2]);
-
-		// Index (uses index 2)
-		SetBoneRotation(4, currentData[2] * StandardPose.AtPlusOne[4][0], 0, 0);
-		SetBoneRotation(5, currentData[2] * StandardPose.AtPlusOne[5][0], 0, 0);
-		SetBoneRotation(6, currentData[2] * StandardPose.AtPlusOne[6][0], 0, 0);
-
-		// Middle (uses index 3)
-		SetBoneRotation(7, currentData[3] * StandardPose.AtPlusOne[7][0], 0, 0);
-		SetBoneRotation(8, currentData[3] * StandardPose.AtPlusOne[8][0], 0, 0);
-		SetBoneRotation(9, currentData[3] * StandardPose.AtPlusOne[9][0], 0, 0);
-
-		// Ring (uses index 4)
-		SetBoneRotation(10, currentData[4] * StandardPose.AtPlusOne[10][0], 0, 0);
-		SetBoneRotation(11, currentData[4] * StandardPose.AtPlusOne[11][0], 0, 0);
-		SetBoneRotation(12, currentData[4] * StandardPose.AtPlusOne[12][0], 0, 0);
-
-		// Pinky (uses index 5)
-		SetBoneRotation(13, currentData[5] * StandardPose.AtPlusOne[13][0], 0, 0);
-		SetBoneRotation(14, currentData[5] * StandardPose.AtPlusOne[14][0], 0, 0);
-		SetBoneRotation(15, currentData[5] * StandardPose.AtPlusOne[15][0], 0, 0);
 	}
 
 	// ========== MOVEMENT CONTROL SYSTEM ==========
@@ -295,7 +255,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 
 		int n = availableMovements.Length;
 		currentMovementIndex = ((currentMovementIndex + delta) % n + n) % n;
-		ResetBones();
+		RestStandardPose();
 		animationState = "waiting";
 		stateTimer = 0;
 		GD.Print($"Movement selected: {availableMovements[currentMovementIndex]}");
@@ -339,7 +299,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 		if (idx >= 0)
 		{
 			currentMovementIndex = idx;
-			ResetBones();
+			RestStandardPose();
 			if (cycle)
 			{
 				// Play the open/close movement cycle — used when recording
@@ -373,7 +333,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 	{
 		animationState = "waiting";
 		stateTimer = 0;
-		ResetBones();
+		RestStandardPose();
 		GD.Print("▲ STOP movement");
 	}
 
@@ -423,7 +383,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 		{
 			animationState = "waiting";
 			stateTimer = 0;
-			ResetBones();
+			RestStandardPose();
 			GD.Print("▲ UNFREEZE movement");
 		}
 	}
@@ -689,7 +649,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 
 			// Reset animation state to prevent issues
 			animationState = "waiting";
-			ResetBones();
+			RestStandardPose();
 		}
 		else
 		{
@@ -725,7 +685,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 		availableMovements = FilterMovementsByMode(loadedPoses);
 		currentMovementIndex = 0;
 		animationState = "waiting";
-		ResetBones();
+		RestStandardPose();
 
 		GD.Print($"Loaded config: {absolutePath} ({availableMovements.Length} movements)");
 

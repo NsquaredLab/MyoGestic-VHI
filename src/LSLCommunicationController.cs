@@ -13,19 +13,18 @@ namespace Vhi;
 /// All Lab Streaming Layer I/O for VHI - the only node that touches LSL directly
 /// (and even then only through <see cref="LSLWrapper"/>, never SharpLSL).
 ///
-/// Resolves two inlets and publishes two outlets:
-/// <list type="bullet">
-///   <item><description><b>Inlet</b> <c>MyoGestic_Output</c> - 9 × <c>float32</c>,
-///     drives the predicted hand. Typically ~32 Hz.</description></item>
-///   <item><description><b>Inlet</b> <c>MyoGestic_ControlPose</c> (optional) - 9 ×
-///     <c>float32</c>, drives the control hand while <see cref="ControlPoseLive"/> is
-///     true; the control hand falls back to its own movements once it goes
-///     stale.</description></item>
-///   <item><description><b>Outlet</b> <c>VHI_Control</c> - the control hand's current
-///     pose, 60 Hz. MyoGestic consumes this as a training-target source.</description></item>
-///   <item><description><b>Outlet</b> <c>VHI_Predict</c> - the predicted hand's current
-///     pose, 60 Hz. For monitoring / recording alongside EMG.</description></item>
-/// </list>
+/// <para><b>One stream per DOF, in.</b> Every control VHI exports is its own LSL stream,
+/// named by its own address and one channel wide: <c>vhi.prediction.index</c>,
+/// <c>vhi.control.pose.thumb.flexion</c>, and their siblings — the same names
+/// <c>GetControlManifest</c> publishes. A sample is applied to the hand the moment it
+/// arrives, and the DOFs that did not deliver hold what they were last commanded to.
+/// There is no whole-pose frame and nothing waits for one: the DOFs are independently
+/// actuated, may come from different producers and may update at different rates, so a
+/// hand whose index has moved and whose thumb has not is a real pose.</para>
+///
+/// <para><b>Two nine-channel outlets, out</b>, unchanged: <c>VHI_Control</c> and
+/// <c>VHI_Predict</c> publish each hand's whole pose at 60 Hz. A read-back is a
+/// recording, and a recording wants one row per instant.</para>
 ///
 /// Stream resolution blocks ~1 s so it runs on a background <c>Task.Run</c> thread;
 /// results and log lines are marshalled back to Godot's main thread via
@@ -35,14 +34,30 @@ namespace Vhi;
 /// </summary>
 public partial class LSLCommunicationController : Node
 {
-	/// <summary>Name of the LSL inlet that drives the predicted hand.
-	/// Resolved by name only.</summary>
-	[Export] public string PredictionStreamName = "MyoGestic_Output";
+	/// <summary>One DOF's inlet: which stream carries it, and where its value lands.</summary>
+	/// <remarks>
+	/// <see cref="Name"/> is the DOF's address and the LSL stream's name — they are the same
+	/// string, which is the point of the design. <see cref="Channel"/> is where the value goes
+	/// in the hand's nine-slot pose and is nobody's business but this renderer's; what a
+	/// producer writes is channel 0 of a stream of its own.
+	/// </remarks>
+	private sealed class DofInlet
+	{
+		public string Name;
+		public HandSkeleton Hand;
+		public bool Control;
+		public int Channel;
+		public object Inlet;
+		public float[] Buffer = new float[1];
 
-	/// <summary>Name of the optional LSL inlet that drives the control hand while
-	/// <see cref="ControlPoseLive"/> is true. Resolved by name only;
-	/// missing is fine - the inlet is simply skipped.</summary>
-	[Export] public string ControlPoseStreamName = "MyoGestic_ControlPose";
+		/// <summary>When this inlet last delivered. <c>MinValue</c> until it does.</summary>
+		public DateTime LastSample = DateTime.MinValue;
+
+		/// <summary>When this inlet was opened — the grace period a fresh one is owed.</summary>
+		public DateTime LastAttempt = DateTime.MinValue;
+	}
+
+	private readonly List<DofInlet> dofs = [];
 
 	/// <summary>What <c>+1</c> means on both pose outlets, published in their metadata.</summary>
 	/// <remarks>
@@ -61,34 +76,13 @@ public partial class LSLCommunicationController : Node
 	/// pose at 60 Hz. For monitoring / recording alongside the EMG.</summary>
 	[Export] public string PredictedOutletName = "VHI_Predict";
 
-	/// <summary>Channel count for the 9-DOF hand pose. Sizes both inlet
-	/// sample buffers and the outlets' advertised channel count. VHI does
-	/// <i>not</i> reject mismatched inlet streams - it just logs the count
-	/// on connect and reads into the fixed-size buffer.</summary>
+	/// <summary>Channel count of the 9-DOF hand pose the two outlets publish.</summary>
 	[Export] public int ExpectedChannels = 9;
 
-	private object predictionInlet;   // StreamInlet (MyoGestic_Output) -> predicted hand
-	private object controlPoseInlet;  // StreamInlet (MyoGestic_ControlPose) -> control hand, while live
 	private object controlOutlet;     // StreamOutlet
 	private object predictedOutlet;   // StreamOutlet
 
-	private List<float> receivedDataControl = [];
-	private List<float> receivedDataPredicted = [];
-	private float[] sampleBuffer;
-	private float[] controlPoseBuffer;
-
-	/// <summary>When the prediction inlet last delivered a sample.</summary>
-	/// <remarks>
-	/// The only reliable way this renderer learns a producer is gone. With liblsl's recovery
-	/// on, the loss is hidden outright. With it off liblsl <i>does</i> raise on the next pull
-	/// — but <see cref="LSLWrapper.PullSample"/> catches every exception, logs it and returns
-	/// <c>0.0</c>, so what reaches the drain loop below is indistinguishable from "no samples
-	/// this frame". Hence a clock rather than error handling: it is the wrapper, not liblsl,
-	/// that decides what this file gets to see, and it never lets an error through.
-	/// </remarks>
-	private DateTime lastPredictionSample = DateTime.Now;
-
-	/// <summary>Silence after which the prediction inlet is assumed dead and dropped.</summary>
+	/// <summary>Silence after which a prediction DOF's inlet is assumed dead and dropped.</summary>
 	/// <remarks>
 	/// Generous on purpose. A `ControlBus` outlet sends at its own rate whether or not the
 	/// values changed, so real silence means the producer went away — but a script that
@@ -99,38 +93,41 @@ public partial class LSLCommunicationController : Node
 	/// </remarks>
 	[Export] public float PredictionStaleAfterSeconds = 5.0f;
 
-	/// <summary>Silence after which the control-pose inlet is assumed gone.</summary>
+	/// <summary>Silence after which a control-pose DOF's inlet is assumed gone.</summary>
 	/// <remarks>
-	/// Presence is the only thing that hands the control hand to this stream, so "the
+	/// Presence is the only thing that hands the control hand to these streams, so "the
 	/// producer stopped" has to be observable here rather than inferred from an error —
-	/// see <see cref="lastPredictionSample"/> for why no error ever arrives.
-	/// <para>It settles two things, not one: <see cref="ControlPoseLive"/> goes false, and
-	/// the inlet itself is dropped so the by-name resolve can find whoever publishes that
-	/// name next. Without the second, the first producer to exit cleanly pinned this inlet
-	/// to a corpse for the life of the process.</para>
+	/// <see cref="LSLWrapper.PullSample"/> catches every exception and returns <c>0.0</c>, so
+	/// no error ever reaches this file and a lost producer is indistinguishable from an idle
+	/// one. The clock is the whole signal.
+	/// <para>It settles two things, not one: the DOF stops counting toward
+	/// <see cref="ControlPoseLive"/>, and its inlet is dropped so the by-name resolve can find
+	/// whoever publishes that name next. Without the second, the first producer to exit
+	/// cleanly pinned that inlet to a corpse for the life of the process.</para>
 	/// </remarks>
 	[Export] public float ControlPoseStaleAfterSeconds = 5.0f;
 
-	/// <summary>Whether the control-pose stream is delivering right now.</summary>
+	/// <summary>Whether <i>any</i> control-pose stream is delivering right now.</summary>
 	/// <remarks>
-	/// `ControlHandSkeleton` reads this to decide whether to render the stream or run its
-	/// movement state machine. It is the whole of the old `Declare(control_pose=true)`
-	/// handshake: publish the stream and the hand follows it, exactly as the predicted
-	/// hand has always followed `MyoGestic_Output`.
+	/// `ControlHandSkeleton` reads this to decide whether to render what it was commanded or
+	/// run its movement state machine. It is the whole of the old `Declare(control_pose=true)`
+	/// handshake: publish a stream and the hand follows it.
+	/// <para><b>Any, not all.</b> There are nine control-pose streams now and a producer is
+	/// under no obligation to publish more than one — driving a single DOF from a single
+	/// producer is the capability this shape exists for, so requiring all nine would mean such
+	/// a producer never took the hand at all. One live DOF is a client driving this hand, and
+	/// the eight that are silent are DOFs nobody is driving, which is not the same as nobody
+	/// driving the hand. The falling edge is therefore the <i>last</i> stream going quiet,
+	/// which is when the hand is genuinely unclaimed and `StopToRest` is right.</para>
 	/// </remarks>
 	public bool ControlPoseLive { get; private set; }
 
-	// MinValue, not Now: Now would make ControlPoseLive read true for the first frames after
-	// connect, before any sample has actually been pulled — the inlet existing is not the
-	// same as the stream delivering. (DateTime.Now - DateTime.MinValue).TotalSeconds is ~2000
-	// years' worth of seconds, safely inside TimeSpan's range and always >= the stale timeout.
-	private DateTime lastControlPoseSample = DateTime.MinValue;
-
+	/// <summary>When the last resolve pass started. One pass, whatever is missing.</summary>
 	private DateTime lastConnectionAttempt;
-	private DateTime lastControlPoseAttempt;
 	private float connectionRetryInterval = 5.0f;
-	private bool isConnecting = false;             // prediction inlet connect in progress
-	private bool isConnectingControlPose = false;  // control-pose inlet connect in progress
+
+	/// <summary>A resolve pass is running. There is never more than one — see `_Process`.</summary>
+	private bool isConnecting = false;
 	private volatile bool isShuttingDown = false;  // Signal background tasks to stop
 	private readonly object connectionLock = new();  // Lock for thread-safe connection status
 
@@ -142,17 +139,26 @@ public partial class LSLCommunicationController : Node
 		GD.Print("  Initializing LSL wrapper...");
 		LSLWrapper.Initialize();
 
-		// Sized for an unlabelled producer, which sends this renderer's full pose layout.
-		// A labelled one may be narrower, and each buffer is resized to its stream when the
-		// inlet resolves — liblsl requires the buffer to match the stream's channel count.
-		sampleBuffer = new float[ExpectedChannels];
-		controlPoseBuffer = new float[ExpectedChannels];
-		GD.Print("  Sample buffers initialized");
+		// One inlet per DOF, from the one table that knows which controls this build
+		// exports. The hands are looked up here rather than looking this node up from
+		// there: a sample is applied where it lands, and only this node knows when one
+		// landed.
+		var controlHand = GetNode<ControlHandSkeleton>("/root/Main/ControlHand");
+		var predictedHand = GetNode<PredictedHandSkeleton>("/root/Main/PredictedHand");
+		foreach ((string address, bool control, int channel) in VhiControlService.PoseStreams())
+		{
+			dofs.Add(new DofInlet
+			{
+				Name = address,
+				Hand = control ? controlHand : predictedHand,
+				Control = control,
+				Channel = channel,
+			});
+		}
+		GD.Print($"  {dofs.Count} per-DOF pose streams to resolve");
 
-		// Initialize timestamps
-		lastConnectionAttempt = DateTime.Now.AddSeconds(-connectionRetryInterval); // Allow immediate first attempt
-		lastControlPoseAttempt = lastConnectionAttempt;
-		GD.Print("  Timestamps initialized");
+		// Allow an immediate first attempt.
+		lastConnectionAttempt = DateTime.Now.AddSeconds(-connectionRetryInterval);
 
 		// Create LSL outlets (optional, can be disabled)
 		GD.Print("  Creating LSL outlets...");
@@ -163,9 +169,18 @@ public partial class LSLCommunicationController : Node
 
 	public override void _Process(double delta)
 	{
-		// --- Connect: prediction inlet (MyoGestic_Output -> predicted hand) ---
-		if (predictionInlet == null && !isConnecting && !isShuttingDown &&
-			(DateTime.Now - lastConnectionAttempt).TotalSeconds >= connectionRetryInterval)
+		// --- Connect: one resolve pass, for every DOF that has no inlet ---------------
+		//
+		// **At most one resolve is ever in flight.** `isConnecting` is a single flag over
+		// the whole set, not one per DOF, and the pass itself resolves *once* and matches
+		// every missing name against that one answer — so eighteen missing streams cost
+		// one resolve, not eighteen. That is not an optimisation, it is the safety
+		// property: concurrent liblsl resolves kernel-panicked a machine here (configd
+		// watchdog, 2026-07-31), and a design with one inlet per DOF is exactly the shape
+		// that invites a resolve per DOF. There is no code path that starts a second.
+		if (!isConnecting && !isShuttingDown
+			&& (DateTime.Now - lastConnectionAttempt).TotalSeconds >= connectionRetryInterval
+			&& dofs.Exists(d => d.Inlet == null))
 		{
 			lock (connectionLock)
 			{
@@ -173,102 +188,68 @@ public partial class LSLCommunicationController : Node
 				{
 					isConnecting = true;
 					lastConnectionAttempt = DateTime.Now;
-					Task.Run(ConnectToInletAsync);
+					Task.Run(ResolveMissingInletsAsync);
 				}
 			}
 		}
 
-		// --- Connect: control-pose inlet (MyoGestic_ControlPose -> control hand) ---
-		if (controlPoseInlet == null && !isConnectingControlPose && !isShuttingDown &&
-			(DateTime.Now - lastControlPoseAttempt).TotalSeconds >= connectionRetryInterval)
+		bool controlLive = false;
+		DateTime now = DateTime.Now;
+		foreach (DofInlet dof in dofs)
 		{
-			lock (connectionLock)
+			float staleAfter = dof.Control ? ControlPoseStaleAfterSeconds : PredictionStaleAfterSeconds;
+
+			// --- Pull, and apply on arrival ------------------------------------------
+			//
+			// Latest sample wins within a frame; the value goes straight onto the hand.
+			// Channel 0 because the stream is this DOF and nothing else — a wider producer
+			// is read at 0 and its extra channels ignored, which is the same tolerance the
+			// buffer sizing gives a narrower manifest.
+			if (dof.Inlet != null)
 			{
-				if (!isConnectingControlPose)
+				int got = 0;
+				while (LSLWrapper.PullSample(dof.Inlet, dof.Buffer, 0.0) > 0)
+					got++;
+				if (got > 0)
 				{
-					isConnectingControlPose = true;
-					lastControlPoseAttempt = DateTime.Now;
-					Task.Run(ConnectControlPoseInletAsync);
+					dof.LastSample = now;
+					dof.Hand.SetStandardValue(dof.Channel, dof.Buffer[0]);
 				}
 			}
-		}
 
-		// --- Pull: prediction inlet -> receivedDataPredicted (latest sample only) ---
-		if (predictionInlet != null)
-		{
-			int samplesThisFrame = 0;
-			while (LSLWrapper.PullSample(predictionInlet, sampleBuffer, 0.0) > 0)
+			// --- Drop an inlet that has gone quiet, so it can be re-resolved -----------
+			//
+			// The clock, not an error: `LSLWrapper.PullSample` returns 0.0 on any failure,
+			// so a producer that died and one that is merely idle arrive here looking
+			// identical. Measured before this existed: a producer exiting cleanly left the
+			// inlet held forever and the *next* producer was invisible until VHI restarted,
+			// because the field never read null and the resolve above never ran again.
+			//
+			// `LastSample` is MinValue until this inlet actually delivers, so judging it on
+			// that alone would drop every fresh inlet on its first frame. `LastAttempt` is
+			// when this inlet was opened — per DOF, so a pass that opens somebody else's
+			// inlet cannot extend this one's grace, which a single shared timestamp would.
+			if (dof.Inlet != null && !isShuttingDown)
 			{
-				receivedDataPredicted = [.. sampleBuffer];
-				samplesThisFrame++;
+				DateTime quietSince = dof.LastSample > dof.LastAttempt ? dof.LastSample : dof.LastAttempt;
+				if ((now - quietSince).TotalSeconds >= staleAfter)
+				{
+					GD.Print(
+						$"⏱️ No {dof.Name} samples for {staleAfter:F0}s "
+						+ "— dropping the inlet and looking again.");
+					DropInlet(dof);
+				}
 			}
 
-			if (samplesThisFrame > 0)
-				lastPredictionSample = DateTime.Now;
-		}
-
-		// --- Drop a prediction inlet that has gone quiet, so it can be re-resolved ---
-		if (predictionInlet != null && !isShuttingDown
-			&& (DateTime.Now - lastPredictionSample).TotalSeconds >= PredictionStaleAfterSeconds)
-		{
-			GD.Print(
-				$"⏱️ No {PredictionStreamName} samples for "
-				+ $"{PredictionStaleAfterSeconds:F0}s — dropping the inlet and looking again.");
-			DropInlet(ref predictionInlet);
-			receivedDataPredicted.Clear();
-			// Reset the clock, or the next inlet is judged on this one's silence.
-			lastPredictionSample = DateTime.Now;
-		}
-
-		// --- Pull: control-pose inlet -> receivedDataControl (latest sample only) ---
-		if (controlPoseInlet != null)
-		{
-			int got = 0;
-			while (LSLWrapper.PullSample(controlPoseInlet, controlPoseBuffer, 0.0) > 0)
+			// Presence, evaluated every frame and per DOF: holding an inlet is not the
+			// stream delivering.
+			if (dof.Control && dof.Inlet != null
+				&& (now - dof.LastSample).TotalSeconds < ControlPoseStaleAfterSeconds)
 			{
-				receivedDataControl = [.. controlPoseBuffer];
-				got++;
-			}
-			if (got > 0)
-				lastControlPoseSample = DateTime.Now;
-		}
-
-		// --- Drop a control-pose inlet that has gone quiet, so it can be re-resolved ---
-		//
-		// Silence is the only signal there is. LSLWrapper.PullSample returns 0.0 on any
-		// failure, so a producer that died and one that is merely idle arrive here looking
-		// identical — which is why both inlets are dropped on a clock rather than on an
-		// error. Measured before this existed: a producer exiting cleanly left the inlet
-		// held forever, ControlPoseLive went false and the hand released correctly, and the
-		// *next* producer was invisible until VHI restarted, because the field never read
-		// null and the resolve above never ran again.
-		//
-		// The clock: lastControlPoseSample is DateTime.MinValue until this inlet actually
-		// delivers something, so judging it on that alone would drop every fresh inlet on
-		// its first frame. lastControlPoseAttempt is when this inlet's connect started —
-		// no attempt begins while an inlet is held, so it stays pinned there — which makes
-		// it exactly the grace period a fresh inlet is owed. ControlPoseLive still reads
-		// lastControlPoseSample alone: holding an inlet is not the stream delivering.
-		if (controlPoseInlet != null && !isShuttingDown)
-		{
-			var quietSince = lastControlPoseSample > lastControlPoseAttempt
-				? lastControlPoseSample : lastControlPoseAttempt;
-			if ((DateTime.Now - quietSince).TotalSeconds >= ControlPoseStaleAfterSeconds)
-			{
-				GD.Print(
-					$"⏱️ No {ControlPoseStreamName} samples for "
-					+ $"{ControlPoseStaleAfterSeconds:F0}s — dropping the inlet and looking again.");
-				DropInlet(ref controlPoseInlet);
-				receivedDataControl.Clear();
+				controlLive = true;
 			}
 		}
-
-		// Presence, evaluated every frame: an inlet that exists but has gone quiet is a
-		// producer that stopped, and the hand should go back to its own movements rather
-		// than hold the last streamed pose forever.
-		ControlPoseLive =
-			controlPoseInlet != null
-			&& (DateTime.Now - lastControlPoseSample).TotalSeconds < ControlPoseStaleAfterSeconds;
+		ControlPoseLive = controlLive;
 	}
 
 	/// <summary>Close an inlet and clear the field, so nothing is left for the finalizer.</summary>
@@ -286,104 +267,108 @@ public partial class LSLCommunicationController : Node
 	/// with it (<c>EXC_BAD_ACCESS at 0x0</c>). A renderer that reconnects on a 5s stale
 	/// timer does this often — 28 times in one session here — and the suite that churns
 	/// outlets made it likely enough to hit.</para>
-	/// <para>The field is cleared under the lock, because <c>ConnectToInletAsync</c> assigns
-	/// it from a task thread. The close happens *outside* the lock: it joins the inlet's
-	/// threads, and holding a lock the connect path wants across a network teardown is how
-	/// this renderer used to stall the app it was talking to.</para>
+	/// <para>The field is cleared under the lock, because the resolve pass assigns it from a
+	/// task thread. The close happens *outside* the lock: it joins the inlet's threads, and
+	/// holding a lock the connect path wants across a network teardown is how this renderer
+	/// used to stall the app it was talking to.</para>
 	/// </remarks>
-	private void DropInlet(ref object inlet)
+	private void DropInlet(DofInlet dof)
 	{
 		object doomed;
 		lock (connectionLock)
 		{
-			doomed = inlet;
-			inlet = null;
+			doomed = dof.Inlet;
+			dof.Inlet = null;
 		}
 		if (doomed != null)
 			LSLWrapper.Dispose(doomed);
 	}
 
-	// Resolves an LSL stream by name on the calling (background) thread.
-	// Returns the created inlet, or null if not found / shutting down / on error.
-	private object TryResolveInlet(
-		string streamName, out int width)
+	/// <summary>
+	/// One resolve, then an inlet for every DOF whose stream that resolve found. Runs on a
+	/// background thread; only ever one at a time.
+	/// </summary>
+	/// <remarks>
+	/// <para>The single resolve is the whole safety argument. `LSLWrapper.ResolveAll` is one
+	/// liblsl network resolve however many names are wanted, so asking it once and matching
+	/// locally means the number of concurrent resolves is one no matter how many DOFs this
+	/// build exports — and cannot grow when it exports more.</para>
+	/// <para><c>recover: false</c> is load-bearing. Recovery matches on <c>source_id</c>, so
+	/// it cannot reattach when the replacement stream has a different channel count: a client
+	/// that rebuilds its outlet with a different set of controls (which the control-map editor
+	/// does on every save) would leave this inlet dead for the life of the process, still
+	/// reporting itself as working. Off, a lost producer simply stops delivering, the
+	/// staleness clock drops the inlet, and this pass picks up whoever publishes that name
+	/// now. That is the recovery this renderer actually wants.</para>
+	/// </remarks>
+	private void ResolveMissingInletsAsync()
 	{
-		width = ExpectedChannels;
 		try
 		{
 			if (isShuttingDown)
-				return null;
+				return;
+
+			var wanted = new List<string>();
+			foreach (DofInlet dof in dofs)
+			{
+				if (dof.Inlet == null)
+					wanted.Add(dof.Name);
+			}
+			if (wanted.Count == 0)
+				return;
 
 			// Background thread — use CallDeferred for GD.Print.
-			CallDeferred(nameof(LogMessage), $"🔍 Searching for LSL stream: {streamName}...");
+			CallDeferred(nameof(LogMessage), $"🔍 Looking for {wanted.Count} pose stream(s)...");
 
-			// Resolve by name only, so we never connect to VHI's own outlets.
-			var streams = LSLWrapper.Resolve("name", streamName, 1.0);
-			if (isShuttingDown || streams == null || streams.Length == 0)
-				return null;
+			object[] found = LSLWrapper.ResolveAll(1.0);
+			if (isShuttingDown || found == null || found.Length == 0)
+				return;
 
-			// recover: false is load-bearing. Recovery matches on source_id, so it cannot
-			// reattach when the replacement stream has a different channel count: a client
-			// that rebuilds its outlet with a different set of controls (which the
-			// control-map editor does on every save) would leave this inlet dead for the
-			// life of the process, still reporting itself as working.
-			//
-			// Off, a lost producer simply stops delivering, the staleness clock drops the
-			// inlet, and the resolve-by-name loop picks up whoever publishes that name now.
-			// That is the recovery this renderer actually wants.
-			int channelCount = LSLWrapper.GetStreamInfoChannelCount(streams[0]);
-			width = channelCount > 0 ? channelCount : ExpectedChannels;
+			var byName = new Dictionary<string, object>();
+			foreach (object info in found)
+				byName.TryAdd(LSLWrapper.GetStreamInfoName(info), info);
 
-			var inlet = LSLWrapper.CreateStreamInlet(streams[0], recover: false);
-			CallDeferred(nameof(LogMessage),
-				$"✅ Connected to LSL inlet: {streamName} ({channelCount} channels)");
-			return inlet;
+			foreach (DofInlet dof in dofs)
+			{
+				if (isShuttingDown)
+					return;
+				if (dof.Inlet != null || !byName.TryGetValue(dof.Name, out object info))
+					continue;
+
+				int channelCount = LSLWrapper.GetStreamInfoChannelCount(info);
+				object inlet = LSLWrapper.CreateStreamInlet(info, recover: false);
+				lock (connectionLock)
+				{
+					if (channelCount > 0 && dof.Buffer.Length != channelCount)
+						dof.Buffer = new float[channelCount];
+					// A new inlet has delivered nothing, and must not inherit the previous
+					// producer's clock: an inlet resolved within the stale window of the old
+					// one's last sample would otherwise read live before a byte arrived, and
+					// on the control hand that refuses SetMovement / SetSpeed / SetFrozen with
+					// no driver present.
+					dof.LastSample = DateTime.MinValue;
+					dof.LastAttempt = DateTime.Now;
+					// Last, and the order matters: `_Process` reads these without the lock,
+					// and `Inlet` is what it gates on. Published after the clock it will be
+					// judged against, never before, or a fresh inlet is dropped on the frame
+					// it was opened for having a `LastAttempt` that had not landed yet.
+					dof.Inlet = inlet;
+				}
+				CallDeferred(nameof(LogMessage),
+					$"✅ Connected to LSL inlet: {dof.Name} ({channelCount} channels)");
+			}
 		}
 		catch (Exception e)
 		{
-			CallDeferred(nameof(LogError), $"❌ Error connecting to LSL inlet '{streamName}': {e.Message}");
-			return null;
+			CallDeferred(nameof(LogError), $"❌ Error resolving LSL inlets: {e.Message}");
 		}
-	}
-
-	private void ConnectToInletAsync()
-	{
-		var inlet = TryResolveInlet(
-			PredictionStreamName, out int width);
-		lock (connectionLock)
+		finally
 		{
-			predictionInlet = inlet;
-			if (inlet != null)
-				lastPredictionSample = DateTime.Now;
-			if (inlet != null && sampleBuffer.Length != width)
-				sampleBuffer = new float[width];
-			isConnecting = false;
+			lock (connectionLock)
+			{
+				isConnecting = false;
+			}
 		}
-		if (inlet == null)
-			CallDeferred(nameof(ClearReceivedDataPredicted));
-	}
-
-	private void ConnectControlPoseInletAsync()
-	{
-		var inlet = TryResolveInlet(
-			ControlPoseStreamName, out int width);
-		lock (connectionLock)
-		{
-			controlPoseInlet = inlet;
-			// A new inlet has delivered nothing. Without this it inherits the previous
-			// producer's clock, so an inlet resolved within ControlPoseStaleAfterSeconds of
-			// the old one's last sample reads ControlPoseLive before a byte arrives, and
-			// SetMovement / SetSpeed / SetFrozen / StartRecordingTrajectory are all refused
-			// with no driver present. One StopToRest flicker when a producer is replaced is
-			// the right trade: something else is taking the hand.
-			if (inlet != null)
-				lastControlPoseSample = DateTime.MinValue;
-			if (inlet != null && controlPoseBuffer.Length != width)
-				controlPoseBuffer = new float[width];
-			isConnectingControlPose = false;
-		}
-		if (inlet == null)
-			CallDeferred(nameof(ClearReceivedDataControl));
 	}
 
 	// Helper methods for thread-safe logging
@@ -395,16 +380,6 @@ public partial class LSLCommunicationController : Node
 	private void LogError(string message)
 	{
 		GD.PrintErr(message);
-	}
-
-	private void ClearReceivedDataControl()
-	{
-		receivedDataControl.Clear();
-	}
-
-	private void ClearReceivedDataPredicted()
-	{
-		receivedDataPredicted.Clear();
 	}
 
 	private void CreateOutlets()
@@ -476,22 +451,8 @@ public partial class LSLCommunicationController : Node
 		GD.Print("    EXITING CreateOutlets()");
 	}
 
-	public List<float> GetReceivedDataControl()
-	{
-		var data = receivedDataControl;
-		receivedDataControl = [];
-		return data;
-	}
-
-	public List<float> GetReceivedDataPredicted()
-	{
-		var data = receivedDataPredicted;
-		receivedDataPredicted = [];
-		return data;
-	}
-
-	/// <summary>Push a 9-DOF pose sample to the <c>VHI_Control</c> outlet
-	/// (when <see cref="EnableOutlets"/> is on). The sample is silently
+	/// <summary>Push a 9-DOF pose sample to the <c>VHI_Control</c> outlet.
+	/// The sample is silently
 	/// dropped if the outlet has not been created or if its length does not
 	/// match <see cref="ExpectedChannels"/>. Called by
 	/// <see cref="ControlHandSkeleton"/> every <c>_PhysicsProcess</c> tick.</summary>
@@ -513,8 +474,8 @@ public partial class LSLCommunicationController : Node
 		}
 	}
 
-	/// <summary>Push a 9-DOF pose sample to the <c>VHI_Predict</c> outlet
-	/// (when <see cref="EnableOutlets"/> is on). Same shape and contract as
+	/// <summary>Push a 9-DOF pose sample to the <c>VHI_Predict</c> outlet.
+	/// Same shape and contract as
 	/// <see cref="SendControlData"/>. Called by
 	/// <see cref="PredictedHandSkeleton"/> every <c>_PhysicsProcess</c> tick.</summary>
 	/// <param name="data">9 float channels - see the LSL stream reference for
@@ -543,8 +504,8 @@ public partial class LSLCommunicationController : Node
 		// Dispose LSL resources — don't wait for network cleanup
 		try
 		{
-			LSLWrapper.Dispose(predictionInlet);
-			LSLWrapper.Dispose(controlPoseInlet);
+			foreach (DofInlet dof in dofs)
+				LSLWrapper.Dispose(dof.Inlet);
 			LSLWrapper.Dispose(controlOutlet);
 			LSLWrapper.Dispose(predictedOutlet);
 		}

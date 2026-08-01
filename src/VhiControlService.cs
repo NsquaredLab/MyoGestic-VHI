@@ -71,12 +71,13 @@ public class VhiControlService : VhiControl.VhiControlBase
 	};
 
 	/// <summary>
-	/// Standard DOF name -> the legacy channel that renders it, the joint whose
+	/// Standard DOF name -> the pose channel that renders it, the joint whose
 	/// rotation reports it back, and the axis it turns.
 	/// </summary>
 	/// <remarks>
-	/// The channel indices are the legacy nine-float layout, kept because the LSL
-	/// transport still carries that many floats. Every channel is claimed here: 0-5
+	/// The channel is where the value lands in the hand's nine-slot pose, and it is
+	/// <i>internal</i>: each of these DOFs arrives on a stream of its own, one channel
+	/// wide, so a producer only ever writes channel 0. Every slot is claimed here: 0-5
 	/// are the five digits and 6-8 are the wrist's three axes. A DOF missing from
 	/// this table is reported as not renderable rather than ignored — an ignored
 	/// joint looks exactly like a joint that is working and holding still.
@@ -105,8 +106,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 	};
 
 	/// <summary>
-	/// Control-hand pose addresses, and the <c>MyoGestic_ControlPose</c> channel each
-	/// occupies.
+	/// Control-hand pose addresses, and the pose channel each occupies.
 	/// </summary>
 	/// <remarks>
 	/// <para>
@@ -121,10 +121,9 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// output into the thing that hand is supposed to be the ground truth *for*.
 	/// </para>
 	/// <para>
-	/// The channels below index <c>MyoGestic_ControlPose</c>, not
-	/// <c>MyoGestic_Output</c> — which is why every capability publishes its
-	/// <c>stream_name</c> alongside its channel. A client must match both; a channel
-	/// number alone is meaningless across two streams.
+	/// The channels below are internal, exactly as <see cref="Renderable"/>'s are: they say
+	/// where a value lands in the control hand's nine-slot pose, not what a client indexes.
+	/// A client writes channel 0 of the stream named for the address.
 	/// </para>
 	/// </remarks>
 	private static readonly Dictionary<string, int> ControlPoseRenderable = new()
@@ -139,6 +138,22 @@ public class VhiControlService : VhiControl.VhiControlBase
 		["vhi.control.pose.wrist.abduction"] = 7,
 		["vhi.control.pose.wrist.rotation"] = 8,
 	};
+
+	/// <summary>
+	/// Every pose stream this build subscribes to: the stream's name, which hand it drives,
+	/// and the pose channel its one value lands on.
+	/// </summary>
+	/// <remarks>
+	/// The name <i>is</i> the address — one stream per DOF, one channel wide — which is why
+	/// the two tables above are the only place either fact is written down.
+	/// <see cref="LSLCommunicationController"/> reads this to know what to resolve, so a
+	/// control added to those tables gets an inlet and a manifest entry together and cannot
+	/// get one without the other.
+	/// </remarks>
+	public static IEnumerable<(string Name, bool Control, int Channel)> PoseStreams() =>
+		Renderable
+			.Select(entry => (entry.Key, false, entry.Value.Channel))
+			.Concat(ControlPoseRenderable.Select(entry => (entry.Key, true, entry.Value)));
 
 	/// <summary>What each address renders, for the manifest's description field.</summary>
 	private static readonly Dictionary<string, string> Describes = new()
@@ -250,7 +265,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 	private static List<ControlCapability> BuildCapabilities()
 	{
 		var caps = new List<ControlCapability>();
-		foreach ((string address, (int channel, int _, Axis _)) in Renderable)
+		foreach ((string address, (int _, int _, Axis _)) in Renderable)
 		{
 			caps.Add(new ControlCapability
 			{
@@ -259,12 +274,16 @@ public class VhiControlService : VhiControl.VhiControlBase
 				Lo = -1.0f,
 				Hi = 1.0f,
 				Rest = 0.0f,
-				StreamName = "MyoGestic_Output",
-				Channel = channel,
+				// The address, and channel 0 of it. A DOF is its own stream: the ones
+				// this renderer exports are independently actuated, may come from
+				// different producers and may update at different rates, so nothing
+				// links them and there is no frame for a client to fill in.
+				StreamName = address,
+				Channel = 0,
 				Description = Describes.TryGetValue(address, out string what) ? what : "",
 			});
 		}
-		foreach ((string address, int channel) in ControlPoseRenderable)
+		foreach (string address in ControlPoseRenderable.Keys)
 		{
 			caps.Add(new ControlCapability
 			{
@@ -273,12 +292,12 @@ public class VhiControlService : VhiControl.VhiControlBase
 				Lo = -1.0f,
 				Hi = 1.0f,
 				Rest = 0.0f,
-				StreamName = "MyoGestic_ControlPose",
-				Channel = channel,
+				StreamName = address,
+				Channel = 0,
 				Description = "control-hand pose, driven by an operator or a setup script "
-					+ "rather than by a model. Nothing to request: the control hand renders "
-					+ "this stream while it is delivering, and gives itself back to its own "
-					+ "movements once the stream goes stale.",
+					+ "rather than by a model. Nothing to request: the control hand follows "
+					+ "these streams while any of them is delivering, and gives itself back "
+					+ "to its own movements once the last one goes stale.",
 			});
 		}
 		return caps;

@@ -50,62 +50,31 @@ public static class LSLWrapper
 	}
 
 	/// <summary>
-	/// Resolve LSL streams by property (e.g., "name" or "type")
-	/// Uses the simpler Resolve(maxCount, waitTime) and filters results
+	/// Every LSL stream visible on the network right now.
 	/// </summary>
-	public static object[] Resolve(string property, string value, double timeout = 1.0)
+	/// <remarks>
+	/// One network resolve, whatever the caller is after. This used to filter by name here,
+	/// which read as "resolve one stream" and was not — liblsl resolved everything either
+	/// way, so a caller wanting several streams paid a full resolve per name. That matters
+	/// now that VHI subscribes to one stream per DOF: concurrent liblsl resolves kernel-
+	/// panicked a machine here, so the caller matches names against one answer instead.
+	/// </remarks>
+	public static object[] ResolveAll(double timeout = 1.0)
 	{
 		if (!initialized) Initialize();
 
 		try
 		{
-			// Call LSL.Resolve(int maxCount, double waitTime) - simpler method that works
+			// LSL.Resolve(int maxCount, double waitTime) - the simple method that works.
 			var resolveMethod = lslType.GetMethod("Resolve", [typeof(int), typeof(double)]);
-
 			if (resolveMethod == null)
 			{
 				GD.PrintErr("❌ Resolve method not found!");
 				return [];
 			}
 
-			// Get all available streams
 			object result = resolveMethod.Invoke(null, [1024, timeout]);
-
-			if (result == null)
-				return [];
-
-			object[] allStreams = (object[])result;
-
-			// Filter by property and value
-			var filtered = new System.Collections.Generic.List<object>();
-			foreach (var stream in allStreams)
-			{
-				try
-				{
-					string streamValue = null;
-					if (property.ToLower() == "name")
-					{
-						streamValue = GetStreamInfoName(stream);
-					}
-					else if (property.ToLower() == "type")
-					{
-						var typeProperty = streamInfoType.GetProperty("Type");
-						streamValue = (string)typeProperty.GetValue(stream);
-					}
-
-					if (streamValue != null && streamValue == value)
-					{
-						filtered.Add(stream);
-					}
-				}
-				catch
-				{
-					// Skip streams we can't read
-					continue;
-				}
-			}
-
-			return [.. filtered];
+			return result == null ? [] : (object[])result;
 		}
 		catch (TargetInvocationException e)
 		{
@@ -306,7 +275,6 @@ public static class LSLWrapper
 		}
 	}
 
-	/// <summary>
 	/// <summary>
 	/// Get StreamInfo name
 	/// </summary>
