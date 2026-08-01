@@ -531,7 +531,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 				// control pose is what puts this hand into Stream mode, so re-declaring
 				// without one is how a client gets back to commanding discrete DOFs. Without
 				// it that switch would be a one-way door for the life of the process.
-				controlHand.ReleaseControlPoseStream();
+				// controlHand.ReleaseControlPoseStream(); // deleted in Task 2 (VHI); Task 3 removes this handler
 			}
 			else
 			{
@@ -555,7 +555,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 				}
 				else
 				{
-					controlHand.AcceptControlPoseStream();
+					// controlHand.AcceptControlPoseStream(); // deleted in Task 2 (VHI); Task 3 removes this handler
 					reply.ControlPoseStreamName = "MyoGestic_ControlPose";
 					reply.ControlPoseChannelOrder.AddRange(ControlPoseOrder);
 					// Echo what was actually granted, not just what was asked for.

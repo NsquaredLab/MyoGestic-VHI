@@ -96,30 +96,25 @@ public partial class ControlHandSkeleton : HandSkeleton
 
 	public override void _Process(double delta)
 	{
-		switch (DriverMode)
+		// Presence decides, not a handshake. A control-pose stream that is delivering is a
+		// client driving this hand; one that is not is a client that stopped, or was never
+		// there. The predicted hand has always worked this way — it renders whatever arrives
+		// on MyoGestic_Output — and the two hands differing on that was the whole reason
+		// Declare had a side effect.
+		if (communicationController != null && communicationController.ControlPoseLive)
 		{
-			case ControlHandDriverMode.Movement:
-				// Predefined-movement state machine + local keyboard.
-				HandleMovementInput();
-				UpdateMovementAnimation((float)delta);
-				break;
-
-			case ControlHandDriverMode.Stream:
-				// Continuous pose streamed in over the MyoGestic_ControlPose inlet.
-				if (communicationController != null)
-				{
-					currentData = communicationController.GetReceivedDataControl();
-					// Standard values mean +1 is the direction the channel's name denotes.
-					// They stay standard from here: MoveBonesFromStream multiplies by
-					// StandardPose.AtPlusOne, so only the domain clamp is owed.
-					// Unconditional — there is one encoding, so every control-pose producer
-					// sends standard values.
-					StandardPose.Clamp(currentData);
-					if (currentData.Count >= 9 && skeleton != null)
-						MoveBonesFromStream();
-				}
-				break;
+			currentData = communicationController.GetReceivedDataControl();
+			// Standard values mean +1 is the direction the channel's name denotes. They stay
+			// standard from here: MoveBonesFromStream multiplies by StandardPose.AtPlusOne,
+			// so only the domain clamp is owed.
+			StandardPose.Clamp(currentData);
+			if (currentData.Count >= 9 && skeleton != null)
+				MoveBonesFromStream();
+			return;
 		}
+
+		HandleMovementInput();
+		UpdateMovementAnimation((float)delta);
 	}
 
 	public override void _PhysicsProcess(double delta)
@@ -217,20 +212,6 @@ public partial class ControlHandSkeleton : HandSkeleton
 	/// held there would always read false. The hand is the thing that is running a
 	/// trajectory, so the hand is where the fact belongs.
 	/// </remarks>
-	/// <summary>
-	/// Accept a control-pose stream, switching to
-	/// <see cref="ControlHandDriverMode.Stream"/> so the inlet is actually consumed.
-	/// </summary>
-	/// <remarks>
-	/// Declaring the stream is what asks for the mode: an inlet nobody reads is
-	/// indistinguishable from a stream that is not arriving, and v1's separate
-	/// SetControlMode RPC is gone. Idempotent.
-	/// </remarks>
-	public void AcceptControlPoseStream()
-	{
-		SetDriverMode(ControlHandDriverMode.Stream);
-	}
-
 	public bool RecordingTrajectoryActive { get; private set; }
 
 	/// <summary>The movement a running recording trajectory is cycling, or empty.</summary>
@@ -257,23 +238,6 @@ public partial class ControlHandSkeleton : HandSkeleton
 		RecordingTrajectoryMovement = movement;
 		GD.Print($"Recording trajectory started: {movement} (freq={Frequency} hold={HoldTime} rest={RestTime})");
 		return true;
-	}
-
-	/// <summary>
-	/// Stop reading a streamed control pose and return to the movement state machine.
-	/// </summary>
-	/// <remarks>
-	/// The counterpart to <see cref="AcceptControlPoseStream"/>, and the reason it
-	/// exists: declaring a control-pose stream switches this hand to
-	/// <see cref="ControlHandDriverMode.Stream"/>, and without a way back that would be
-	/// a one-way door — discrete DOFs render as movements, which are rejected outside
-	/// Movement mode, so a client that streamed once could never command a held state
-	/// again for the lifetime of the process. Idempotent.
-	/// </remarks>
-	public void ReleaseControlPoseStream()
-	{
-		if (DriverMode == ControlHandDriverMode.Stream)
-			SetDriverMode(ControlHandDriverMode.Movement);
 	}
 
 	/// <summary>Stop a recording trajectory, resting the hand only if one was running. Idempotent.</summary>
