@@ -156,13 +156,13 @@ def v2(v2_pb2, vhi_process):
     last: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            stub.Declare(pb2.DeclareRequest(standard_version="1"), timeout=3.0)
+            stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=3.0)
             break
         except Exception as e:  # noqa: BLE001 - retried until the deadline
             last = e
             time.sleep(0.5)
     else:
-        pytest.fail(f"v2 service never answered Declare: {last!r}")
+        pytest.fail(f"v2 service never answered GetControlManifest: {last!r}")
 
     yield stub, pb2
     channel.close()
@@ -172,19 +172,5 @@ def v2(v2_pb2, vhi_process):
 def movements(v2):
     """The movement names this build offers, discovered rather than assumed."""
     stub, pb2 = v2
-    reply = stub.Declare(
-        pb2.DeclareRequest(
-            standard_version="1",
-            dofs=[
-                pb2.DofDeclaration(
-                    name="hand.grasp", kind=pb2.DISCRETE, states=["definitely-not-a-movement"]
-                )
-            ],
-        ),
-        timeout=5.0,
-    )
-    # The refusal message lists what the hand does have — the only discovery path
-    # v2 offers, which is itself worth pinning.
-    message = reply.verdicts[0].message
-    inside = message.split("offers [")[-1].rstrip("]")
-    return [name.strip() for name in inside.split(",") if name.strip()]
+    reply = stub.GetRecordingSessionState(pb2.GetRecordingSessionStateRequest(), timeout=5.0)
+    return list(reply.available_movements)

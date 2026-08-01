@@ -18,8 +18,9 @@ namespace Vhi;
 ///   <item><description><b>Inlet</b> <c>MyoGestic_Output</c> - 9 × <c>float32</c>,
 ///     drives the predicted hand. Typically ~32 Hz.</description></item>
 ///   <item><description><b>Inlet</b> <c>MyoGestic_ControlPose</c> (optional) - 9 ×
-///     <c>float32</c>, drives the control hand only when its
-///     <see cref="ControlHandSkeleton.DriverMode"/> is <c>Stream</c>.</description></item>
+///     <c>float32</c>, drives the control hand while <see cref="ControlPoseLive"/> is
+///     true; the control hand falls back to its own movements once it goes
+///     stale.</description></item>
 ///   <item><description><b>Outlet</b> <c>VHI_Control</c> - the control hand's current
 ///     pose, 60 Hz. MyoGestic consumes this as a training-target source.</description></item>
 ///   <item><description><b>Outlet</b> <c>VHI_Predict</c> - the predicted hand's current
@@ -38,8 +39,8 @@ public partial class LSLCommunicationController : Node
 	/// Resolved by name only.</summary>
 	[Export] public string PredictionStreamName = "MyoGestic_Output";
 
-	/// <summary>Name of the optional LSL inlet that drives the control hand
-	/// in <see cref="ControlHandDriverMode.Stream"/>. Resolved by name only;
+	/// <summary>Name of the optional LSL inlet that drives the control hand while
+	/// <see cref="ControlPoseLive"/> is true. Resolved by name only;
 	/// missing is fine - the inlet is simply skipped.</summary>
 	[Export] public string ControlPoseStreamName = "MyoGestic_ControlPose";
 

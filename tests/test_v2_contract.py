@@ -88,113 +88,7 @@ EXPECTED = {
 STANDARD_DOFS = tuple(EXPECTED)
 
 
-def _declare(stub, pb2, *names, kind=None, states=None):
-    kind = kind if kind is not None else pb2.CONTINUOUS
-    dofs = [
-        pb2.DofDeclaration(name=n, kind=kind, lo=-1.0, hi=1.0, rest=0.0, states=states or [])
-        for n in names
-    ]
-    return stub.Declare(
-        pb2.DeclareRequest(standard_version="1", dofs=dofs, client_name="contract-test"),
-        timeout=10.0,
-    )
-
-
-# --- Declare -------------------------------------------------------------------
-
-
-def test_the_six_standard_dofs_are_renderable(v2):
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, *STANDARD_DOFS)
-    assert reply.accepted
-    assert [v.name for v in reply.verdicts] == list(STANDARD_DOFS)
-    for verdict in reply.verdicts:
-        assert verdict.renderable, verdict.message
-        assert verdict.renders_as, f"{verdict.name} must say what it drives"
-
-
-def test_declare_reports_the_channel_order_and_stream(v2):
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, *STANDARD_DOFS)
-    assert list(reply.continuous_channel_order) == list(STANDARD_DOFS)
-    assert reply.continuous_stream_name == "MyoGestic_Output"
-    assert reply.standard_version == "1"
-
-
-def test_every_named_channel_is_actually_rendered(v2):
-    """The order may only name channels this hand drives.
-
-    This began as "channels 6-8 are dead, so nothing may name a wrist" — naming a dead
-    channel being how four wrong pose tables spread. All nine render now, so the claim can
-    no longer be about which names are absent; it is that every name present is renderable,
-    which is the property that mattered all along.
-    """
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, *STANDARD_DOFS)
-    order = list(reply.continuous_channel_order)
-    assert len(order) == len(STANDARD_DOFS) == 9
-    assert all(v.renderable for v in reply.verdicts), [v.message for v in reply.verdicts]
-    # Declaring the order itself must also be accepted: a name in it that this hand could
-    # not drive would be exactly the old bug in a new place.
-    assert _declare(stub, pb2, *order).accepted
-
-
-def test_a_dof_this_hand_lacks_is_refused_with_what_it_has(v2):
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, "wrist.rotation")
-    assert not reply.accepted
-    verdict = reply.verdicts[0]
-    assert not verdict.renderable
-    assert "vhi.prediction" in verdict.message, "a refusal must be actionable"
-
-
-def test_one_unrenderable_dof_fails_the_whole_declaration(v2):
-    """All-or-nothing: a client must not half-render and believe it succeeded."""
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, "vhi.prediction.index", "wrist.rotation")
-    assert not reply.accepted
-    assert [v.renderable for v in reply.verdicts] == [True, False]
-
-
-def test_an_empty_declaration_is_not_accepted(v2):
-    stub, pb2 = v2
-    assert not stub.Declare(pb2.DeclareRequest(standard_version="1"), timeout=5.0).accepted
-
-
 # --- discrete DOFs -------------------------------------------------------------
-
-
-def test_a_discrete_dof_renders_as_movements(v2, movements):
-    """The point of the discrete work: no v1 SetMovement needed to command a state."""
-    stub, pb2 = v2
-    states = [m.lower() for m in movements[:3]]
-    reply = _declare(stub, pb2, "vhi.control.gesture", kind=pb2.DISCRETE, states=states)
-    assert reply.accepted, reply.verdicts[0].message
-    assert "control-hand movements" in reply.verdicts[0].renders_as
-
-
-def test_discrete_states_resolve_case_insensitively(v2, movements):
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, "vhi.control.gesture", kind=pb2.DISCRETE, states=[movements[0].upper()])
-    assert reply.accepted, reply.verdicts[0].message
-
-
-def test_a_discrete_dof_with_an_unknown_state_is_refused(v2, movements):
-    """Partly-resolvable is not partly-renderable — it silently does nothing."""
-    stub, pb2 = v2
-    reply = _declare(
-        stub, pb2, "vhi.control.gesture", kind=pb2.DISCRETE, states=[movements[0], "no-such-movement"]
-    )
-    assert not reply.accepted
-    verdict = reply.verdicts[0]
-    assert "no-such-movement" in verdict.message
-    assert movements[0] in verdict.message, "the refusal must list what is available"
-
-
-def test_a_discrete_dof_with_no_states_is_refused(v2):
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, "vhi.control.gesture", kind=pb2.DISCRETE, states=[])
-    assert not reply.accepted
 
 
 def test_setcontrol_applies_a_discrete_state(v2, movements):
@@ -334,8 +228,8 @@ def test_the_legacy_v1_service_is_no_longer_served(vhi_process):
 
     Called over a raw channel with no generated stub, which is the point: the v1
     contract file is deleted, so there is nothing to generate from. A client that still
-    speaks v1 now gets UNIMPLEMENTED — precisely the signal v2's Declare handshake reads
-    to decide it is talking to a build that does not speak its language.
+    speaks v1 now gets UNIMPLEMENTED — precisely the signal a v2 client reads to notice
+    it is talking to a build that does not speak its language.
     """
     import grpc
 
@@ -499,16 +393,6 @@ def test_continuous_control_is_unaffected_by_a_running_trajectory(aid, v2):
 # --- layer 3: presentation blending, and what it must NOT be ---------------------
 
 
-def test_presentation_blending_can_be_configured(v2):
-    stub, pb2 = v2
-    assert stub.SetPresentation(
-        pb2.SetPresentationRequest(blend=True, blend_speed=8.0), timeout=10.0
-    ).applied
-    assert _declare(stub, pb2, "vhi.prediction.index").blends_presentation
-    assert stub.SetPresentation(pb2.SetPresentationRequest(blend=False), timeout=10.0).applied
-    assert not _declare(stub, pb2, "vhi.prediction.index").blends_presentation
-
-
 def test_blending_does_not_change_the_commanded_value(v2):
     """Layer 3 is cosmetic. If it altered the value it would be layer 1 in disguise.
 
@@ -548,29 +432,6 @@ def test_the_recording_state_reports_the_current_movement(v2, aid, movements):
 
 
 # --- the control-pose stream: negotiated, not flipped ----------------------------
-
-
-@pytest.fixture
-def rest_control_hand(v2, aid):
-    """Leave the control hand in Movement mode for whatever runs next.
-
-    Declaring a control-pose stream switches the hand to Stream mode, and a later test
-    commanding a discrete DOF would then be refused for a reason that has nothing to do
-    with what it is testing.
-    """
-    yield
-    aid_stub, pb2 = aid
-    control_stub, _ = v2
-    movements = aid_stub.GetRecordingSessionState(
-        pb2.GetRecordingSessionStateRequest(), timeout=10.0
-    ).available_movements
-    # Commanding a movement is only possible in Movement mode, so the aid's trajectory
-    # start/stop is the way back: StopRecordingTrajectory rests via SetMovement.
-    control_stub.SetControl(pb2.SetControlRequest(continuous={}), timeout=10.0)
-    aid_stub.StartRecordingTrajectory(
-        pb2.StartRecordingTrajectoryRequest(movement=movements[0]), timeout=10.0
-    )
-    aid_stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0)
 
 
 def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet):
@@ -819,71 +680,6 @@ def test_direction_is_the_same_on_every_repeat(v2):
     assert runs[0] == runs[1] == runs[2], runs
 
 
-# --- one vocabulary ---------------------------------------------------------------
-
-
-def _advertised(v2, stream):
-    stub, pb2 = v2
-    manifest = stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=10.0)
-    return {c.address for c in manifest.capabilities if c.stream_name == stream}
-
-
-def test_the_reply_names_only_controls_the_manifest_advertises(v2):
-    """`Declare`'s channel order and the manifest must speak one vocabulary.
-
-    They drifted, and nothing here noticed: the aliases were trimmed from the manifest
-    while the reply went on naming them, so a client building its frame from
-    `continuous_channel_order` was handed five addresses its own loader would refuse.
-    The order is derived from the manifest's own table now, and this is what says so.
-    """
-    stub, pb2 = v2
-    reply = _declare(stub, pb2, "vhi.prediction.index")
-    advertised = _advertised(v2, "MyoGestic_Output")
-    unknown = [n for n in reply.continuous_channel_order if n not in advertised]
-    assert not unknown, f"the reply names {unknown}, which the manifest does not advertise"
-
-
-def test_the_control_pose_order_names_control_pose_controls(v2, rest_control_hand):
-    """Not the predicted hand's. Both orders used to come from the prediction table.
-
-    A client that declared a control-pose stream was told its channels were
-    `vhi.prediction.*` — addresses on the *other* hand, which it would then have routed
-    onto this one.
-    """
-    stub, pb2 = v2
-    reply = stub.Declare(
-        pb2.DeclareRequest(
-            standard_version="1",
-            client_name="control-pose-test",
-            control_pose=True,
-            dofs=[
-                pb2.DofDeclaration(
-                    name="vhi.prediction.index", kind=pb2.CONTINUOUS, lo=-1.0, hi=1.0, states=[]
-                )
-            ],
-        ),
-        timeout=10.0,
-    )
-    assert reply.accepted, reply.message
-    order = list(reply.control_pose_channel_order)
-    assert order, "declaring the stream must report its channel order"
-    assert all(name.startswith("vhi.control.pose.") for name in order), order
-    advertised = _advertised(v2, "MyoGestic_ControlPose")
-    assert not [n for n in order if n not in advertised], order
-
-
-def test_an_alias_is_still_accepted_though_unadvertised(v2):
-    """The rename is not a removal: a map written against the old name keeps rendering.
-
-    `resolve()` on the client side refuses what the manifest omits, so this is what a
-    client reaches only by declaring the alias directly — but the renderer must not be
-    the thing that breaks it.
-    """
-    stub, pb2 = v2
-    assert "vhi.prediction.thumb" not in _advertised(v2, "MyoGestic_Output")
-    assert _declare(stub, pb2, "vhi.prediction.thumb").accepted
-
-
 # --- the wrist ------------------------------------------------------------------
 
 
@@ -975,8 +771,9 @@ def test_a_pose_frame_lands_on_the_channel_the_manifest_names(v2):
     three times. The compaction saved three floats a frame.
     """
     pylsl = pytest.importorskip("pylsl")
-    stub, pb2 = v2
-    assert _declare(stub, pb2, "vhi.prediction.index", "vhi.prediction.middle").accepted
+    # No declaration: the manifest already says vhi.prediction.index is channel 2 and
+    # vhi.prediction.middle is channel 3, and both ends read that from one table — that
+    # is the whole claim this test makes.
 
     info = pylsl.StreamInfo("MyoGestic_Output", "Control", 9, 60, "float32", "pose-frame")
     outlet = pylsl.StreamOutlet(info)

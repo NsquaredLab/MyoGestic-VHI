@@ -35,16 +35,6 @@ public enum Movements
 }
 
 /// <summary>
-/// How the control hand is driven. The default, Movement, preserves the prior
-/// behaviour — nothing changes unless a caller switches the mode.
-/// </summary>
-public enum ControlHandDriverMode
-{
-	Movement,  // predefined-movement state machine + local keyboard
-	Stream     // continuous pose from the MyoGestic_ControlPose LSL inlet
-}
-
-/// <summary>
 /// Static class containing all movement pose definitions
 /// Data structure: [16 joints][2 states (max/min)][3 axes (x,y,z)]
 /// </summary>

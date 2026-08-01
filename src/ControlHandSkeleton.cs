@@ -8,16 +8,19 @@ namespace Vhi;
 /// <summary>
 /// The "control" hand - the ground-truth / cued hand on the left of the scene.
 ///
-/// Drives 16 finger joints in one of three modes selected by <see cref="DriverMode"/>:
+/// Follows the presence of its <c>MyoGestic_ControlPose</c> LSL stream, exactly as the
+/// predicted hand follows <c>MyoGestic_Output</c>: whichever is live drives the hand,
+/// checked fresh every frame rather than switched by a handshake.
 /// <list type="bullet">
-///   <item><description><b>Movement</b> (default): plays a named predefined movement
-///     through the state machine <i>waiting → closing → holding → opening → resting</i>,
-///     and listens for ←/→/↑/↓ keyboard input to cycle/start/stop. Movement poses
-///     come from the TOML loaded via <see cref="MovementConfigLoader"/>; the available
-///     set is filtered by <see cref="Mode"/> (AI vs Classifier).</description></item>
-///   <item><description><b>Stream</b>: ignores the state machine and follows a continuous
-///     9-DOF pose streamed in over the <c>MyoGestic_ControlPose</c> LSL inlet
-///     (consumed via <see cref="LSLCommunicationController"/>).</description></item>
+///   <item><description><b>Stream live</b>: ignores its own movement state machine and
+///     renders the streamed 9-DOF pose (consumed via
+///     <see cref="LSLCommunicationController"/>).</description></item>
+///   <item><description><b>Stream absent</b> (the default at startup, and again once the
+///     stream goes stale): plays a named predefined movement through the state machine
+///     <i>waiting → closing → holding → opening → resting</i>, and listens for
+///     ←/→/↑/↓ keyboard input to cycle/start/stop. Movement poses come from the TOML
+///     loaded via <see cref="MovementConfigLoader"/>; the available set is filtered by
+///     <see cref="Mode"/> (AI vs Classifier).</description></item>
 /// </list>
 ///
 /// Frame-by-frame animation logic runs in <c>_Process</c>; the resulting pose is
@@ -28,12 +31,6 @@ namespace Vhi;
 /// </summary>
 public partial class ControlHandSkeleton : HandSkeleton
 {
-	/// <summary>How the control hand is driven each frame -
-	/// <see cref="ControlHandDriverMode.Movement"/>,
-	/// <see cref="ControlHandDriverMode.Stream"/>. Change at runtime with
-	/// <see cref="SetDriverMode"/>, itself driven by the v2 Declare handshake.</summary>
-	[Export] public ControlHandDriverMode DriverMode = ControlHandDriverMode.Movement;
-
 	/// <summary>Godot resource path to the movements TOML config. Defaults to
 	/// <c>user://movements.toml</c>; auto-generated from the hard-coded poses
 	/// on first run, and hot-reloaded on change. To load a TOML from
@@ -41,8 +38,8 @@ public partial class ControlHandSkeleton : HandSkeleton
 	/// button or call <see cref="LoadConfigFile"/>.</summary>
 	[Export] public string ConfigFilePath = "user://movements.toml";
 
-	/// <summary>Movement cycles per second in
-	/// <see cref="ControlHandDriverMode.Movement"/> - the closing/opening
+	/// <summary>Movement cycles per second while the control hand is animating its own
+	/// movements rather than following its pose stream - the closing/opening
 	/// interpolation speed. Live-adjustable via the control panel or the
 	/// gRPC <c>SetSpeed</c> RPC.</summary>
 	[Export] public float Frequency = 0.5f;
@@ -237,8 +234,8 @@ public partial class ControlHandSkeleton : HandSkeleton
 	/// Non-positive <paramref name="frequencyHz"/> and negative hold/rest times leave
 	/// VHI's current timing alone, matching <see cref="SetSpeed"/>.
 	/// </remarks>
-	/// <returns><see langword="false"/> if the hand is not in Movement mode or the
-	/// movement name is unknown — in which case nothing was started.</returns>
+	/// <returns><see langword="false"/> if a control-pose stream is driving the hand or
+	/// the movement name is unknown — in which case nothing was started.</returns>
 	public bool StartRecordingTrajectory(string movement, float frequencyHz, float holdTimeS, float restTimeS)
 	{
 		SetSpeed(frequencyHz, holdTimeS, restTimeS);
@@ -427,30 +424,6 @@ public partial class ControlHandSkeleton : HandSkeleton
 	/// <see cref="SetMovement"/> with <c>cycle=false</c> after reaching the
 	/// end pose.</summary>
 	public bool IsFrozen => animationState == "frozen";
-
-	/// <summary>
-	/// Set how the control hand is driven. Switching to Movement resets to the
-	/// resting state; Idle holds the rest pose; Stream lets the next streamed
-	/// sample take over. Driven by the v2 Declare handshake.
-	/// </summary>
-	/// <param name="mode">The target driver mode -
-	/// <see cref="ControlHandDriverMode.Movement"/>,
-	/// <see cref="ControlHandDriverMode.Stream"/>, or
-	/// <see cref="ControlHandDriverMode.Idle"/>.</param>
-	public void SetDriverMode(ControlHandDriverMode mode)
-	{
-		if (mode == DriverMode)
-			return;
-		DriverMode = mode;
-		GD.Print($"Control hand driver mode: {mode}");
-		if (mode == ControlHandDriverMode.Movement)
-		{
-			animationState = "waiting";
-			stateTimer = 0;
-		}
-		if (mode != ControlHandDriverMode.Stream)
-			ResetBones();
-	}
 
 	private void UpdateMovementAnimation(float delta)
 	{

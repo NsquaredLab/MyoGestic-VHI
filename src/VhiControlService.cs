@@ -105,7 +105,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 		// Aliases. Each is a second spelling of a channel already named above, accepted so
 		// a map resolves instead of being refused over punctuation, and hidden from the
 		// manifest so discovery returns one name per control. <see cref="Aliases"/> is the
-		// list, and both the manifest and Declare's channel order filter on it.
+		// list, and the manifest filters on it.
 		//
 		// A bare `thumb` is here rather than above because the thumb is the one digit
 		// where a bare name would have to guess, and guessing is what a manifest exists to
@@ -192,7 +192,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// </para>
 	/// <para>
 	/// So the manifest names each control once. <see cref="Renderable"/> still resolves these,
-	/// because <c>Declare</c>, <c>SetControl</c> and <c>SweepControl</c> read that table
+	/// because <c>SetControl</c> and <c>SweepControl</c> read that table
 	/// directly: a client that already sends an axis form keeps working on the wire.
 	/// </para>
 	/// <para>
@@ -224,46 +224,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 		"vhi.control.pose.ring.flexion",
 		"vhi.control.pose.little.flexion",
 	];
-
-	/// <summary>Advertised addresses in pose-channel order, for one stream.</summary>
-	/// <remarks>
-	/// <para>Derived from the same tables the manifest is built from, minus
-	/// <see cref="Aliases"/>, rather than restated as a literal. It was a literal, and it
-	/// drifted: after the aliases were trimmed the reply still named five controls the
-	/// manifest no longer advertised, so a client that resolved what <c>Declare</c> told it
-	/// would have been refused by its own loader.</para>
-	/// <para>Per stream, too. Both orders used to come from the prediction table, so a client
-	/// declaring a control-pose stream was handed <c>vhi.prediction.*</c> names for it.</para>
-	/// </remarks>
-	private static string[] AdvertisedOrder(bool controlPose)
-	{
-		var pairs = controlPose
-			? ControlPoseRenderable.Select(e => (e.Key, Channel: e.Value))
-			: Renderable.Select(e => (e.Key, e.Value.Channel));
-		return [.. pairs
-			.Where(e => e.Channel >= 0 && !Aliases.Contains(e.Key))
-			.OrderBy(e => e.Channel)
-			.Select(e => e.Key)];
-	}
-
-	/// <summary>
-	/// The continuous channel order VHI reports from <see cref="Declare"/>: index i is
-	/// channel i of the LSL stream, named by its ADDRESS.
-	/// </summary>
-	/// <remarks>
-	/// Addresses rather than bare names, so a client can resolve its own alias to an
-	/// address and the address to a channel without inventing a convention.
-	/// <para>
-	/// Nine entries, not six: every channel either hand exports is rendered, including
-	/// 6-8, which carry wrist flexion, abduction and rotation. There is no dead channel
-	/// left for a name to claim.
-	/// </para>
-	/// </remarks>
-	private static readonly string[] PredictionOrder = AdvertisedOrder(controlPose: false);
-	private static readonly string[] ControlPoseOrder = AdvertisedOrder(controlPose: true);
-
-	/// <summary>The standard vocabulary version this build implements.</summary>
-	private const string StandardVersion = "1";
 
 	/// <summary>
 	/// Resolve a standard discrete state to one of this hand's movement names, or
@@ -414,173 +374,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 			return manifest;
 		});
 
-	/// <summary>Negotiate a control space: per-DOF verdicts plus the channel layout.</summary>
-	public override Task<DeclareReply> Declare(DeclareRequest request, ServerCallContext context) =>
-		server.InvokeOnMainThread(() =>
-		{
-			var reply = new DeclareReply
-			{
-				StandardVersion = StandardVersion,
-				ContinuousStreamName = "MyoGestic_Output",
-				// The continuous inlet takes standard values, and nothing here takes anything
-				// else: both inlets clamp and pass them straight to StandardPose.AtPlusOne.
-				// There is no legacy-signed mode to negotiate into. The first end-to-end v2
-				// run inverted every joint precisely because a handshake agreed on names and
-				// left units implied, which is why this stays documented rather than assumed.
-				//
-				// Both outlets publish standard values too — VHI_Predict and, since the
-				// direction fix, VHI_Control. They now agree, which is the whole point: a
-				// model trained on the ground-truth stream can be fed back to the predicted
-				// hand without its weights being flipped by hand. Recordings made before that
-				// are in the rig's old units and stay readable through
-				// myogestic.vhi.legacy.decode_pose; the outlets advertise `pose_convention`
-				// so the two cannot be confused.
-				//
-				// Layer 3 of three, reported so a client can see it — never so it can
-				// mistake it for chatter protection. See SetPresentation.
-				BlendsPresentation = predictedHand.EnableSmoothing,
-				Accepted = true,
-			};
-			reply.ContinuousChannelOrder.AddRange(PredictionOrder);
-
-			// A declaration is accepted when everything in it is renderable. "Nothing in
-			// it" is not acceptance — except when the client declared a control-pose
-			// stream instead of DOFs, which is a legitimate thing to negotiate alone.
-			bool all = request.Dofs.Count > 0 || request.ControlPose;
-			foreach (DofDeclaration dof in request.Dofs)
-			{
-				// The alias is the client's; the address is ours. An empty address means a
-				// client written before the manifest existed, which sent the address as
-				// the name — honour that rather than breaking it.
-				string address = string.IsNullOrEmpty(dof.Address) ? dof.Name : dof.Address;
-				var verdict = new DofVerdict { Name = dof.Name, Address = address };
-				if (dof.Kind == Kind.Discrete)
-				{
-					// A discrete DOF renders as a control-hand movement. Every declared
-					// state must resolve to one: a DOF where three of four states work
-					// is not partially renderable, it is a DOF that silently does
-					// nothing a quarter of the time.
-					var unresolved = new List<string>();
-					var mapping = new List<string>();
-					foreach (string state in dof.States)
-					{
-						string movement = ResolveMovement(state);
-						if (movement == null)
-							unresolved.Add(state);
-						else
-							mapping.Add($"{state}->{movement}");
-					}
-					if (dof.States.Count == 0)
-					{
-						verdict.Renderable = false;
-						verdict.Message = "a discrete DOF must declare at least one state";
-					}
-					else if (unresolved.Count > 0)
-					{
-						verdict.Renderable = false;
-						verdict.Message =
-							$"no movement matches [{string.Join(", ", unresolved)}] — this "
-							+ $"hand offers [{string.Join(", ", controlHand.GetAvailableMovements())}]";
-					}
-					else
-					{
-						verdict.Renderable = true;
-						verdict.RendersAs = $"control-hand movements: {string.Join(", ", mapping)}";
-					}
-				}
-				else if (Renderable.TryGetValue(address, out var slot))
-				{
-					verdict.Renderable = true;
-					verdict.RendersAs =
-						$"predicted hand: {HandSkeleton.BoneNameForJoint(slot.Joint)} "
-						+ $"{slot.Axis} axis (MyoGestic_Output channel {slot.Channel})";
-				}
-				else if (ControlPoseRenderable.TryGetValue(address, out int poseChannel))
-				{
-					// The control hand's own namespace. Declarable so a client can route to
-					// it, but note what it needs that the prediction stream does not: the
-					// hand has to be in Stream mode, which declaring control_pose requests.
-					// Without that the inlet is read by nobody, and an inlet nobody reads is
-					// indistinguishable from a stream that is not arriving.
-					verdict.Renderable = true;
-					verdict.RendersAs =
-						$"control hand: MyoGestic_ControlPose channel {poseChannel}"
-						+ (!request.ControlPose
-							? " — declare control_pose, or nothing will read it"
-							: "");
-				}
-				else
-				{
-					verdict.Renderable = false;
-					verdict.Message =
-						$"this target does not export '{address}' — call GetControlManifest "
-						+ $"for the full list. It renders: [{string.Join(", ", PredictionOrder)}]";
-				}
-				all &= verdict.Renderable;
-				reply.Verdicts.Add(verdict);
-			}
-
-			// A declared control-pose stream drives the *control* hand's bones, and so does
-			// a discrete DOF (as a movement). Refuse the combination rather than arbitrate
-			// it per command: two drivers for one hand is exactly what v1's ControlMode
-			// existed to referee, and a client told "no" at handshake time can fix its
-			// configuration, where one told "no" per command just sees things not happen.
-			if (!request.ControlPose)
-			{
-				// Not declaring the stream releases it. Symmetry matters here: declaring a
-				// control pose is what puts this hand into Stream mode, so re-declaring
-				// without one is how a client gets back to commanding discrete DOFs. Without
-				// it that switch would be a one-way door for the life of the process.
-				// controlHand.ReleaseControlPoseStream(); // deleted in Task 2 (VHI); Task 3 removes this handler
-			}
-			else
-			{
-				bool anyDiscrete = false;
-				foreach (DofDeclaration dof in request.Dofs)
-					anyDiscrete |= dof.Kind == Kind.Discrete;
-
-				if (anyDiscrete)
-				{
-					reply.Accepted = false;
-					foreach (DofVerdict verdict in reply.Verdicts)
-					{
-						if (verdict.Renderable && FindDeclaration(request, verdict.Name) == Kind.Discrete)
-						{
-							verdict.Renderable = false;
-							verdict.Message =
-								"a discrete DOF and a control-pose stream would both drive the "
-								+ "control hand — declare one or the other";
-						}
-					}
-				}
-				else
-				{
-					// controlHand.AcceptControlPoseStream(); // deleted in Task 2 (VHI); Task 3 removes this handler
-					reply.ControlPoseStreamName = "MyoGestic_ControlPose";
-					reply.ControlPoseChannelOrder.AddRange(ControlPoseOrder);
-					// Echo what was actually granted, not just what was asked for.
-					reply.ControlPose = true;
-					GD.Print("  v2 control-pose stream accepted; control hand -> Stream mode");
-				}
-			}
-
-			reply.Accepted = all && reply.Accepted;
-			GD.Print($"  v2 Declare from {request.ClientName}: accepted={reply.Accepted} "
-				+ $"({request.Dofs.Count} DOFs, standard {request.StandardVersion})");
-			return reply;
-		});
-
-	/// <summary>The declared kind of one DOF in a request, for cross-checking.</summary>
-	private static Kind FindDeclaration(DeclareRequest request, string name)
-	{
-		foreach (DofDeclaration dof in request.Dofs)
-		{
-			if (dof.Name == name)
-				return dof.Kind;
-		}
-		return Kind.Unspecified;
-	}
-
 	/// <summary>Apply one standard frame. Continuous only, for now.</summary>
 	public override Task<ControlAck> SetControl(SetControlRequest request, ServerCallContext context) =>
 		server.InvokeOnMainThread(() =>
@@ -592,7 +385,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 				// manifest publishes them.
 				if (!Renderable.TryGetValue(name, out var slot))
 				{
-					ack.Rejected[name] = "not renderable — see Declare";
+					ack.Rejected[name] = "not renderable — see GetControlManifest";
 					ack.Applied = false;
 					continue;
 				}
@@ -623,7 +416,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 				string movement = ResolveMovement(state);
 				if (movement == null)
 				{
-					ack.Rejected[name] = $"no movement matches state '{state}' — see Declare";
+					ack.Rejected[name] = $"no movement matches state '{state}' — see GetControlManifest";
 					ack.Applied = false;
 					continue;
 				}
@@ -709,7 +502,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 			return new SweepControlReply
 			{
 				Completed = false,
-				Message = $"{request.Name} is not renderable — see Declare",
+				Message = $"{request.Name} is not renderable — see GetControlManifest",
 			};
 		}
 
