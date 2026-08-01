@@ -97,6 +97,26 @@ public partial class LSLCommunicationController : Node
 	/// </remarks>
 	[Export] public float PredictionStaleAfterSeconds = 5.0f;
 
+	/// <summary>Silence after which the control-pose inlet is assumed gone.</summary>
+	/// <remarks>
+	/// The prediction inlet has had one of these; this one had not, and was dropped only
+	/// when a pull raised. Presence is now what puts the control hand into Stream mode, so
+	/// "the producer stopped" needs to be observable rather than inferred from an error
+	/// that a quiet-but-alive outlet never raises.
+	/// </remarks>
+	[Export] public float ControlPoseStaleAfterSeconds = 5.0f;
+
+	/// <summary>Whether the control-pose stream is delivering right now.</summary>
+	/// <remarks>
+	/// `ControlHandSkeleton` reads this to decide whether to render the stream or run its
+	/// movement state machine. It is the whole of the old `Declare(control_pose=true)`
+	/// handshake: publish the stream and the hand follows it, exactly as the predicted
+	/// hand has always followed `MyoGestic_Output`.
+	/// </remarks>
+	public bool ControlPoseLive { get; private set; }
+
+	private DateTime lastControlPoseSample = DateTime.Now;
+
 	private DateTime lastConnectionAttempt;
 	private DateTime lastControlPoseAttempt;
 	private float connectionRetryInterval = 5.0f;
@@ -205,8 +225,14 @@ public partial class LSLCommunicationController : Node
 		{
 			try
 			{
+				int got = 0;
 				while (LSLWrapper.PullSample(controlPoseInlet, controlPoseBuffer, 0.0) > 0)
+				{
 					receivedDataControl = [.. controlPoseBuffer];
+					got++;
+				}
+				if (got > 0)
+					lastControlPoseSample = DateTime.Now;
 			}
 			catch (Exception e)
 			{
@@ -215,6 +241,13 @@ public partial class LSLCommunicationController : Node
 				receivedDataControl.Clear();
 			}
 		}
+
+		// Presence, evaluated every frame: an inlet that exists but has gone quiet is a
+		// producer that stopped, and the hand should go back to its own movements rather
+		// than hold the last streamed pose forever.
+		ControlPoseLive =
+			controlPoseInlet != null
+			&& (DateTime.Now - lastControlPoseSample).TotalSeconds < ControlPoseStaleAfterSeconds;
 	}
 
 	/// <summary>Close an inlet and clear the field, so nothing is left for the finalizer.</summary>

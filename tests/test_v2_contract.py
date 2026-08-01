@@ -573,6 +573,34 @@ def rest_control_hand(v2, aid):
     aid_stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0)
 
 
+def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet):
+    """Publish MyoGestic_ControlPose and the control hand renders it. No handshake.
+
+    The predicted hand has always worked this way — publish MyoGestic_Output and it
+    moves. The control hand required a Declare(control_pose=true) whose only effect was
+    a mode flip, so the same idea needed a ceremony on one stream and not the other.
+    """
+    pylsl = pytest.importorskip("pylsl")
+    info = pylsl.StreamInfo("MyoGestic_ControlPose", "Control", 9, 60, "float32", "presence")
+    outlet = pylsl.StreamOutlet(info)
+    frame = [0.0] * 9
+    frame[2] = 1.0  # index flexion
+    sample = None
+    try:
+        deadline = time.time() + 25.0
+        while time.time() < deadline:
+            outlet.push_sample(frame)
+            control_inlet.flush()
+            time.sleep(0.5)
+            sample, _ = control_inlet.pull_sample(timeout=2.0)
+            if sample and sample[2] > 0.9:
+                break
+        assert sample, "VHI_Control never delivered a sample"
+    finally:
+        del outlet
+    assert sample[2] == pytest.approx(1.0, abs=0.05), f"index not driven: {sample}"
+
+
 # --- Direction: standard +1 renders what the DOF name denotes ------------------
 #
 # This section has been wrong twice, in opposite directions, and both times it passed.
