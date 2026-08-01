@@ -633,8 +633,8 @@ public class VhiControlService : VhiControl.VhiControlBase
 				if (!controlHand.SetMovement(movement, false))
 				{
 					ack.Rejected[name] =
-						$"'{movement}' was refused — the control hand is in "
-						+ $"{controlHand.DriverMode} mode, not Movement";
+						$"'{movement}' was refused — a control-pose stream is driving the "
+						+ "control hand";
 					ack.Applied = false;
 				}
 			}
@@ -822,8 +822,8 @@ public class VhiControlService : VhiControl.VhiControlBase
 				{
 					Applied = false,
 					Message =
-						$"could not start '{request.Movement}' — the control hand is in "
-						+ $"{controlHand.DriverMode} mode, or that movement does not exist "
+						$"could not start '{request.Movement}' — a control-pose stream is "
+						+ "driving the control hand, or that movement does not exist "
 						+ $"(offers [{string.Join(", ", controlHand.GetAvailableMovements())}])",
 				};
 			}

@@ -55,6 +55,9 @@ public partial class ControlHandSkeleton : HandSkeleton
 
 	private LSLCommunicationController communicationController;
 	private List<float> currentData = [];
+	// Set on every live frame, read on the next non-live one, so _Process can tell a
+	// falling edge (the stream just went stale) from an already-stale stream.
+	private bool wasControlPoseLive = false;
 
 	// Movement control system
 	private Dictionary<string, float[][][]> movementPoses;
@@ -110,7 +113,17 @@ public partial class ControlHandSkeleton : HandSkeleton
 			StandardPose.Clamp(currentData);
 			if (currentData.Count >= 9 && skeleton != null)
 				MoveBonesFromStream();
+			wasControlPoseLive = true;
 			return;
+		}
+
+		// Falling edge: the producer that was driving this hand went quiet. Give the hand
+		// back to its own movements rather than hold the last streamed pose forever — the
+		// same contract LSLCommunicationController keeps for the predicted hand's buffer.
+		if (wasControlPoseLive)
+		{
+			StopToRest();
+			wasControlPoseLive = false;
 		}
 
 		HandleMovementInput();
@@ -310,8 +323,9 @@ public partial class ControlHandSkeleton : HandSkeleton
 	/// <see langword="false"/> if <paramref name="name"/> was rejected.</returns>
 	public bool SetMovement(string name, bool cycle = false)
 	{
-		// Movement commands only apply when the control hand is in Movement mode.
-		if (DriverMode != ControlHandDriverMode.Movement
+		// Movement commands only apply when no control-pose stream is driving this hand —
+		// the same presence check _Process itself uses, so the two can never disagree.
+		if ((communicationController != null && communicationController.ControlPoseLive)
 			|| availableMovements == null)
 			return false;
 
@@ -369,7 +383,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 	/// values are ignored.</param>
 	public void SetSpeed(float frequencyHz, float holdTimeS, float restTimeS)
 	{
-		if (DriverMode != ControlHandDriverMode.Movement)
+		if (communicationController != null && communicationController.ControlPoseLive)
 			return;
 		if (frequencyHz > 0) Frequency = frequencyHz;
 		if (holdTimeS >= 0) HoldTime = holdTimeS;
@@ -389,7 +403,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 	/// state and resume the normal movement state machine.</param>
 	public void SetFrozen(bool frozen)
 	{
-		if (DriverMode != ControlHandDriverMode.Movement)
+		if (communicationController != null && communicationController.ControlPoseLive)
 			return;
 		if (frozen)
 		{

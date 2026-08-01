@@ -579,6 +579,12 @@ def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet):
     The predicted hand has always worked this way — publish MyoGestic_Output and it
     moves. The control hand required a Declare(control_pose=true) whose only effect was
     a mode flip, so the same idea needed a ceremony on one stream and not the other.
+
+    Covers both edges: while the outlet is delivering, the hand renders it; once the
+    outlet is gone and `ControlPoseStaleAfterSeconds` has elapsed, the hand must give
+    itself back to its own movements rather than hold the last streamed pose forever —
+    otherwise a producer that dies mid-recording leaves `VHI_Control` emitting a
+    plausible held gesture indistinguishable from an operator deliberately holding it.
     """
     pylsl = pytest.importorskip("pylsl")
     info = pylsl.StreamInfo("MyoGestic_ControlPose", "Control", 9, 60, "float32", "presence")
@@ -599,6 +605,24 @@ def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet):
     finally:
         del outlet
     assert sample[2] == pytest.approx(1.0, abs=0.05), f"index not driven: {sample}"
+
+    # Falling edge. The outlet above is gone, so ControlPoseLive drops once
+    # ControlPoseStaleAfterSeconds of silence has passed — read from the C# rather than
+    # restated, so a retuned timeout cannot make this wait too short to observe it.
+    stale_after_s = float(
+        re.search(
+            r"ControlPoseStaleAfterSeconds = ([\d.]+)f",
+            (SOURCE / "LSLCommunicationController.cs").read_text(),
+        ).group(1)
+    )
+    time.sleep(stale_after_s + 2.0)
+    control_inlet.flush()
+    sample, _ = control_inlet.pull_sample(timeout=5.0)
+    assert sample is not None, "VHI_Control stopped publishing once the stream went stale"
+    assert sample[2] == pytest.approx(0.0, abs=0.05), (
+        f"index still held {stale_after_s + 2.0:.0f}s after the stream went stale: {sample} "
+        "— the control hand did not give itself back to the movement state machine"
+    )
 
 
 # --- Direction: standard +1 renders what the DOF name denotes ------------------
