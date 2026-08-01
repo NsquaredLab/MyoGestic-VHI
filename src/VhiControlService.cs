@@ -233,8 +233,20 @@ public class VhiControlService : VhiControl.VhiControlBase
 		this.server = server;
 	}
 
-	/// <summary>The vocabulary version, bumped when addresses or their semantics change.</summary>
-	private const string VocabularyVersion = "1";
+	/// <summary>The vocabulary this build serves. A decimal integer, compared numerically.</summary>
+	/// <remarks>
+	/// <para>Bumped when the addresses or the transport change in a way a client cannot absorb
+	/// silently. A client declares the oldest vocabulary it can drive and refuses anything
+	/// below it, by name, when it binds — which is the only thing that makes a version-skewed
+	/// pair of these two <i>separately installed</i> applications say so out loud. Before that
+	/// gate existed the mismatch was silent in the worst way: an old renderer listening for a
+	/// whole-pose stream a new client no longer publishes logs nothing at all, and the hand
+	/// simply never moves.</para>
+	/// <para><c>1</c> — a manifest carrying <c>stream_name</c> and <c>channel</c>, several
+	/// controls able to share one wider stream. Retired.<br/>
+	/// <c>2</c> — one stream per DOF, named for the address, one channel wide.</para>
+	/// </remarks>
+	private const string VocabularyVersion = "2";
 
 	/// <summary>
 	/// Every control this build exports, with the semantics VHI itself declares.
@@ -274,12 +286,11 @@ public class VhiControlService : VhiControl.VhiControlBase
 				Lo = -1.0f,
 				Hi = 1.0f,
 				Rest = 0.0f,
-				// The address, and channel 0 of it. A DOF is its own stream: the ones
-				// this renderer exports are independently actuated, may come from
-				// different producers and may update at different rates, so nothing
-				// links them and there is no frame for a client to fill in.
-				StreamName = address,
-				Channel = 0,
+				// No stream name and no channel: a DOF is its own stream, named for this
+				// very address and one channel wide, so both fields only ever repeated what
+				// `Address` already says. The DOFs this renderer exports are independently
+				// actuated, may come from different producers and may update at different
+				// rates, so nothing links them and there is no frame for a client to fill in.
 				Description = Describes.TryGetValue(address, out string what) ? what : "",
 			});
 		}
@@ -292,8 +303,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 				Lo = -1.0f,
 				Hi = 1.0f,
 				Rest = 0.0f,
-				StreamName = address,
-				Channel = 0,
 				Description = "control-hand pose, driven by an operator or a setup script "
 					+ "rather than by a model. Nothing to request: the control hand follows "
 					+ "these streams while any of them is delivering, and gives itself back "
@@ -324,10 +333,6 @@ public class VhiControlService : VhiControl.VhiControlBase
 			{
 				Address = "vhi.control.gesture",
 				Kind = Kind.Discrete,
-				// -1, not left at proto3's default of 0: a held state travels over gRPC and
-				// occupies no pose channel, and an unset 0 is indistinguishable from
-				// channel 0 — which read as "the same control as the thumb" on the client.
-				Channel = -1,
 				RestState = "Rest",
 				Description = "a control-hand movement preset, held until changed. Includes "
 					+ "whole-hand gestures (Fist, pinches, Pointing) and the wrist movements "
