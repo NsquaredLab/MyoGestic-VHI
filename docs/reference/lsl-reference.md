@@ -15,10 +15,11 @@ for the *why*.
 
 ## Inlets - consumed by VHI
 
-A DOF's stream name **is** its address. `GetControlManifest` reports
-`stream_name = <the address>` and `channel = 0` for every one of them, so a client reads
-the name it must publish under straight off the manifest and there is no positional
-layout to get wrong.
+A DOF's stream name **is** its address, and that is the whole of the inbound transport
+contract. The manifest carries nothing else about a wire — no stream name beside the
+address, no channel number — because a capability's address already says everything a
+producer needs: publish one stream under it, one `float32` channel wide. A client reads
+the address off `GetControlManifest` and there is no positional layout to get wrong.
 
 Nine drive the **predicted** hand:
 
@@ -48,12 +49,31 @@ the rest, and a name nobody publishes costs only an unresolved lookup.
 
 | | |
 |---|---|
-| Channels | **1 × `float32`**, always. The value goes on channel 0 |
+| Channels | **1 × `float32`**, exactly. Any other width is refused outright — see below |
 | Rate | the producer's, per stream. MyoGestic's prediction loop is ~32 Hz; VHI imposes nothing |
 | Resolution | by **name** only; one liblsl resolve every ~5 s covers every stream still missing, so the resolve count does not grow with the number of DOFs |
-| Type / channel count | **not checked.** A stream is accepted on its name alone; a wider producer is read at channel 0 and its other channels ignored |
+| Type | **not checked.** A stream is *found* on its name alone; the type it advertises is informational |
 | Goes stale after | 5 s of silence (`PredictionStaleAfterSeconds` / `ControlPoseStaleAfterSeconds`). VHI drops that one inlet and looks for the name again, so the next producer of it is picked up |
 | Nominal rate | advertised by the producer, ignored by VHI. It applies what arrives and renders at its own physics tick |
+
+### A stream that is not one channel wide is never opened
+
+Names find a stream; **width decides whether it is opened**. A resolved stream whose
+channel count is anything other than exactly 1 is logged as an error and its inlet is not
+created:
+
+```text
+❌ vhi.prediction.index is published 9 channels wide, and this contract is one address
+per stream, one float32 channel. Not opening it — publish one stream per DOF, named for
+the address.
+```
+
+This used to be tolerated: the inlet resized its buffer to whatever turned up and read
+element zero. That quietly accepted a nine-channel whole-pose outlet from a producer too
+old to know the streams had been split apart — and element zero of that frame is the
+thumb, so every DOF would have rendered the thumb's value with nothing anywhere saying
+so. A receiver that advertises an invariant is the thing that has to enforce it, and a
+loud refusal is the only reading of a mis-shaped stream that a producer can act on.
 
 ### A DOF nobody is driving holds its last commanded value
 
@@ -116,9 +136,10 @@ address tables and confirmed against recorded sessions. Do not restate it from m
 earlier descriptions put thumb *rotation* where thumb flexion is, and called channels 6-8
 a dead wrist when they are a live one.
 
-Inbound, an address **is** a stream name and you write channel 0 of it. Outbound, the
-same DOF is a numbered channel of the read-back. The `#` column is **the outlets'**
-channel number; it is not something an inbound producer indexes.
+Inbound, an address **is** a stream name, and that stream has exactly one channel, so
+there is no index to choose. Outbound, the same DOF is a numbered channel of the
+read-back. The `#` column is **the outlets'** channel number; it is not something an
+inbound producer indexes.
 
 | Address suffix | # on the outlets | Outlet channel label | Bones |
 |---|---|---|---|
@@ -218,10 +239,18 @@ which stamps `pose_convention` into the session so a reader never has to guess.
 
 !!! tip "Read the stream name off the manifest"
     The addresses above are what this build exports today. Call `GetControlManifest` and
-    publish under each capability's `stream_name` rather than a name copied from this
-    page — a build that renames or adds a DOF then moves your client with it, and a name
-    this build does not export is refused by `SetControl` with the alternatives named,
-    instead of silently never resolving.
+    publish under each capability's `address` rather than a name copied from this page —
+    a build that renames or adds a DOF then moves your client with it, and a name this
+    build does not export is refused by `SetControl` with the alternatives named, instead
+    of silently never resolving.
+
+    Check `ControlManifest.vocabulary_version` while you are there. It is **`"2"`** on
+    this build, and it is a gate rather than a label: one stream per DOF, named for the
+    address, one channel wide. A client declares the oldest vocabulary it can drive and
+    refuses anything below it, by name, at bind. Vocabulary `1` described the transport
+    with per-capability `stream_name` and `channel` fields and allowed several controls to
+    share one wider stream; those fields are gone and their numbers and names are
+    reserved.
 
 ## Minimal producer
 

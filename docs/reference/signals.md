@@ -46,9 +46,15 @@ every name still missing, so the resolve count does not grow with the number of 
 
 #### A stream is one DOF, and its name is that DOF's address
 
-`GetControlManifest` reports `stream_name` = the address and `channel` = `0` for every
-streamed capability, so a client publishes under the name it read and never places a
-value by position. There is no whole-pose frame and nothing waits for one.
+`GetControlManifest` reports the address and says nothing further about the wire, because
+there is nothing further to say: the address **is** the stream name, and the stream is one
+`float32` channel wide. A client publishes under the name it read and never places a value
+by position. There is no whole-pose frame and nothing waits for one.
+
+The width is enforced on receipt. A resolved stream that is not exactly one channel wide
+is logged as an error and its inlet is never opened — it is not read at channel 0 and its
+extra channels are not ignored, because element zero of a nine-channel pose is the thumb
+and every DOF would have rendered the thumb.
 
 A sample is applied the moment it arrives; the DOFs that did not deliver hold what they
 were last commanded to. That is deliberate, not a tolerance: the DOFs are independently
@@ -87,8 +93,8 @@ outlets advertise `pose_convention` so the two cannot be confused.
 ### The nine DOFs, and where each one lands
 
 The channel column is **the outlets'**. Inbound it is not an index at all: prefix the
-address suffix with `vhi.prediction.` or `vhi.control.pose.`, publish under that name, and
-write channel 0 of it.
+address suffix with `vhi.prediction.` or `vhi.control.pose.`, and publish one
+single-channel stream under that name.
 
 | address suffix | outlet ch | outlet label | bone | renders? |
 |---|---|---|---|---|
@@ -110,7 +116,7 @@ One service, `VhiControl`, hosts all eight. All are request/reply; nothing strea
 
 | RPC | in | out |
 |---|---|---|
-| `GetControlManifest` | - | every control VHI exports, each with its kind, range or states, and the `stream_name` to publish it under. Call it first |
+| `GetControlManifest` | - | every control VHI exports, each with its kind and its range or states, plus the `vocabulary_version` a client gates on. A streamed control's address is the name to publish it under. Call it first |
 | `SetControl` | a `continuous` map and a `discrete` map | applied, or a rejection reason per name |
 | `SweepControl` | one DOF name and a duration | which bones moved, and the signed degrees at `hi` and at `lo` |
 | `SetPresentation` | blend on/off and speed | applied. Appearance only - it does not change a commanded value |
@@ -118,6 +124,16 @@ One service, `VhiControl`, hosts all eight. All are request/reply; nothing strea
 | `StartRecordingTrajectory` | a movement name to cycle as a subject cue | applied |
 | `StopRecordingTrajectory` | - | applied (idempotent) |
 | `GetRecordingSessionState` | - | recording flag, whether a trajectory runs, its movement, the animation state, `available_movements`, and the selected movement |
+
+The manifest also carries a `vocabulary_version`, and it is **`"2"`** on this build. That
+is a gate rather than a label: a client declares the oldest vocabulary it can drive and
+refuses anything below it, by name, when it binds. VHI and its clients are separately
+installed applications, so upgrading one does not upgrade the other, and a skewed pair
+otherwise fails in the quietest possible way — an old client publishing a wide pose stream
+nobody reads any more, or waiting on a shape nobody publishes, with no error anywhere and
+a hand that simply never moves. Vocabulary `1` described the transport with per-capability
+`stream_name` and `channel` fields; `2` is one stream per DOF, named for the address, one
+channel wide.
 
 ## Neither protocol
 
@@ -136,12 +152,12 @@ be recorded alongside EMG; "can you render these six DOFs?" wants a reply, which
 way to give.
 
 `SetControl` *can* carry continuous values, and is meant to for low-rate updates only. One
-control never touches LSL at all: `vhi.control.gesture` is a held state, reported with
-`channel = -1` and an empty `stream_name`, and travels over gRPC exclusively.
+control never touches LSL at all: `vhi.control.gesture` is a **held state**, and a held
+state travels over `SetControl` exclusively.
 
-Nothing in an address says which wire it uses. Read `stream_name` on the capability: empty
-means gRPC-only; anything else is the LSL stream name, and for this renderer that name is
-the address itself.
+Nothing in an address says which wire it uses — its **kind** does, and there is no other
+field to read. A `CONTINUOUS` capability is streamed, under a stream named for its own
+address; a `DISCRETE` one is a held state and drives no stream at all.
 
 ## Asymmetries worth remembering
 

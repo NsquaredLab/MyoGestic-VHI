@@ -59,14 +59,49 @@ Read the reason in `ControlAck.rejected["vhi.control.gesture"]`:
 ## The predicted hand isn't moving
 
 - Are streams named for the DOFs you drive actually being published?
-  `vhi.prediction.index` and its siblings — the **stream name is the address**, exactly
-  as `GetControlManifest` reports it in `stream_name`. Check with an LSL viewer or
+  `vhi.prediction.index` and its siblings — the **stream name is the address**, exactly as
+  `GetControlManifest` reports it. Check with an LSL viewer or
   `tests/test_all_streams.py`.
 - Stream names are case-sensitive and matched exactly. A typo is not an error anywhere:
   VHI simply goes on looking for a name nobody publishes.
-- Look for the `✅ Connected to LSL inlet <name> (N channels)` line per DOF. VHI resolves
-  by name only and does *not* reject a mismatched stream, so a wide producer is read at
-  channel 0 and its other channels ignored.
+- Look for the `✅ Connected to LSL inlet: <name>` line per DOF. If a name resolved but
+  no such line appeared, look for the `❌` beside it — see the next section.
+
+## VHI found the stream and refused to open it
+
+**Symptom** — an `❌ … is published N channels wide` line instead of the `✅ Connected to
+LSL inlet:` one:
+
+```text
+❌ vhi.prediction.index is published 9 channels wide, and this contract is one address
+per stream, one float32 channel. Not opening it — publish one stream per DOF, named for
+the address.
+```
+
+Your producer is publishing the old whole-pose frame under a per-DOF address. VHI resolves
+by name and then checks the width, and a stream that is not exactly one channel is never
+opened — it is not read at channel 0 and its extra channels are not ignored, because
+element zero of a nine-channel pose is the *thumb*, and tolerating it would render the
+thumb's value on every DOF with nothing anywhere saying so.
+
+Publish one single-channel `float32` outlet per DOF, named for that DOF's address. See
+[Stream a custom pose](how-to/stream-a-custom-pose.md) for a minimal producer.
+
+## A client refuses to bind, naming the vocabulary version
+
+**Symptom** — the client will not drive this renderer and says so at bind, quoting a
+vocabulary version.
+
+`GetControlManifest` reports a `vocabulary_version`; this build reports **`"2"`**, and a
+client declares the oldest it can drive. MyoGestic declares a minimum of 2. Vocabulary `1`
+was the manifest that described the transport with per-capability `stream_name` and
+`channel` fields, before every DOF got a stream of its own.
+
+The refusal is the *good* case. VHI and its clients are separately installed, so upgrading
+one does not upgrade the other, and the alternative to a loud refusal is a pair that binds
+happily and then does nothing: one side waiting for a stream shape the other stopped
+publishing, no error on either, and a hand that never moves. Upgrade the older half — see
+[Upgrading to VHI 2.0](upgrading-to-v2.md).
 
 ## Only some fingers move
 
@@ -82,9 +117,9 @@ one DOF pinned. Kill old producers before measuring anything.
 ## No LSL streams found at all
 
 - Confirm the producer is running and on the same machine/subnet.
-- Check the stream **name** matches an address VHI exports — read `stream_name` off
+- Check the stream **name** matches an address VHI exports — read the address off
   `GetControlManifest` rather than typing it. There is no configurable inlet name any
-  more; the address *is* the name.
+  more, and no separate stream name in the manifest either; the address *is* the name.
 - LSL uses multicast for discovery - a restrictive firewall or VPN can block
   it. VHI runs one resolve every ~5 s covering every name still missing (never one per
   DOF), so starting the producer late is fine once discovery works.

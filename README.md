@@ -23,10 +23,10 @@ VHI is the Godot / .NET front-end of the **[MyoGestic](https://github.com/Nsquar
 
 ## How it fits together
 
-VHI talks to MyoGestic over two channels, each chosen for the kind of traffic it carries:
+VHI talks to MyoGestic over two transports, each chosen for the kind of traffic it carries:
 
-- **LSL** for **continuous time-series**: `MyoGestic_Output` (prediction stream → predicted hand, ~32 Hz), the optional `MyoGestic_ControlPose` (operator-driven pose → control hand), and VHI's own `VHI_Control` / `VHI_Predict` outlets (60 Hz) so the experiment records what was actually shown on screen.
-- **gRPC** for **negotiation, discrete state and verification**: `Declare` agrees a control space by DOF *name*, `SetControl` carries held states, `SweepControl` reports what the rig actually did, and the same service gates a recording session and drives its trajectories. VHI hosts the server in-process on `127.0.0.1:50051`; MyoGestic is the client.
+- **LSL** for **continuous time-series**: one stream per DOF, inbound — `vhi.prediction.*` drives the predicted hand (~32 Hz) and the optional `vhi.control.pose.*` drives the control hand — plus VHI's own `VHI_Control` / `VHI_Predict` outlets (60 Hz, nine channels each) so the experiment records what was actually shown on screen.
+- **gRPC** for **discovery, discrete state and verification**: `GetControlManifest` publishes every control VHI exports, `SetControl` carries held states, `SweepControl` reports what the rig actually did, and the same service gates a recording session and drives its trajectories. VHI hosts the server in-process on `127.0.0.1:50051`; MyoGestic is the client.
 
 `proto/myogestic_vhi.proto` is the wire contract for the gRPC side. MyoGestic vendors a copy and regenerates its Python stubs from it. The pre-2.0 `VhiControl` service is gone — see [Upgrading to VHI 2.0](docs/upgrading-to-v2.md).
 
@@ -43,19 +43,21 @@ Use **←/→** to cycle movements, **↓/↑** to start/stop, **space** to free
 
 ### Drive it from your own EMG pipeline
 
-Publish an LSL stream named `MyoGestic_Output` with 9 float channels:
+Publish **one LSL stream per DOF**, named for that DOF's address and one `float32` channel wide:
 
 ```python
 from pylsl import StreamInfo, StreamOutlet
 
-info = StreamInfo("MyoGestic_Output", "MyoGestic_9DVector", 9, 32, "float32", "my_uid")
+info = StreamInfo("vhi.prediction.index", "MyoGestic_Control", 1, 32, "float32", "my_uid")
 outlet = StreamOutlet(info)
-outlet.push_sample([0.0] * 9)
+outlet.push_sample([1.0])          # the predicted hand's index flexes; nothing else moves
 ```
 
-All nine channels are read: thumb flexion, thumb abduction, then index, middle, ring and little flexion, then wrist flexion, abduction and rotation on channels 6-8 — there is no dead channel on this rig.
+Nine addresses drive the predicted hand — thumb flexion and abduction, index, middle, ring and little flexion, then wrist flexion, abduction and rotation. All nine render; there is no dead DOF on this rig. Publish only the ones you drive: there is no frame to fill in, and a DOF nobody publishes holds what it was last commanded to.
 
-As of 2.0 this inlet takes **standard** values: `+1` is the direction the channel's name denotes, so a closed fist is roughly `[1, 1, 1, 1, 1, 1, 0, 0, 0]`. Before 2.0 the same fist was `[-1, -1, ...]`. Rather than hard-code either, call `Declare` and read `continuous_channel_order` from the reply — see [the LSL reference](docs/reference/lsl-reference.md#the-channel-layout).
+The address **is** the stream name — that is the whole of the inbound transport contract, and the manifest carries nothing further about the wire. A stream that resolves under one of those names and is not exactly one channel wide is refused rather than read at index 0.
+
+Values are **standard**: `+1` is the direction the DOF's name denotes, so a closed fist is `[1, -1, 1, 1, 1, 1, 0, 0, 0]` across the nine — five flexions and an *ad*ducted thumb. Before 2.0 the same fist was `[-1, -1, …]` in the renderer's own units. Rather than hard-code any of it, call `GetControlManifest`, check that its `vocabulary_version` is at least `"2"`, and publish under the addresses it lists — see [the LSL reference](docs/reference/lsl-reference.md#the-nine-dofs).
 
 ## Documentation
 

@@ -12,16 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`VhiControl` — the one gRPC control service, and `GetControlManifest` is its whole
   contract.** The manifest lists every **address** VHI exports
   (`vhi.prediction.index`, `vhi.control.gesture`) with what it can render for each: the
-  kind, the range or the states, and the LSL stream it is read from. A client calls it
-  once, unconditionally, before it sends anything, and maps its own configuration's names
-  onto those addresses. There is no per-client negotiation and nothing to declare — the
-  manifest is the same for everyone, and VHI keeps no session state about who is talking
-  to it. Neither side hard-codes a stream layout.
+  kind, and the range or the states. A client calls it once, unconditionally, before it
+  sends anything, and maps its own configuration's names onto those addresses. There is no
+  per-client negotiation and nothing to declare — the manifest is the same for everyone,
+  and VHI keeps no session state about who is talking to it. Neither side hard-codes a
+  stream layout.
 
-  Every streamed capability reports `stream_name` = its own address and `channel` = `0`,
-  because every DOF is a stream of its own: a client reads the name it must publish under
-  and there is no position to get wrong. `vhi.control.gesture` is the one control that
-  never touches LSL — it reports an empty `stream_name` and `channel` = `-1`.
+  A streamed capability's **address is the name of its LSL stream**, and the manifest says
+  nothing further about the wire because there is nothing further to say: every DOF is a
+  stream of its own, one `float32` channel wide, so a client publishes under the address it
+  read and there is no position to get wrong. `vhi.control.gesture` is the one control that
+  never touches LSL, and its **kind** is what says so — a discrete control is a held state,
+  it travels over `SetControl`, and it drives no stream at all.
 
   A DOF that cannot be rendered is reported by name with a reason and **never silently
   ignored** — an ignored joint looks exactly like a joint that is working and holding
@@ -73,14 +75,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `stream_name` and `channel` are gone from `ControlCapability`, and
+  `vocabulary_version` is now the gate that says so.** The two fields described a
+  transport that had stopped needing describing: VHI publishes one LSL stream per DOF,
+  named for that DOF's own address and exactly one `float32` channel wide, so
+  `stream_name` always equalled `address` and `channel` was always `0` — or `-1` for the
+  one discrete control, which is a fact its **kind** already carried. A field that can
+  only repeat its neighbour is a field two codebases can disagree about for no gain. The
+  address is the stream name, and that is now the whole of the inbound transport contract.
+
+  Field numbers `10` and `11` are `reserved`, and so are the **names** `stream_name` and
+  `channel`. Reserving the numbers alone would still let a later field take either
+  spelling, and in JSON or text format that field would then read as this one to anything
+  still carrying the old schema.
+
+  `ControlManifest.vocabulary_version` moves from `"1"` to **`"2"`**, and from
+  informational to load-bearing. It is a decimal integer compared numerically; a client
+  declares the oldest vocabulary it can drive and **refuses** anything below it, by name,
+  at bind. MyoGestic declares a minimum of 2. VHI and its clients are separately installed
+  applications, so upgrading one does not upgrade the other, and without the gate the skew
+  is silent in the worst way available: an old renderer waits for a wide pose stream nobody
+  publishes any more, logs nothing at all, and the hand simply never moves. Vocabulary `1`
+  was the `stream_name`/`channel` manifest, in which several controls could share one wider
+  stream; `2` is one stream per DOF, named for the address.
+
+  Code reading `cap.stream_name` or `cap.channel` raises `AttributeError` against a
+  regenerated stub, which is the loudest way a field removal reaches a Python client.
+
+- **BREAKING: an inbound stream that is not exactly one channel wide is refused, not
+  tolerated.** A resolved stream is checked for width before an inlet is opened, and
+  anything other than 1 is logged and left unopened:
+  `❌ <name> is published N channels wide, and this contract is one address per stream,
+  one float32 channel. Not opening it — publish one stream per DOF, named for the
+  address.` It used to resize its buffer to whatever turned up and read element zero,
+  which quietly accepted a nine-channel whole-pose outlet from a client too old to know
+  the streams had been split apart — and element zero of that frame is the *thumb*, so
+  every DOF would have rendered the thumb's value with nothing anywhere saying so. A
+  receiver that advertises an invariant is the thing that has to enforce it. The
+  `✅ Connected to LSL inlet` line no longer reports a channel count, because there is only
+  one count it can ever be.
+
 - **BREAKING: one LSL stream per DOF, replacing the two nine-channel pose inlets.**
   `MyoGestic_Output` and `MyoGestic_ControlPose` are gone. Every control VHI exports is
   now its own stream, named by its own address and **one channel wide**:
   `vhi.prediction.index`, `vhi.prediction.thumb.flexion`, `vhi.control.pose.index`, and
-  their siblings — the same names `GetControlManifest` has always published. Each
-  capability reports `stream_name` = its own address and `channel` = `0`, so a client
-  reads the name it must publish under straight off the manifest and there is no
-  positional layout left to get wrong.
+  their siblings — the same names `GetControlManifest` has always published. **The address
+  is the stream name**, so a client reads the name it must publish under straight off the
+  manifest and there is no positional layout left to get wrong.
 
   **There is no whole-pose frame any more and nothing waits for one.** A sample is
   applied to the hand the moment it arrives, and the DOFs that did not deliver hold what
@@ -204,13 +245,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The direction anchor is no longer derived from anything the renderer also reads. It
   holds the movement whose *name* says what it is — `Movements.Index` is index flexion
   because a human called it that — and asserts what `VHI_Control` publishes.
-- **A channel is an address, and both ends read it from one table.** The manifest says
-  `vhi.prediction.index` is channel 2 and a producer writes it there; VHI reads its
-  inlets positionally and reconstructs nothing. Reading a sender's channel labels back
-  instead meant asking the inlet for its stream info, which is the only thing that
-  starts liblsl's `info_receiver` thread — and cancelling that thread mid-request
-  crashed the renderer. It bought a producer the right to send a narrower frame, which
-  saved three floats.
+- **VHI no longer reads a sender's channel labels back off the inlet, and does not
+  crash.** Asking an inlet for its stream info is the only thing that starts liblsl's
+  `info_receiver` thread, and cancelling that thread mid-request crashed the renderer. All
+  it bought was a producer's right to send a narrower frame, which saved three floats.
+  What a stream carries is settled before a byte moves — by its **name**, which is the
+  address of the one DOF it drives — so there is nothing to reconstruct on arrival.
 - **The wrist renders.** `wrist.flexion` and `wrist.abduction` on both hands, channels 6
   and 7. Bone 0 is the common ancestor of all five digit chains, so turning it turns the
   whole hand — it was mapped, named "wrist", and never written to.
@@ -249,8 +289,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   | `vhi.prediction.thumb` | `vhi.prediction.thumb.flexion` (or `.abduction`) |
 
   The same five spellings on `vhi.control.pose.*` are gone from the resolver too; they
-  were never reachable over `SetControl`, and the control-pose stream is written by
-  channel.
+  were never reachable over `SetControl`, and a control-pose DOF is driven by publishing
+  under the address VHI advertises, which was never one of them.
 
   **The manifest does not change** — it never carried these — so a client that already
   resolves against `GetControlManifest` is unaffected, and one that hard-coded a spelling

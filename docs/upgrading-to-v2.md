@@ -10,6 +10,11 @@ All of it is breaking, and all of it is detectable — nothing degrades silently
     those names no longer resolve to anything. And a client that streams the old pose
     convention will render **every joint inverted**. Update MyoGestic and VHI together.
 
+    The manifest now carries the check for exactly this. `vocabulary_version` is `"2"` on
+    2.0, a client declares the oldest vocabulary it can drive, and MyoGestic **refuses**
+    any renderer reporting less — by name, at bind, rather than by leaving you to notice
+    that a hand is not moving.
+
 ## What changed, and why
 
 **Movements, poses and modes were three different things wearing one interface.** v1
@@ -18,9 +23,10 @@ ends for years without anything noticing, and MyoGestic's own documentation desc
 channel 0 as thumb *rotation* and channels 6-8 as a wrist. Neither was true.
 
 v2 replaces that with a **manifest**. `GetControlManifest` lists every address VHI
-exports — `vhi.prediction.index`, `vhi.control.gesture` — each with its kind, its
-range or its states, and the LSL stream it is read from. A client fetches it once, maps
-its own names onto those addresses, and sends. Nothing hard-codes a stream layout on
+exports — `vhi.prediction.index`, `vhi.control.gesture` — each with its kind and its
+range or its states. A streamed control's address is also the name of the LSL stream it
+is read from, so nothing further describes the wire. A client fetches the manifest once,
+maps its own names onto those addresses, and sends. Nothing hard-codes a stream layout on
 either side, and nothing is negotiated: the manifest is the same for every client, and
 VHI keeps no per-client state.
 
@@ -33,7 +39,29 @@ now its own LSL stream, named for its own address and **one channel wide**:
 |---|---|
 | `MyoGestic_Output`, 9 channels, positional | `vhi.prediction.index`, `vhi.prediction.thumb.flexion`, … — nine streams, 1 channel each |
 | `MyoGestic_ControlPose`, 9 channels, positional | `vhi.control.pose.index`, `vhi.control.pose.thumb.flexion`, … — nine streams, 1 channel each |
-| `channel` on the capability told you where to write in the frame | `stream_name` on the capability tells you what to publish under; `channel` is `0` |
+| `channel` on the capability told you where to write in the frame | **the address is the stream name.** `stream_name` and `channel` are gone from the capability entirely |
+
+**The manifest stopped describing the wire, because the address already did.**
+`ControlCapability` used to carry a `stream_name` and a `channel` beside each address, and
+both are now gone: field numbers `10` and `11` are `reserved`, and so are the two *names*,
+so a later field cannot quietly inherit either spelling in a JSON or text-format payload.
+Neither ever said anything — `stream_name` always equalled `address`, and `channel` was
+always `0`, or `-1` for the one control that never streams at all. Read `cap.address` and
+publish under it; `cap.stream_name` and `cap.channel` raise `AttributeError` against a
+regenerated stub, which is the loudest way for a field removal to reach a Python client.
+
+**`vocabulary_version` is how a mismatched pair announces itself.** It is `"2"` on 2.0 —
+one stream per DOF, named for the address, one channel wide — where `1` was the manifest
+that carried `stream_name` and `channel` and let several controls share one wider stream.
+A client declares the oldest vocabulary it can drive and refuses anything below it; that
+is the only thing that makes two *separately installed* applications say a skew out loud
+rather than bind cleanly and render nothing.
+
+**And VHI now refuses a mis-shaped stream on receipt.** A resolved stream whose channel
+count is not exactly 1 is logged as an error and its inlet is never opened. It used to
+resize its buffer to whatever turned up and read element zero — which silently accepted a
+nine-channel `MyoGestic_Output` frame from an un-migrated client and rendered its *thumb*
+on every DOF.
 
 **There is no whole-pose frame any more and nothing waits for one.** A sample is applied
 the moment it arrives, and the DOFs that did not deliver hold what they were last
@@ -197,7 +225,8 @@ by it, and calling it twice costs one extra RPC.
 5. **Delete any hand-built 9-float frame, and the stream it went to.** There is no frame
    any more: `MyoGestic_Output` and `MyoGestic_ControlPose` do not exist, each DOF has a
    stream of its own, and a frame assembled by position is correct for nothing. Push
-   standard values through the bus and let it publish under the manifest's stream names.
+   standard values through the bus and let it publish one stream per address the manifest
+   lists.
 6. **Drop `freeze`, `set_speed`, `set_chirality`, `set_control_mode`.** They have no
    equivalent by design.
 7. **Stop asking for `Stream` mode.** Whatever selected it — a `control_pose=True`
@@ -209,18 +238,23 @@ by it, and calling it twice costs one extra RPC.
 
 Generate stubs from `proto/myogestic_vhi.proto`, then:
 
-1. Call `GetControlManifest` once, unconditionally, before you send anything.
-2. For each control you drive, read the capability's `stream_name` — never a remembered
-   name — and create **one single-channel LSL outlet under it**. For this renderer
-   `stream_name` is the address itself and `channel` is `0`; read them anyway, so a
-   target that packs its controls differently does not break you.
+1. Call `GetControlManifest` once, unconditionally, before you send anything, and
+   **refuse a `vocabulary_version` below `2`**. It is a string holding a decimal integer;
+   compare it numerically, and say what you refused and why.
+2. For each control you drive, take the capability's `address` — never a remembered name
+   — and create **one single-channel LSL outlet under it**. The address *is* the stream
+   name: there is no `stream_name` and no `channel` on a capability any more, and a stream
+   that is not exactly one `float32` channel wide is refused by VHI rather than read at
+   index 0.
 3. Push each DOF on its own outlet, at whatever rate you have values for it, and/or call
    `SetControl` for held states. Nothing has to be opened, declared or requested first,
    and you publish only the DOFs you drive — the rest hold where they are.
 
-An `UNIMPLEMENTED` on step 1 is a renderer too old to drive. Read
-`ControlAck.rejected` on every `SetControl`: a refusal is always named, and a name
-missing from it is the only evidence a value landed.
+An `UNIMPLEMENTED` on step 1 is a renderer too old to have a manifest at all; a
+`vocabulary_version` below your minimum is one that has a manifest and speaks a transport
+you do not. Both are a renderer you cannot drive, and both are worth naming in a log
+rather than working around. Read `ControlAck.rejected` on every `SetControl` too: a
+refusal is always named, and a name missing from it is the only evidence a value landed.
 
 ## Smoothing: three layers, not one
 

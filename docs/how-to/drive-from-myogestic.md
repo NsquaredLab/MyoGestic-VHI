@@ -78,6 +78,12 @@ issues the unary RPC and logs the acknowledgement.
     version; run a checkout from source with `$VHI_PATH` and `$GODOT_BIN` if you have
     no 2.x release.
 
+    `VhiTarget` also reads `vocabulary_version` off the manifest and **refuses anything
+    below `2`**, loudly, at bind. Vocabulary 2 is the one in which every DOF is its own
+    single-channel stream named for its address; a renderer still reporting `1` expects
+    the retired `stream_name`/`channel` manifest, and driving it would leave the hand
+    still with nothing anywhere logging why.
+
 ## Discover what VHI exports
 
 `capabilities()` is the whole vocabulary, and it is VHI's to declare: every address,
@@ -86,8 +92,14 @@ so a build that grows a control needs no client change.
 
 ```python
 for cap in client.capabilities() or ():
-    print(cap.address, cap.kind, cap.lo, cap.hi, cap.channel)
+    print(cap.address, cap.kind, cap.lo, cap.hi, cap.rest)
 ```
+
+A capability describes what it renders and nothing about the wire, because the wire needs
+no describing: a continuous control's **address is the name of its LSL stream**, one
+`float32` channel wide, and a discrete one is a held state that drives no stream at all.
+There is no `stream_name` and no `channel` field to read — `cap.kind` is the whole of that
+distinction.
 
 ## Query control-hand state
 

@@ -24,7 +24,7 @@ while a recording trajectory is deliberately sweeping the control hand.
 
 | RPC | Request | Returns | Notes |
 |---|---|---|---|
-| `GetControlManifest` | `GetControlManifestRequest` | `ControlManifest` | Every address VHI exports, each with its kind, its range or its states, and the `stream_name` to publish it under (this renderer gives every streamed DOF a stream of its own, so `stream_name` is the address and `channel` is `0`). **Call this first**, unconditionally — there is nothing else to open, declare or negotiate. |
+| `GetControlManifest` | `GetControlManifestRequest` | `ControlManifest` | Every address VHI exports, each with its kind and its range or its states — plus the `vocabulary_version` to gate on. A streamed DOF's **address is its stream name**: there is no separate stream name or channel number, because a stream is one DOF and one `float32` channel. **Call this first**, unconditionally — there is nothing else to open, declare or negotiate. |
 | `SetControl` | `SetControlRequest` | `ControlAck` | Command one frame: `continuous` by name, `discrete` by state. Refusals are named in `rejected`, never silent. |
 | `SweepControl` | `SweepControlRequest` | `SweepControlReply` | Drive one DOF across its range; reports which rig elements moved and the signed degrees, read back off the skeleton. |
 | `SetPresentation` | `SetPresentationRequest` | `ControlAck` | Renderer blending. Appearance only — never a substitute for a client-side debounce. |
@@ -39,6 +39,35 @@ being aligned against. A live `vhi.control.pose.*` stream owns it the same way �
 of the nine is enough — and refuses the same commands. See
 [What drives the control hand](../concepts/control-hand-drivers.md). Continuous DOFs are
 unaffected either way; they drive the predicted hand.
+
+## `vocabulary_version` — check it, and refuse below it
+
+`ControlManifest.vocabulary_version` is a decimal integer, compared numerically. This
+build reports **`"2"`**, and it is load-bearing: a client declares the oldest vocabulary
+it can drive and refuses anything below it, by name, at bind. MyoGestic declares a minimum
+of 2.
+
+| Vocabulary | The transport it describes |
+|---|---|
+| `1` | a manifest carrying `stream_name` and `channel` per capability; several controls could share one wider stream. **Retired.** |
+| `2` | one stream per DOF, named for the address, one `float32` channel wide. |
+
+VHI and its clients are separately installed applications, so upgrading one does not
+upgrade the other. Without the gate a skewed pair fails silently in both directions: an
+old renderer waits for a wide pose stream nobody publishes any more and logs nothing, and
+a new renderer refuses an old client's wide stream at the LSL layer instead — either way
+the hand does not move, and only one of those two says so out loud. The version check is
+the one place both sides' versions are visible at once.
+
+!!! note "`stream_name` and `channel` are gone from `ControlCapability`"
+    Field numbers `10` and `11` are `reserved`, and so are the names `stream_name` and
+    `channel` — a later field reusing either spelling would read as the old one in JSON or
+    text format to anything still carrying the v1 schema, which reserving the numbers
+    alone does not prevent. Code that read `cap.stream_name` or `cap.channel` raises
+    `AttributeError` against a regenerated stub; use `cap.address` as the stream name and
+    `cap.kind` to tell a streamed control from a held state.
+
+## The full contract
 
 `proto/myogestic_vhi.proto` is the authoritative source - MyoGestic vendors a copy
 and regenerates its stubs from it.

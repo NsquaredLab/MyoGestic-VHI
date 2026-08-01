@@ -41,27 +41,60 @@ source. MyoGestic vendors a copy and regenerates its Python stubs from it.
 ### `GetControlManifest` is the whole contract
 
 DOFs are addressed **by name**, and `GetControlManifest` publishes every address VHI
-exports along with what it can render for each — the kind, the range, the states, and
-the LSL stream it is read from. Neither side hard-codes a stream layout, and neither
-side keeps a table the other has to be kept in sync with.
+exports along with what it can render for each — the kind, the range, the states. Neither
+side hard-codes a stream layout, and neither side keeps a table the other has to be kept
+in sync with.
 
-For this renderer each streamed control is a stream of its own, so the manifest reports
-`stream_name` = the address and `channel` = `0`. A client publishes under the name it
-read; there is no positional layout left to get wrong, and nothing links one DOF's
-stream to another's.
+Each streamed control is a stream of its own, named for that control's own address and
+one `float32` channel wide. So **the address is the stream name**, and the manifest says
+nothing else about the wire — there is nothing else to say. It used to carry a
+`stream_name` and a `channel` beside every address; both are gone, because `stream_name`
+always equalled `address` and `channel` was always `0`, and a field that can only repeat
+its neighbour is a field two codebases can disagree about for no gain. A client publishes
+under the address it read; there is no positional layout left to get wrong, and nothing
+links one DOF's stream to another's.
 
 A client calls it **once, unconditionally, before it sends anything**. There is no
 per-client negotiation, no declared subset, and nothing to declare: the manifest is
 the same for every client, and VHI keeps no session state about who is talking to it.
 The sequence is:
 
-1. `GetControlManifest` — one call. Map your own model-output names onto the
-   addresses it lists, and read each capability's `stream_name`.
-2. Then either **publish** the stream that capability named, one per DOF you drive, or
-   **send** `SetControl` for held states and low-rate updates. Both work immediately;
-   nothing has to be opened first, and you publish only the DOFs you actually drive.
+1. `GetControlManifest` — one call. Check the `vocabulary_version` it reports, then map
+   your own model-output names onto the addresses it lists.
+2. Then either **publish** a single-channel stream named for that address, one per DOF you
+   drive, or **send** `SetControl` for held states and low-rate updates. Both work
+   immediately; nothing has to be opened first, and you publish only the DOFs you actually
+   drive.
 
 `SweepControl`, `SetPresentation` and the recording RPCs are optional extras on top.
+
+### The vocabulary version is a gate, not a label
+
+`ControlManifest.vocabulary_version` is a decimal integer, compared numerically, and this
+build reports **`"2"`**. A client declares the oldest vocabulary it can drive and
+**refuses** anything below it, loudly, at bind — MyoGestic declares a minimum of 2 and
+will not drive a renderer reporting less.
+
+That refusal exists because VHI and its clients are *separately installed applications*.
+Upgrading one does not upgrade the other, and a version-skewed pair otherwise fails in the
+quietest way this system has: an old renderer sits waiting for a wide pose stream nobody
+publishes any more, logs nothing at all, and the hand simply never moves. There is no
+symptom to read, so the check has to happen at the one moment both versions are on the
+table.
+
+| Vocabulary | The transport it describes |
+|---|---|
+| `1` | a manifest carrying `stream_name` and `channel` per capability; several controls could share one wider stream. **Retired.** |
+| `2` | one stream per DOF, named for the address, one `float32` channel wide. |
+
+Field numbers `10` and `11` are `reserved` in the `.proto`, and so are the *names*
+`stream_name` and `channel` — a later field reusing either spelling would read as the old
+one in JSON or text format to anything still carrying the v1 schema, which is the mistake
+reserving the numbers alone does not prevent.
+
+VHI enforces the same contract from the receiving end: a resolved LSL stream whose channel
+count is not exactly 1 is logged as an error and its inlet is never opened. See
+[the LSL reference](../reference/lsl-reference.md#a-stream-that-is-not-one-channel-wide-is-never-opened).
 
 !!! warning "The legacy `VhiControl` service has been removed"
     `proto/myogestic_vhi.proto` and its service are gone. They spoke in movement
@@ -158,7 +191,7 @@ what is arriving at the moment of the command.
 
 | RPC | Purpose |
 |---|---|
-| `GetControlManifest` | every address VHI exports, with its kind, range, states, and the stream to publish it under. Call it first |
+| `GetControlManifest` | every address VHI exports with its kind, range and states, plus the vocabulary version to gate on. Call it first |
 | `SetControl` | command one standard frame — continuous values and discrete states |
 | `SweepControl` | drive one DOF across its range and report which bones moved, in signed degrees |
 | `SetPresentation` | renderer blending (appearance only — layer 3 of three) |

@@ -24,9 +24,16 @@ individual stream is optional too - producing the control-pose family at all is
 unusual, and most setups let the control hand play its named movements instead.
 
 The stream name *is* the address `GetControlManifest` publishes, so a client
-reads the name it must publish under rather than agreeing on a layout. See
-[the LSL reference](../reference/lsl-reference.md#inlets-consumed-by-vhi) for
-all eighteen names.
+reads the name it must publish under rather than agreeing on a layout — and the
+manifest carries nothing else about the wire, because there is nothing else to
+carry. See [the LSL reference](../reference/lsl-reference.md#inlets-consumed-by-vhi)
+for all eighteen names.
+
+One channel is not a convention here, it is **enforced**: a stream that resolves
+under one of those names and turns out to be any other width is logged and never
+opened. Tolerating a wider one would mean reading element zero of somebody's
+whole-pose frame, which is the thumb — and rendering the thumb on every DOF is
+exactly the sort of wrong that never reports itself.
 
 The inlet rate is **whatever the producer pushes**, per stream. MyoGestic's
 default prediction loop runs at ~32 Hz, but VHI itself doesn't impose or assume

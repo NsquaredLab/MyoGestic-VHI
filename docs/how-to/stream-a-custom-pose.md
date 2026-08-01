@@ -51,15 +51,24 @@ from myogestic.vhi import virtual_hand
 vhi = virtual_hand()
 client = vhi.control_client()
 
-# What the control hand exports, and the stream name for each.
+# What the control hand exports. The address is the stream name.
 for cap in client.capabilities() or ():
     if cap.address.startswith("vhi.control.pose."):
-        print(cap.address, cap.stream_name, cap.channel)
-        # -> vhi.control.pose.index  vhi.control.pose.index  0
+        print(cap.address)
+        # -> vhi.control.pose.index
 ```
 
-`stream_name` is the address and `channel` is `0` for every one of them: publish under
-the name you read, one channel wide, and there is no positional layout to get wrong.
+The address **is** the stream name: publish one `float32` channel under it and there is
+no positional layout to get wrong. The manifest carries nothing else about the wire — no
+stream name beside the address, no channel number — because a stream is one DOF and one
+channel, so both fields could only ever repeat what the address already said. They were
+removed for exactly that reason; a client that still reads `cap.stream_name` or
+`cap.channel` raises `AttributeError` against a current stub.
+
+The manifest also reports a `vocabulary_version`, and it is **`"2"`** here — one stream
+per DOF, named for the address. Check it before you publish anything: a client that
+refuses a renderer below its minimum finds out at bind, and one that does not finds out
+by watching a hand that never moves.
 
 `vhi.control.pose.*` is the control hand's own namespace — deliberately distinct from
 `vhi.prediction.*`, and on separate streams. Nothing can route a model's output into
@@ -78,7 +87,7 @@ from pylsl import StreamInfo, StreamOutlet
 def dof_outlet(address, rate=32):
     """One single-channel LSL outlet, named for the DOF it drives."""
     info = StreamInfo(
-        name=address,          # straight off the manifest's stream_name
+        name=address,          # straight off the manifest — the address is the name
         type="MyoGestic_Control",
         channel_count=1,
         nominal_srate=rate,
@@ -136,9 +145,10 @@ client = vhi.control_client()
 recording = vhi.recording_client()
 
 # 1. Orchestration over gRPC. Nothing here turns the streams on — the only call is
-#    the manifest, and it is a read.
-STREAM = {
-    cap.address: cap.stream_name
+#    the manifest, and it is a read. Each address is also the stream name, so this
+#    doubles as the check that the build still exports what the sweep will publish.
+EXPORTED = {
+    cap.address
     for cap in client.capabilities() or ()
     if cap.address.startswith("vhi.control.pose.")
 }
@@ -150,13 +160,15 @@ DIGITS = [                              # the six finger DOFs; the order is your
     "vhi.control.pose.ring",
     "vhi.control.pose.little",
 ]
+assert EXPORTED.issuperset(DIGITS), sorted(set(DIGITS) - EXPORTED)
 recording.set_recording_session(True)   # gate VHI's keyboard - MyoGestic owns the hand
 
-# 2. One outlet per DOF under test. The wrist is never published, so it holds at rest
-#    for the whole sweep without anything having to write zeros to it.
+# 2. One outlet per DOF under test, one channel each — VHI refuses anything wider.
+#    The wrist is never published, so it holds at rest for the whole sweep without
+#    anything having to write zeros to it.
 outlets = {
     address: StreamOutlet(
-        StreamInfo(STREAM[address], "MyoGestic_Control", 1, 32, "float32", f"sweep:{address}")
+        StreamInfo(address, "MyoGestic_Control", 1, 32, "float32", f"sweep:{address}")
     )
     for address in DIGITS
 }
@@ -180,14 +192,16 @@ recording.set_recording_session(False)
 
 `SETTLE_S` is half a second, comfortably inside the five-second stale window, so the
 hand stays stream-driven for the whole sweep without anything holding it there. And no
-stream name is written down anywhere: `STREAM` comes from the manifest, so a build that
-renames a DOF moves this loop with it.
+stream name is invented anywhere: an address *is* one, so asserting `DIGITS` against the
+manifest is the same check as "does this build still publish what I am about to drive",
+and a build that renames a DOF fails the assertion instead of sweeping a hand that never
+moves.
 
 Two planes, two roles - this is the whole design:
 
 | Plane | What it carries here | Role |
 |---|---|---|
-| **gRPC** | `GetControlManifest` (the stream names), `SetRecordingSession`, `GetRecordingSessionState` | discovery, setup, assertions |
+| **gRPC** | `GetControlManifest` (the addresses, which are the stream names), `SetRecordingSession`, `GetRecordingSessionState` | discovery, setup, assertions |
 | **LSL** (`vhi.control.pose.*`) | the test poses themselves, one stream per DOF | continuous data, and the only thing that activates the hand |
 
 Two LSL records line everything up offline:
