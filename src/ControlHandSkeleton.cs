@@ -99,7 +99,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 		// Presence decides, not a handshake. A control-pose stream that is delivering is a
 		// client driving this hand; one that is not is a client that stopped, or was never
 		// there. The predicted hand has always worked this way — it renders whatever arrives
-		// on MyoGestic_Output — and the two hands differing on that was the whole reason
+		// on its DOFs' streams — and the two hands differing on that was the whole reason
 		// Declare had a side effect.
 		if (communicationController != null && communicationController.ControlPoseLive)
 		{
