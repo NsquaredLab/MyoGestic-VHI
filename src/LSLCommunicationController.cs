@@ -83,9 +83,8 @@ public partial class LSLCommunicationController : Node
 	/// on, the loss is hidden outright. With it off liblsl <i>does</i> raise on the next pull
 	/// — but <see cref="LSLWrapper.PullSample"/> catches every exception, logs it and returns
 	/// <c>0.0</c>, so what reaches the drain loop below is indistinguishable from "no samples
-	/// this frame". The <c>catch</c> around that loop cannot fire from a failing pull, and an
-	/// inlet whose producer died looks alive forever. Read that before concluding the catch
-	/// covers this: it is the wrapper, not liblsl, that decides what this file gets to see.
+	/// this frame". Hence a clock rather than error handling: it is the wrapper, not liblsl,
+	/// that decides what this file gets to see, and it never lets an error through.
 	/// </remarks>
 	private DateTime lastPredictionSample = DateTime.Now;
 
@@ -102,11 +101,9 @@ public partial class LSLCommunicationController : Node
 
 	/// <summary>Silence after which the control-pose inlet is assumed gone.</summary>
 	/// <remarks>
-	/// The prediction inlet has had one of these; this one had not, and leaned on the catch
-	/// around its pull instead — which never fires, because the wrapper swallows the
-	/// exception before this file sees it. Presence is now the only thing that hands the
-	/// control hand to this stream, so "the producer stopped" has to be observable here
-	/// rather than inferred from an error that never arrives.
+	/// Presence is the only thing that hands the control hand to this stream, so "the
+	/// producer stopped" has to be observable here rather than inferred from an error —
+	/// see <see cref="lastPredictionSample"/> for why no error ever arrives.
 	/// <para>It settles two things, not one: <see cref="ControlPoseLive"/> goes false, and
 	/// the inlet itself is dropped so the by-name resolve can find whoever publishes that
 	/// name next. Without the second, the first producer to exit cleanly pinned this inlet
@@ -199,24 +196,15 @@ public partial class LSLCommunicationController : Node
 		// --- Pull: prediction inlet -> receivedDataPredicted (latest sample only) ---
 		if (predictionInlet != null)
 		{
-			try
+			int samplesThisFrame = 0;
+			while (LSLWrapper.PullSample(predictionInlet, sampleBuffer, 0.0) > 0)
 			{
-				int samplesThisFrame = 0;
-				while (LSLWrapper.PullSample(predictionInlet, sampleBuffer, 0.0) > 0)
-				{
-					receivedDataPredicted = [.. sampleBuffer];
-					samplesThisFrame++;
-				}
+				receivedDataPredicted = [.. sampleBuffer];
+				samplesThisFrame++;
+			}
 
-				if (samplesThisFrame > 0)
-					lastPredictionSample = DateTime.Now;
-			}
-			catch (Exception e)
-			{
-				GD.PrintErr($"Error pulling LSL prediction sample: {e.Message}");
-				DropInlet(ref predictionInlet);
-				receivedDataPredicted.Clear();
-			}
+			if (samplesThisFrame > 0)
+				lastPredictionSample = DateTime.Now;
 		}
 
 		// --- Drop a prediction inlet that has gone quiet, so it can be re-resolved ---
@@ -235,39 +223,25 @@ public partial class LSLCommunicationController : Node
 		// --- Pull: control-pose inlet -> receivedDataControl (latest sample only) ---
 		if (controlPoseInlet != null)
 		{
-			try
+			int got = 0;
+			while (LSLWrapper.PullSample(controlPoseInlet, controlPoseBuffer, 0.0) > 0)
 			{
-				int got = 0;
-				while (LSLWrapper.PullSample(controlPoseInlet, controlPoseBuffer, 0.0) > 0)
-				{
-					receivedDataControl = [.. controlPoseBuffer];
-					got++;
-				}
-				if (got > 0)
-					lastControlPoseSample = DateTime.Now;
+				receivedDataControl = [.. controlPoseBuffer];
+				got++;
 			}
-			catch (Exception e)
-			{
-				GD.PrintErr($"Error pulling LSL control-pose sample: {e.Message}");
-				DropInlet(ref controlPoseInlet);
-				receivedDataControl.Clear();
-			}
+			if (got > 0)
+				lastControlPoseSample = DateTime.Now;
 		}
 
 		// --- Drop a control-pose inlet that has gone quiet, so it can be re-resolved ---
 		//
-		// The prediction inlet has always had this; this one had only the catch above, and
-		// that catch is dead code: LSLWrapper.PullSample swallows the exception and returns
-		// 0.0, so a lost producer reaches the drain loop as "no samples" and nothing here
-		// ever drops the inlet. Measured — a producer exiting cleanly logs liblsl's "Stream
-		// transmission broke off" and then "PullSample failed (1449 more since the last
-		// message)", while `🔍 Searching for MyoGestic_ControlPose` is never printed again.
-		// ControlPoseLive went false and the hand released, so the bug hid behind correct
-		// behaviour: the dead inlet was still held, the field never read null, and the
-		// by-name resolve above never ran. The next producer to publish
-		// MyoGestic_ControlPose was invisible until VHI was restarted. Presence is the
-		// whole mechanism now that Declare is gone, and presence has to be able to notice
-		// the *second* producer.
+		// Silence is the only signal there is. LSLWrapper.PullSample returns 0.0 on any
+		// failure, so a producer that died and one that is merely idle arrive here looking
+		// identical — which is why both inlets are dropped on a clock rather than on an
+		// error. Measured before this existed: a producer exiting cleanly left the inlet
+		// held forever, ControlPoseLive went false and the hand released correctly, and the
+		// *next* producer was invisible until VHI restarted, because the field never read
+		// null and the resolve above never ran again.
 		//
 		// The clock: lastControlPoseSample is DateTime.MinValue until this inlet actually
 		// delivers something, so judging it on that alone would drop every fresh inlet on
@@ -348,17 +322,15 @@ public partial class LSLCommunicationController : Node
 			if (isShuttingDown || streams == null || streams.Length == 0)
 				return null;
 
-			// recover: false is load-bearing. With liblsl's recovery on, a producer that
-			// goes away is hidden — the inlet keeps "working", silently delivering nothing,
-			// and the catch below that nulls it and lets the by-name search run again never
-			// fires. Worse, recovery matches on source_id, so it cannot reattach when the
-			// replacement stream has a different channel count: a client that rebuilds its
-			// outlet with a different set of controls (which the control-map editor does on
-			// every save) left this inlet dead for the life of the process.
+			// recover: false is load-bearing. Recovery matches on source_id, so it cannot
+			// reattach when the replacement stream has a different channel count: a client
+			// that rebuilds its outlet with a different set of controls (which the
+			// control-map editor does on every save) would leave this inlet dead for the
+			// life of the process, still reporting itself as working.
 			//
-			// Off, a lost producer raises, the inlet is dropped, and the resolve-by-name
-			// loop picks up whatever is publishing that name now. That is the recovery this
-			// renderer actually wants, and it is the one it already had code for.
+			// Off, a lost producer simply stops delivering, the staleness clock drops the
+			// inlet, and the resolve-by-name loop picks up whoever publishes that name now.
+			// That is the recovery this renderer actually wants.
 			int channelCount = LSLWrapper.GetStreamInfoChannelCount(streams[0]);
 			width = channelCount > 0 ? channelCount : ExpectedChannels;
 
