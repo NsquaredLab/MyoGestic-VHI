@@ -718,13 +718,13 @@ def test_direction_is_the_same_on_every_repeat(v2):
 # now carry one half each, and the two tests below are the whole claim.
 
 
-def test_every_capability_names_its_own_stream_at_channel_zero(v2):
+def test_every_streamed_control_is_exactly_one_address(v2):
     """The manifest is the whole contract now — there is no Declare to double-check it.
 
-    One stream per DOF, named by the address, one channel wide. A client reads the name it
-    must publish under straight off `stream_name`, and the channel is 0 because there is
-    nothing else on that stream — so there is no positional layout left to get wrong, and
-    no way to drive the wrong finger by counting from the wrong end.
+    One stream per DOF, named by the address, one channel wide, and the manifest says so
+    by carrying nothing else: `stream_name` and `channel` are gone, because a field whose
+    value is always the address, and one whose value is always 0, are two more things that
+    could disagree with the third. A client publishes under the address it reads here.
 
     Exactly eighteen, one per address, an equality rather than a subset: a second name for
     one control is the thing this vocabulary is not allowed to grow back, and so is a
@@ -732,14 +732,8 @@ def test_every_capability_names_its_own_stream_at_channel_zero(v2):
     """
     stub, pb2 = v2
     manifest = stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=10.0)
-    streamed = {
-        c.address: (c.stream_name, c.channel)
-        for c in manifest.capabilities
-        if c.kind == pb2.CONTINUOUS
-    }
+    streamed = {c.address for c in manifest.capabilities if c.kind == pb2.CONTINUOUS}
     assert streamed == {
-        address: (address, 0)
-        for address in (
             "vhi.prediction.thumb.flexion",
             "vhi.prediction.thumb.abduction",
             "vhi.prediction.index",
@@ -758,22 +752,43 @@ def test_every_capability_names_its_own_stream_at_channel_zero(v2):
             "vhi.control.pose.wrist.flexion",
             "vhi.control.pose.wrist.abduction",
             "vhi.control.pose.wrist.rotation",
-        )
     }
 
 
-def test_a_held_state_still_names_no_stream(v2):
-    """The one capability that is not a stream, and must not read as channel 0 of one.
+def test_a_held_state_is_told_apart_by_its_kind_alone(v2):
+    """The one capability that is not a stream, and nothing but `kind` says so.
 
-    Channel 0 is now a *real* channel on eighteen streams, so a discrete control left at
-    proto3's default would read as the thumb's own stream rather than as "not streamed".
+    It used to say so twice over, with `channel = -1` and an empty `stream_name` beside
+    the kind — and that redundancy was a hazard rather than a belt and braces: a target
+    that simply left `channel` unset reported proto3's default of 0, which read as the
+    thumb's own channel. There is one answer to the question now, and it is the only one
+    that was ever authoritative.
     """
     stub, pb2 = v2
     manifest = stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=10.0)
     gesture = next(c for c in manifest.capabilities if c.address == "vhi.control.gesture")
     assert gesture.kind == pb2.DISCRETE
-    assert gesture.channel == -1, "a held state travels over gRPC and occupies no channel"
-    assert gesture.stream_name == ""
+    fields = {field.name for field in gesture.DESCRIPTOR.fields}
+    assert not fields & {"stream_name", "channel"}, (
+        "the removed fields are reserved by name as well as by number, so nothing may "
+        f"reintroduce either spelling — found {sorted(fields)}"
+    )
+
+
+def test_the_manifest_reports_the_vocabulary_a_client_gates_on(v2):
+    """The version is load-bearing, so a build that forgot to bump it must fail here.
+
+    MyoGestic and VHI are installed separately, so shipping them together does not make
+    any running pair a matching pair. A client refuses a renderer below its own minimum by
+    name; a renderer that still claimed `"1"` while serving this transport would be
+    refused as though it were the old one — correctly, and confusingly.
+    """
+    stub, pb2 = v2
+    manifest = stub.GetControlManifest(pb2.GetControlManifestRequest(), timeout=10.0)
+    assert int(manifest.vocabulary_version) >= 2, (
+        f"one stream per DOF is vocabulary 2, but this build reports "
+        f"{manifest.vocabulary_version!r}"
+    )
 
 
 #: A spelling VHI used to accept unadvertised -> the one address that replaces it.
