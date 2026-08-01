@@ -9,23 +9,24 @@ using Myogestic.Vhi;
 namespace Vhi;
 
 /// <summary>
-/// The one gRPC service VHI serves: control-space negotiation and per-frame commands
-/// for the predicted and control hands, plus the recording-session coordination a
-/// capture pipeline drives them through.
+/// The one gRPC service VHI serves: a manifest of every control it exports, per-frame
+/// commands for the predicted and control hands, plus the recording-session
+/// coordination a capture pipeline drives them through.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A client declares which of VHI's <b>addresses</b> it drives ("vhi.prediction.index"),
-/// under whatever names its own configuration uses, and VHI answers with what it can
-/// render. <see cref="Renderable"/> is the only table in VHI that knows both
-/// vocabularies, and it exists so that nothing outside this file has to.
+/// A client calls <see cref="GetControlManifest"/> once, unconditionally, and gets back
+/// every <b>address</b> VHI exports ("vhi.prediction.index") with what it can render —
+/// no per-client negotiation, no declared subset. <see cref="Renderable"/> is the only
+/// table in VHI that knows both the manifest's addresses and the rig they resolve to,
+/// and it exists so that nothing outside this file has to.
 /// </para>
 /// <para>
 /// <b>Which hand renders what.</b> Continuous DOFs drive the <i>predicted</i> hand;
 /// discrete DOFs drive the <i>control</i> hand's movements. The two never contend, so
 /// an application can hold a continuous grip and a discrete grasp state at once. A
-/// client that wants a discrete DOF rendered still needs the control hand in Movement
-/// mode, and gets told so by name when it is not.
+/// discrete DOF is refused by name when a control-pose stream is driving the control
+/// hand instead — see <see cref="SetControl"/>.
 /// </para>
 /// <para>
 /// <b>Recording-session coordination.</b> <see cref="SetRecordingSession"/>,
