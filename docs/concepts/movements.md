@@ -1,6 +1,7 @@
 # Movements
 
-In [`Movement` mode](control-modes.md), the control hand plays from a set of
+Whenever no control-pose stream is
+[driving it](control-hand-drivers.md), the control hand plays from a set of
 **named predefined movements**. This page covers the set, the two modes it
 comes in, and the TOML file that defines the poses.
 
@@ -16,7 +17,8 @@ VHI ships 23 movement definitions (`Movements` in `src/MovementDefinitions.cs`):
 A movement defines one **max-flexion** pose per animated joint (Euler degrees);
 the rest pose is always neutral (`[0, 0, 0]`) and is not stored. The state
 machine interpolates between rest and that max-flexion pose (see
-[Control-hand modes](control-modes.md) for `cycle`).
+[held state, or a swept trajectory](control-hand-drivers.md#held-state-or-a-swept-trajectory)
+for `cycle`).
 
 ## Which movements are offered
 
@@ -64,6 +66,6 @@ the TOML - no rebuild. See
 !!! info "Named movements vs. arbitrary poses"
     The TOML route is for movements you can **name ahead of time**. If you
     need to drive the control hand with an *arbitrary, runtime-generated* pose
-    (a data glove, another model, generated trajectories), that's the
-    [`Stream` mode](control-modes.md) path instead -
+    (a data glove, another model, generated trajectories),
+    [publish a control-pose stream](control-hand-drivers.md) instead -
     see [Stream a custom pose](../how-to/stream-a-custom-pose.md).

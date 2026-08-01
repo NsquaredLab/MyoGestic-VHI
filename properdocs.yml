@@ -91,7 +91,7 @@ nav:
       - The two hands: concepts/hands.md
       - LSL streams: concepts/lsl-streams.md
       - gRPC control plane: concepts/grpc-control.md
-      - Control-hand modes: concepts/control-modes.md
+      - What drives the control hand: concepts/control-hand-drivers.md
       - Movements: concepts/movements.md
   - How-to:
       - how-to/index.md

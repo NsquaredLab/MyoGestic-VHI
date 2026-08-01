@@ -13,12 +13,12 @@ its peer can start in any order.
 | Stream name | Drives | Shape | Rate |
 |---|---|---|---|
 | `MyoGestic_Output` | the **predicted** hand | 9 × `float32` | ~32 Hz (the producer's pace) |
-| `MyoGestic_ControlPose` | the **control** hand (only in [`Stream` mode](control-modes.md)) | 9 × `float32` | ~32 Hz (the producer's pace) |
+| `MyoGestic_ControlPose` | the **control** hand ([while it is delivering](control-hand-drivers.md)) | 9 × `float32` | ~32 Hz (the producer's pace) |
 
 The two inlets are **independent**: `MyoGestic_Output` only ever drives the
 predicted hand, `MyoGestic_ControlPose` only ever drives the control hand.
-(Producing `MyoGestic_ControlPose` is opt-in - most setups never publish it
-and leave the control hand in `Movement` mode.)
+(Producing `MyoGestic_ControlPose` is optional - most setups never publish it,
+and the control hand plays its named movements instead.)
 
 The inlet rate is **whatever the producer pushes**. MyoGestic's default
 prediction loop runs at ~32 Hz, but VHI itself doesn't impose or assume a

@@ -38,8 +38,25 @@ calls; the return value *is* the acknowledgement.
 The contract is `proto/myogestic_vhi.proto` in this repo — the authoritative
 source. MyoGestic vendors a copy and regenerates its Python stubs from it.
 
-DOFs are addressed **by name**, and `Declare` negotiates which ones this hand can
-render, so neither side hard-codes a channel index.
+### `GetControlManifest` is the whole contract
+
+DOFs are addressed **by name**, and `GetControlManifest` publishes every address VHI
+exports along with what it can render for each — the kind, the range, the states, the
+LSL stream, and the channel a streamed value lands on. Neither side hard-codes a
+channel index, and neither side keeps a table the other has to be kept in sync with.
+
+A client calls it **once, unconditionally, before it sends anything**. There is no
+per-client negotiation, no declared subset, and nothing to declare: the manifest is
+the same for every client, and VHI keeps no session state about who is talking to it.
+The sequence is:
+
+1. `GetControlManifest` — one call. Map your own model-output names onto the
+   addresses it lists, and read each capability's `stream_name` and `channel`.
+2. Then either **publish** the pose stream that capability named, writing each value
+   to the channel it named, or **send** `SetControl` for held states and low-rate
+   updates. Both work immediately; nothing has to be opened first.
+
+`SweepControl`, `SetPresentation` and the recording RPCs are optional extras on top.
 
 !!! warning "The legacy `VhiControl` service has been removed"
     `proto/myogestic_vhi.proto` and its service are gone. They spoke in movement
@@ -47,9 +64,10 @@ render, so neither side hard-codes a channel index.
     were dead on both ends for years without anything noticing, and MyoGestic's own
     tables documented channel 1 wrongly.
 
-    A client that still speaks v1 now gets `UNIMPLEMENTED`, which is exactly the
-    signal v2's `Declare` handshake reads to recognise a build it cannot negotiate
-    with. Nothing degrades silently.
+    A client that still speaks v1 now gets `UNIMPLEMENTED`. That is also what a
+    current client sees when it calls `GetControlManifest` against a build too old to
+    answer, which is how it recognises a renderer it cannot drive. Nothing degrades
+    silently.
 
     Its capabilities went to three different places, because they were three
     different kinds of thing: `SetMovement` became a standard **discrete DOF**
@@ -79,8 +97,9 @@ classifier needs a stability gate, which is layer 2 and lives on the MyoGestic s
 Layer 3 is worth having — a hand that snaps between poses looks wrong — but it cannot
 make an unstable prediction stable. A build with blending on and no debounce still
 jumps between states; it just does so smoothly, which is arguably worse because it
-looks deliberate. `DeclareReply.blends_presentation` reports whether blending is on so
-a client can *see* layer 3, never so it can rely on it.
+looks deliberate. Blending is a renderer setting a client *writes* and never reads
+back — there is no field anywhere reporting whether it is on, precisely so nothing
+can be built on top of it.
 
 ### Recording-session RPCs — coordination, not control
 
@@ -113,20 +132,28 @@ refused with a reason rather than being allowed to interrupt the trajectory a re
 is being aligned against. Continuous DOFs are unaffected — they drive the *predicted*
 hand.
 
+A live `MyoGestic_ControlPose` stream owns the hand the same way, and refuses the same
+commands for the same reason — see
+[What drives the control hand](control-hand-drivers.md). Both are **command-time**
+refusals carried in `ControlAck.rejected`: there is no setup call left at which a
+client could be told in advance, and none would help, because the answer depends on
+what is arriving at the moment of the command.
+
 !!! warning "A negotiation that settled names but not units was not a negotiation"
-    `DeclareReply` used to carry a `continuous_encoding` field, and it was not
-    optional even then. The first end-to-end run agreed on channel names while
-    VHI's continuous path still decoded legacy units, so a standard `+1` arrived
-    as a legacy `+1` and the hand **extended when it was told to flex** — exactly
-    the class of bug an encoding-negotiation field invites. There is one encoding
-    now: standard, unconditionally, on every continuous stream. Nothing is left
-    to negotiate, and nothing is left to misread.
+    An earlier draft of this service had a `Declare` RPC, and its reply carried a
+    `continuous_encoding` field so a client could ask which convention was in force.
+    The first end-to-end run agreed on channel names while VHI's continuous path
+    still decoded legacy units, so a standard `+1` arrived as a legacy `+1` and the
+    hand **extended when it was told to flex** — exactly the class of bug an
+    encoding-negotiation field invites. There is one encoding now: standard,
+    unconditionally, on every continuous stream. Nothing is left to negotiate, and
+    nothing is left to misread — which is why `Declare` itself is gone too.
 
 `VhiControl`'s control-facing RPCs, at a glance:
 
 | RPC | Purpose |
 |---|---|
-| `Declare` | negotiate a control space by name; returns per-DOF verdicts and the channel order |
+| `GetControlManifest` | every address VHI exports, with its kind, range, states, stream and channel. Call it first |
 | `SetControl` | command one standard frame — continuous values and discrete states |
 | `SweepControl` | drive one DOF across its range and report which bones moved, in signed degrees |
 | `SetPresentation` | renderer blending (appearance only — layer 3 of three) |

@@ -22,7 +22,8 @@ for the *why*.
 |---|---|
 | Default name | `MyoGestic_ControlPose` (configurable: `ControlPoseStreamName`) |
 | Channels | 9 × `float32` |
-| Drives | the **control** hand - only while it is in [`Stream` mode](../concepts/control-modes.md) |
+| Drives | the **control** hand - [while it is delivering](../concepts/control-hand-drivers.md) |
+| Goes stale after | 5 s of silence (`ControlPoseStaleAfterSeconds`); the hand then returns to its own movements |
 | Resolution | by name; retried every ~5 s. Optional - most setups never publish it. |
 
 ## Outlets - published by VHI
@@ -91,60 +92,65 @@ channel 0 as thumb *rotation* and channels 6-8 as a wrist, and neither was true.
     axis. Unlike flexion and abduction, both the range and the sign of this axis are
     **chosen** — no movement in the library touches joint 0's Y. See `Vhi.StandardPose`.
 
-### Two sign conventions, and which stream uses which
+### One sign convention, on all four streams
 
-The layout is shared, the **sign is not**. Getting this wrong inverts every joint, so it
-is worth stating per stream:
+The layout is shared and so is the **sign**. That has not always been true, and getting
+it wrong inverts every joint, so it is worth stating per stream:
 
 | Stream | Direction | Convention |
 |---|---|---|
 | `MyoGestic_Output` (inlet) | into VHI | **Standard** — `+1` is the direction the channel's name denotes, so `+1` on `IndexFlexion` *flexes*. |
 | `MyoGestic_ControlPose` (inlet) | into VHI | **Standard**, unconditionally — see below. |
-| `VHI_Control` (outlet) | out of VHI | **Renderer units** — `-1` flexes. |
+| `VHI_Control` (outlet) | out of VHI | **Standard** — `+1` flexes. It published renderer units, `-1` flexing, before 2.0. |
 | `VHI_Predict` (outlet) | out of VHI | **Standard** — `+1` flexes. |
+
+Both outlets advertise `pose_convention = "standard"` in their metadata, and the control
+outlet's `source_id` is `control_hand_002_standard`, so the two conventions are
+distinguishable on the wire rather than by remembering which release you are on.
 
 ### `MyoGestic_ControlPose` is standard, always
 
 `MyoGestic_Output` had its convention *changed* in 2.0. The control-pose inlet used to be
-handled differently: its convention was chosen by the client through a
-`DeclareRequest.control_pose_encoding` field, defaulting to the old renderer units. That
-field is gone. There is one encoding now — standard, unconditionally, on both continuous
-inlets — and VHI converts internally (`Vhi.StandardPose.ToRig`) so a producer never
-chooses a convention, only whether it declares the stream at all.
+handled differently: its convention was chosen by the client through a field on a
+`Declare` handshake, defaulting to the old renderer units. Both the field and the
+handshake are gone. There is one encoding now — standard, unconditionally, on both
+continuous inlets — and VHI converts internally (`Vhi.StandardPose.ToRig`), so a producer
+never chooses a convention. It only chooses whether to publish.
 
-Declare it through `DeclareRequest.control_pose`, a plain bool:
+### Publishing the stream is the whole request
 
-| Value | VHI does |
+There is no flag, no mode and no RPC. VHI resolves the inlet by name whenever it does not
+have one, and the control hand follows it whenever it is delivering:
+
+| What you do | VHI does |
 |---|---|
-| `false` (the default, and what omitting the field sends) | Nothing. The stream and the control hand are left exactly as they were. |
-| `true` | Reads the stream as standard values, and switches the control hand to `Stream` mode so the inlet is consumed. |
+| Publish nothing (the default) | The control hand runs its own movement state machine — named movements from discrete DOFs, a recording trajectory, or the keyboard. |
+| Publish `MyoGestic_ControlPose` | The control hand renders each sample as standard values, and keeps doing so while samples keep arriving. |
+| Stop publishing | After `ControlPoseStaleAfterSeconds` (**5 s**), the hand stops any running trajectory, returns to rest, and resumes its movement state machine. VHI drops the inlet and re-resolves by name, so the next producer of that name is picked up. |
 
 Two things worth knowing:
 
-- **Declaring the stream is what asks for `Stream` mode.** An inlet nobody reads is
-  indistinguishable from a stream that is not arriving, and there is no separate mode
-  RPC — declaring that you will stream a control pose *is* the request.
-- **A control-pose stream and a discrete DOF cannot be declared together.** A discrete
-  DOF renders as a control-hand *movement*, and a streamed pose drives the same bones.
-  v1 arbitrated that per command through `ControlMode`; the current handshake refuses
-  the combination at `Declare`, where a client can still fix its configuration rather
-  than watch commands quietly not apply.
+- **Presence is the request because an inlet nobody reads is indistinguishable from a
+  stream that is not arriving.** This is exactly how the predicted hand has always
+  treated `MyoGestic_Output`; the control hand needed a handshake for the same idea and
+  no longer does.
+- **A live stream and a discrete DOF cannot both drive the hand.** A discrete DOF renders
+  as a control-hand *movement*, and a streamed pose drives the same bones. v1 arbitrated
+  per command through `ControlMode`; now the stream simply wins, and a discrete DOF sent
+  while it is live comes back in `ControlAck.rejected` reading `'<movement>' was refused
+  — a control-pose stream is driving the control hand`. Read the ack rather than assume.
 
-`DeclareReply.control_pose` echoes what was **actually granted** rather than what was
-requested, so read it instead of assuming your request won.
-
-`MyoGestic_Output` changed convention in 2.0; see
-[Upgrading to VHI 2.0](../upgrading-to-v2.md). The outlets deliberately did **not**, so
-sessions recorded before that release stay readable by the same decoder — on the
-MyoGestic side that decoder is `myogestic.vhi.legacy.decode_pose`, which remains the
-reader for archived kinematics.
+`MyoGestic_Output` and `VHI_Control` both changed convention in 2.0; see
+[Upgrading to VHI 2.0](../upgrading-to-v2.md). Sessions recorded before that release are
+in the old units and are converted once with `myogestic.tools.migrate_vhi_sessions`,
+which stamps `pose_convention` into the session so a reader never has to guess.
 
 !!! tip "Don't hard-code any of this"
-    A frame built by hand from this table is correct for every standard stream and
-    silently inverted on `VHI_Control`, the one outlet that stays in rig units. Call
-    `Declare` and honour `continuous_channel_order`. MyoGestic's `VhiTarget` does
-    that — pass `stream="control_pose"` when it is driving the control hand, so it
-    reads *that* stream's order rather than the output stream's.
+    This table is the layout VHI *happens* to use today, and a frame built by hand from
+    it goes wrong the moment it does not. Call `GetControlManifest` and build your frame
+    from each capability's `stream_name` and `channel` instead. MyoGestic's `VhiTarget`
+    does that — pass `stream="control_pose"` when it is driving the control hand, so it
+    resolves against *that* stream's channels rather than the output stream's.
 
 ## Minimal producer
 

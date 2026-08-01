@@ -1,7 +1,7 @@
 # Every signal in and out
 
 One page listing everything that crosses the VHI process boundary, sorted by protocol.
-Four LSL streams, nine RPCs, and one input that is neither.
+Four LSL streams, eight RPCs, and one input that is neither.
 
 This is the inventory, not the detail: [LSL streams](lsl-reference.md) documents each
 stream's metadata and channel layout, and [gRPC API](grpc-api.md) documents each RPC's
@@ -14,11 +14,11 @@ flowchart LR
   KB["Local keyboard"]
 
   MG -- "LSL · MyoGestic_Output" --> VHI
-  MG -- "LSL · MyoGestic_ControlPose · opt-in" --> VHI
+  MG -- "LSL · MyoGestic_ControlPose · optional" --> VHI
   VHI -- "LSL · VHI_Predict · 9ch" --> MG
   VHI -- "LSL · VHI_Control · 9ch" --> MG
-  MG <-- "gRPC · 127.0.0.1:50051 · 9 RPCs" --> VHI
-  KB -- "Movement mode only" --> VHI
+  MG <-- "gRPC · 127.0.0.1:50051 · 8 RPCs" --> VHI
+  KB -- "only while no control pose streams" --> VHI
 ```
 
 ## LSL - four streams
@@ -28,13 +28,15 @@ flowchart LR
 | stream | drives | units | present |
 |---|---|---|---|
 | `MyoGestic_Output` | the **predicted** hand | standard, always | always |
-| `MyoGestic_ControlPose` | the **control** hand, in `Stream` mode | standard, always | only once declared |
+| `MyoGestic_ControlPose` | the **control** hand, while it is delivering | standard, always | optional |
 
 `MyoGestic_Output` is standard unconditionally: `+1` means the direction the channel's
-name denotes, whatever the client declared. `MyoGestic_ControlPose` takes the same
-convention — there is one encoding now, so nothing is negotiated — and declaring the
-stream at all is what switches the control hand into `Stream` mode, since there is no
-mode RPC.
+name denotes. `MyoGestic_ControlPose` takes the same convention — there is one encoding
+now, so nothing is negotiated — and it needs no request either. Publishing it *is* the
+request: the control hand renders it while a sample has arrived within the last five
+seconds (`ControlPoseStaleAfterSeconds`) and runs its own movements otherwise. Both
+inlets work the same way; the control hand's used to need a handshake and no longer
+does.
 
 Both are resolved **by name**, first match wins.
 
@@ -85,16 +87,15 @@ The order a stream uses when nothing labels it, and the order both outlets alway
 | 7 | `WristAbduction` | 0, Z | yes |
 | 8 | `WristRotation` | 0, Y | yes - pronation/supination, `±179°`; see the warning in [LSL streams](lsl-reference.md) |
 
-## gRPC - nine RPCs on `127.0.0.1:50051`
+## gRPC - eight RPCs on `127.0.0.1:50051`
 
-One service, `VhiControl`, hosts all nine. All are request/reply; nothing streams.
+One service, `VhiControl`, hosts all eight. All are request/reply; nothing streams.
 
 ### `VhiControl`
 
 | RPC | in | out |
 |---|---|---|
-| `GetControlManifest` | - | every control VHI exports, with the semantics VHI declares for each |
-| `Declare` | the DOFs a client intends to drive | a verdict **per DOF**, the continuous stream name, its channel order, and whether the renderer blends |
+| `GetControlManifest` | - | every control VHI exports, each with its kind, range or states, `stream_name` and `channel`. Call it first |
 | `SetControl` | a `continuous` map and a `discrete` map | applied, or a rejection reason per name |
 | `SweepControl` | one DOF name and a duration | which bones moved, and the signed degrees at `hi` and at `lo` |
 | `SetPresentation` | blend on/off and speed | applied. Appearance only - it does not change a commanded value |
@@ -105,10 +106,12 @@ One service, `VhiControl`, hosts all nine. All are request/reply; nothing stream
 
 ## Neither protocol
 
-**Local keyboard** drives the control hand's movement state machine, in `Movement` mode
-only. It belongs in this list because it is a *third* writer to the same bones as
-`MyoGestic_ControlPose` and `vhi.control.gesture` - which is why declaring a control-pose
-stream together with a discrete DOF is refused rather than arbitrated.
+**Local keyboard** drives the control hand's movement state machine, and only while no
+control-pose stream is delivering. It belongs in this list because it is a *third*
+writer to the same bones as `MyoGestic_ControlPose` and `vhi.control.gesture` - which is
+why a live stream refuses discrete DOFs by name rather than letting them apply and then
+overwriting them, and why `SetRecordingSession` exists to gate the keyboard off during a
+recording.
 
 ## Which protocol carries what
 
@@ -128,15 +131,15 @@ means gRPC-only.
 
 - **Both inbound streams number from 0.** `MyoGestic_Output` channel 2 is the model's
   index; `MyoGestic_ControlPose` channel 2 is the operator's. Same number, different hand -
-  which is why a client must say which stream it drives, and why labelling with the full
-  address rather than `index` is what makes a stream unambiguous.
-- **`VHI_Predict` is standard; `VHI_Control` is not.** See above.
+  which is why every capability publishes `stream_name` beside `channel`, and why a
+  channel number read without its stream means nothing.
+- **Both outlets are standard.** They disagreed once; see above.
 - **The inlets may be narrow; the outlets never are.**
-- **`Declare` is optional for the predicted hand, mandatory for the control hand.** The
-  service keeps no per-client session state and validates each call against its address
-  table, so `SetControl`, `SweepControl` and the pose stream all work undeclared. The
-  control hand is the exception: without a declaration it is not in `Stream` mode, so its
-  addresses are not renderable.
+- **Nothing has to be opened first.** The service keeps no per-client session state and
+  validates each call against its address table, so `SetControl`, `SweepControl` and
+  both pose streams work the moment a client sends them. `GetControlManifest` is a
+  read, not a registration — call it because you need the channel numbers, not because
+  VHI is waiting for it.
 - **Nominal rates disagree.** MyoGestic pushes at 32 Hz, VHI publishes at 60 Hz nominal.
   Nominal only - neither side paces off the other's number.
 - **A still-streaming producer wins.** The renderer replaces its whole pose from the inlet

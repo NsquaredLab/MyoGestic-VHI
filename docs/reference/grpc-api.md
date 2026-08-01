@@ -10,8 +10,9 @@ though they share a service: a discrete DOF is a held state, and it stays one ev
 while a recording trajectory is deliberately sweeping the control hand.
 
 !!! warning "The legacy `VhiControl` service (v1) has been removed"
-    A client that still speaks it receives `UNIMPLEMENTED` — the signal `Declare`'s
-    handshake reads to recognise a build it cannot negotiate with. Its capabilities were
+    A client that still speaks it receives `UNIMPLEMENTED` — the same signal a current
+    client gets from `GetControlManifest` against a build too old to answer, and how it
+    recognises a renderer it cannot drive. Its capabilities were
     split by *kind* rather than moved wholesale: `SetMovement` became a standard
     discrete DOF, `SetSessionActive` and movement cycling became the recording session
     RPCs, and `SetSmoothing` became `SetPresentation`. `Freeze`, `SetSpeed`, `SetChirality`
@@ -23,7 +24,7 @@ while a recording trajectory is deliberately sweeping the control hand.
 
 | RPC | Request | Returns | Notes |
 |---|---|---|---|
-| `Declare` | `DeclareRequest` | `DeclareReply` | Negotiate a control space by name. Per-DOF verdicts, the continuous channel order, and whether the renderer blends. Call before streaming. |
+| `GetControlManifest` | `GetControlManifestRequest` | `ControlManifest` | Every address VHI exports, each with its kind, its range or its states, its `stream_name` and its `channel`. **Call this first**, unconditionally — there is nothing else to open, declare or negotiate. |
 | `SetControl` | `SetControlRequest` | `ControlAck` | Command one frame: `continuous` by name, `discrete` by state. Refusals are named in `rejected`, never silent. |
 | `SweepControl` | `SweepControlRequest` | `SweepControlReply` | Drive one DOF across its range; reports which rig elements moved and the signed degrees, read back off the skeleton. |
 | `SetPresentation` | `SetPresentationRequest` | `ControlAck` | Renderer blending. Appearance only — never a substitute for a client-side debounce. |
@@ -34,7 +35,10 @@ while a recording trajectory is deliberately sweeping the control hand.
 
 While a recording trajectory runs it **owns** the control hand: `SetControl`'s discrete
 DOFs are refused with the reason rather than interrupting the trajectory a recording is
-being aligned against. Continuous DOFs are unaffected — they drive the predicted hand.
+being aligned against. A live `MyoGestic_ControlPose` stream owns it the same way, and
+refuses the same commands — see
+[What drives the control hand](../concepts/control-hand-drivers.md). Continuous DOFs are
+unaffected either way; they drive the predicted hand.
 
 `proto/myogestic_vhi.proto` is the authoritative source - MyoGestic vendors a copy
 and regenerates its stubs from it.

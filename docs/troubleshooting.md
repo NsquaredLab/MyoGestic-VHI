@@ -35,21 +35,25 @@ Full detail in [Build and export](how-to/build-and-export.md).
 
 The export needs an active **.NET 8 SDK**. If your default `dotnet` is a newer
 major version, pin .NET 8 with a `global.json` - see
-[Build and export](how-to/build-and-export.md#prerequisite-an-active-net-8-sdk).
+[Build and export](how-to/build-and-export.md#prerequisite-a-net-8-sdk).
 
 ## The control hand ignores a discrete DOF
 
 **Symptom** - `SetControl` comes back with the DOF named in `rejected`.
 
-Check the `message` in the `CommandAck`:
+Read the reason in `ControlAck.rejected["vhi.control.gesture"]`:
 
-- *"unknown movement"* - the name isn't in the current movement set. Call
+- *"no movement matches state …"* - the name isn't in the current movement set. Call
   `GetRecordingSessionState` and use a name from `available_movements`; remember the
   set depends on `Mode` (`AI` vs `Classifier`).
-- *"control hand is in Stream/Idle mode"* - movement commands only apply in
-  `Movement` mode, or a recording trajectory owns the hand — the rejection message
-  says which. See
-  [Control-hand modes](concepts/control-modes.md).
+- *"a control-pose stream is driving the control hand"* - something is publishing
+  `MyoGestic_ControlPose`, and a stream and a movement cannot both own the bones.
+  Stop publishing and the hand is yours again five seconds later. Watch for a *stale
+  outlet left by an earlier process* - it keeps repeating its last sample and looks
+  exactly like a live producer. See
+  [What drives the control hand](concepts/control-hand-drivers.md).
+- *"a recording trajectory is running …"* - stop it with `StopRecordingTrajectory`
+  first; a recording is being aligned against it.
 
 ## The predicted hand isn't moving
 
@@ -72,19 +76,20 @@ Check the `message` in the `CommandAck`:
 
 ## The control hand cycles when you wanted it held (or vice versa)
 
-That's a training program, from the recording aid:
+Two different RPCs, deliberately:
 
-- `cycle = false` (default) → snap to the end pose and hold - for classifier
-  outputs.
-- `cycle = true` → play the open/close loop - for regression recording.
+- A **discrete DOF** (`SetControl`) snaps to the movement's end pose and holds it -
+  for classifier outputs.
+- A **recording trajectory** (`StartRecordingTrajectory`) plays the open/close loop -
+  for regression recording.
 
-See [Control-hand modes](concepts/control-modes.md#cycle-hold-the-end-pose-or-play-the-movement).
+See [held state, or a swept trajectory](concepts/control-hand-drivers.md#held-state-or-a-swept-trajectory).
 
 ## The hand looks mirrored / wrong-handed
 
-Chirality (left/right mirroring) is exposed as a control-panel toggle and a
-`SetChirality` RPC, but the implementation is **currently disabled** - the
-RPC returns `applied = false`. Both hands use the left-hand FBX by default.
+Chirality (left/right mirroring) is exposed as a control-panel toggle, but the
+implementation is **currently disabled** and there is no chirality RPC. Both hands
+use the left-hand FBX by default.
 
 ## C# build errors
 

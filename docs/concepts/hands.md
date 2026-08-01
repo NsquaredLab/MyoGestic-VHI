@@ -22,29 +22,30 @@ visualisation of whatever is on the stream.
 
 ## Control hand
 
-The control hand is the experimenter's reference. It has **three driver
-modes** (see [Control-hand modes](control-modes.md)):
+The control hand is the experimenter's reference. It has **two drivers** (see
+[What drives the control hand](control-hand-drivers.md)):
 
-- **`Movement`** *(default)* - a predefined-movement state machine. It selects
-  a named movement from the [movement set](movements.md) and either snaps to
-  the movement's end pose or plays the open/close cycle (`waiting → closing →
-  holding → opening → resting`). Driven by [standard discrete DOFs](grpc-control.md)
-  or the keyboard.
-- **`Stream`** - driven by a continuous pose on the `MyoGestic_ControlPose` LSL
-  inlet, exactly like the predicted hand. For custom poses that aren't in the
-  predefined set. See [Stream a custom pose](../how-to/stream-a-custom-pose.md).
-- **`Idle`** - holds the rest pose; ignores keyboard, stream and commands.
+- **The `MyoGestic_ControlPose` stream** - a continuous pose applied to the bones
+  every frame, exactly like the predicted hand's. For custom poses that aren't in
+  the predefined set. See [Stream a custom pose](../how-to/stream-a-custom-pose.md).
+- **A predefined-movement state machine** - it selects a named movement from the
+  [movement set](movements.md) and either snaps to the movement's end pose or plays
+  the open/close cycle (`waiting → closing → holding → opening → resting`). Driven
+  by [standard discrete DOFs](grpc-control.md), a recording trajectory, or the
+  keyboard.
 
-Only one driver is active at a time - the mode decides which, so they never
-fight over the bones. Discrete DOFs and recording trajectories
-are **rejected** unless the hand is in `Movement` mode.
+Only one is active at a time, and **stream presence** decides: while a control-pose
+sample has arrived within the last five seconds the stream drives the hand, and the
+state machine does not run. So they never fight over the bones, and a client that
+stops publishing gets the movement state machine back without asking. While the
+stream is live, discrete DOFs and recording trajectories are **refused by name**.
 
 ### Sessions and keyboard authority
 
 While a MyoGestic recording session is active, VHI's local keyboard control of
 the control hand is **disabled** - set via the recording aid's `SetRecordingSession(true)`
 call - so MyoGestic is the sole movement source for the recording. This is
-orthogonal to the driver mode: the session gate only gates the keyboard.
+orthogonal to which driver is live: the session gate only gates the keyboard.
 
 ## Why two hands and not one
 

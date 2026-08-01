@@ -16,8 +16,12 @@ sent nine floats whose channel meaning lived nowhere: channels 6-8 were dead on 
 ends for years without anything noticing, and MyoGestic's own documentation described
 channel 0 as thumb *rotation* and channels 6-8 as a wrist. Neither was true.
 
-v2 makes an application declare what it controls **by name** and VHI answer with what
-it can render. Nothing hard-codes a channel index on either side.
+v2 replaces that with a **manifest**. `GetControlManifest` lists every address VHI
+exports — `vhi.prediction.index`, `vhi.control.gesture` — each with its kind, its
+range or its states, the LSL stream it is read from and the channel it occupies there.
+A client fetches it once, maps its own names onto those addresses, and sends. Nothing
+hard-codes a channel index on either side, and nothing is negotiated: the manifest is
+the same for every client, and VHI keeps no per-client state.
 
 | v1 | current | Why it moved |
 |---|---|---|
@@ -41,6 +45,25 @@ unless someone is recording*. While a recording trajectory runs it **owns** the 
 hand: discrete DOFs are refused with the reason rather than silently interrupting the
 trajectory a recording is aligned against.
 
+### The control hand has no modes
+
+v1 had a `SetControlMode` RPC, and an intermediate v2 draft had a
+`ControlHandDriverMode` enum (`Movement` / `Stream` / `Idle`) that a client flipped as
+a side effect of declaring a control-pose stream. Both are gone, along with the
+`DriverMode` Inspector field and the `SetDriverMode` method behind it.
+
+What decides now is **stream presence**: the control hand renders
+`MyoGestic_ControlPose` while a sample has arrived within the last five seconds, and
+runs its own movement state machine otherwise. Publish, and it follows; stop, and it
+returns to rest on its own. That is exactly how the predicted hand has always followed
+`MyoGestic_Output` — the two hands differing on it was the only reason a mode existed.
+
+The refusals moved with it. A discrete DOF sent while the stream is driving comes back
+as `ControlAck.applied = false` with `rejected["vhi.control.gesture"]` reading
+`'<movement>' was refused — a control-pose stream is driving the control hand`. It is a
+**command-time** rejection now, not a setup-time one — there is no setup call left to
+carry it. See [What drives the control hand](concepts/control-hand-drivers.md).
+
 ### The continuous stream is now standard
 
 `MyoGestic_Output` carries **standard** values: `+1` means the direction the DOF name
@@ -48,12 +71,13 @@ denotes, so `+1` on index flexion *flexes*. v1 took raw rig units — the pose m
 the renderer applies to its per-bone gains — and named no channel, so what a value meant
 was a matter of matching tables.
 
-`DeclareReply` briefly carried a `continuous_encoding` field so a client could tell which
-convention was in force. It didn't last: the first end-to-end v2 build got the handshake
-wrong in exactly the way an optional encoding invites — it agreed on channel *names*
-while the decoder still expected the old units, and the hand extended when it was told
-to flex. The fix was to stop negotiating: there is one encoding now, standard,
-unconditionally, and the field is gone.
+A pre-release draft of v2 let a client ask which convention was in force, through a
+`continuous_encoding` field on the reply to a `Declare` handshake. It didn't last: the
+first end-to-end build got the handshake wrong in exactly the way an optional encoding
+invites — it agreed on channel *names* while the decoder still expected the old units,
+and the hand extended when it was told to flex. The fix was to stop negotiating. There
+is one encoding now, standard, unconditionally; the field is gone, and so is the
+handshake that carried it.
 
 !!! warning "`VHI_Control` changed too, and it is a wire break"
     It published the renderer's own units, opposite to `VHI_Predict` on five channels —
@@ -69,17 +93,17 @@ unconditionally, and the field is gone.
     identity rather than a sign flip. Nothing archived depends on that stream, which is
     what makes the change safe to make.
 
-    The optional `MyoGestic_ControlPose` inlet is standard too, unconditionally — declare
-    `control_pose=True` to opt in. Declaring that stream is also how you ask for `Stream`
-    mode, since there is no separate mode RPC. See
+    The optional `MyoGestic_ControlPose` inlet is standard too, unconditionally. There
+    is nothing to opt into: publish the stream and the control hand follows it, stop and
+    it returns to its own movements five seconds later. See
     [the LSL reference](reference/lsl-reference.md#myogestic_controlpose-is-standard-always).
 
 ## Upgrade steps
 
 ### If you use MyoGestic
 
-Declare what you control and let `VhiTarget` negotiate. It handles both conventions,
-so the same application code works against VHI 1.x and 2.0:
+Say what you control in your own names, point each at an address VHI publishes, and let
+`VhiTarget` resolve the two against the manifest:
 
 ```python
 from myogestic.controls import ControlBus, load_control_map, resolve
@@ -103,7 +127,7 @@ controls = resolve(CONTROL_MAP, client.capabilities())
 
 target = VhiTarget(
     vhi.outlet(),
-    client=client,                       # negotiates v2
+    client=client,                       # reads the manifest; refuses a pre-2.0 build
 )
 bus = ControlBus(controls, targets=[target], hz=32)
 recording = vhi.recording_client()
@@ -119,8 +143,12 @@ Then, once VHI is actually running — which for an app that launches VHI from i
 is *after* startup:
 
 ```python
-target.negotiate()      # settles the contract; cheap and idempotent
+target.negotiate()      # re-reads the manifest; cheap and idempotent
 ```
+
+`negotiate` is a MyoGestic-side retry, not a wire handshake: it re-fetches
+`GetControlManifest` and resolves this configuration against it. VHI is told nothing
+by it, and calling it twice costs one extra RPC.
 
 1. **Replace `set_movement` with a discrete DOF.** `bus.select("gesture", "Fist")`
    for a deliberate click; `bus.push({...})` per tick for a classifier. Delete any
@@ -137,11 +165,25 @@ target.negotiate()      # settles the contract; cheap and idempotent
    silently inverted on the other. Push standard values through the bus instead.
 6. **Drop `freeze`, `set_speed`, `set_chirality`, `set_control_mode`.** They have no
    equivalent by design.
+7. **Stop asking for `Stream` mode.** Whatever selected it — a `control_pose=True`
+   flag, a `DriverMode`, a `set_control_mode` call — just delete it. Publishing
+   `vhi.control_outlet()` is the whole request, and `VhiTarget(..., stream="control_pose")`
+   is how the bus drives that stream instead of `MyoGestic_Output`.
 
 ### If you use VHI directly
 
-Generate stubs from `proto/myogestic_vhi.proto` and call `Declare` first. Honour
-`continuous_channel_order` — build your frame *from* it, don't assume your own order.
+Generate stubs from `proto/myogestic_vhi.proto`, then:
+
+1. Call `GetControlManifest` once, unconditionally, before you send anything.
+2. For each control you drive, read the capability's `stream_name` and `channel` and
+   build your frame *from those* — never from a remembered order. Both pose streams
+   number their channels from zero, so a channel means nothing without its stream.
+3. Publish that stream, and/or call `SetControl` for held states. Nothing has to be
+   opened, declared or requested first.
+
+An `UNIMPLEMENTED` on step 1 is a renderer too old to drive. Read
+`ControlAck.rejected` on every `SetControl`: a refusal is always named, and a name
+missing from it is the only evidence a value landed.
 
 ## Smoothing: three layers, not one
 

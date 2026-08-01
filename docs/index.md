@@ -32,8 +32,9 @@ VHI splits its communication by *what kind of data it is*:
 MyoGestic can also drive the **control hand** continuously over LSL via the
 optional `MyoGestic_ControlPose` inlet - useful for streaming custom poses
 (data gloves, trajectory generators, …) instead of playing a named movement.
-That path activates when the control hand's driver mode is set to `Stream` -
-see [Control-hand modes](concepts/control-modes.md).
+Publishing that stream is the whole activation: the hand follows it while it is
+delivering and returns to its own movements when it stops - see
+[What drives the control hand](concepts/control-hand-drivers.md).
 
 See [gRPC control plane](concepts/grpc-control.md) for the why behind the
 gRPC / LSL split.
@@ -46,8 +47,8 @@ gRPC / LSL split.
   install Godot, restore, run, and see a hand move.
 
 - :material-sitemap: **[Concepts](concepts/index.md)** -
-  the two hands, the LSL streams, the gRPC control plane, control modes,
-  and the movement set.
+  the two hands, the LSL streams, the gRPC control plane, what drives the
+  control hand, and the movement set.
 
 - :material-tools: **[How-to guides](how-to/index.md)** -
   drive VHI from MyoGestic, stream a custom pose, add a movement, build &
