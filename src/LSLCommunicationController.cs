@@ -115,7 +115,11 @@ public partial class LSLCommunicationController : Node
 	/// </remarks>
 	public bool ControlPoseLive { get; private set; }
 
-	private DateTime lastControlPoseSample = DateTime.Now;
+	// MinValue, not Now: Now would make ControlPoseLive read true for the first frames after
+	// connect, before any sample has actually been pulled — the inlet existing is not the
+	// same as the stream delivering. (DateTime.Now - DateTime.MinValue).TotalSeconds is ~2000
+	// years' worth of seconds, safely inside TimeSpan's range and always >= the stale timeout.
+	private DateTime lastControlPoseSample = DateTime.MinValue;
 
 	private DateTime lastConnectionAttempt;
 	private DateTime lastControlPoseAttempt;
