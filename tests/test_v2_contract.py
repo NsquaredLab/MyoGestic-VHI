@@ -478,6 +478,13 @@ def test_the_control_hand_follows_the_control_pose_stream(v2, control_inlet, mov
         assert ack.applied is False, (
             f"a movement was accepted while MyoGestic_ControlPose was driving the hand: {ack}"
         )
+        # `applied is False` alone would also pass if the state simply failed to
+        # resolve, or if the movement list were empty — neither of which is the
+        # property this test is named for. Pin the reason, so only the presence
+        # guard can satisfy it.
+        assert "a control-pose stream is driving" in ack.rejected.get(
+            "vhi.control.gesture", ""
+        ), f"refused, but not because the stream was driving the hand: {ack}"
     finally:
         del outlet
     assert sample[2] == pytest.approx(1.0, abs=0.05), f"index not driven: {sample}"
