@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-02
+
+**One control service, and the manifest is the contract.** VHI 2.0 and **MyoGestic 2.5 are one
+release** and must be upgraded together: the pair negotiates a `vocabulary_version`, this build
+reports `2`, and MyoGestic 2.5 requires 2. A mismatched pair refuses at bind rather than
+half-driving a hand.
+
+There is no upgrade path from 1.x and no compatibility window. `myogestic-install-vhi` refuses
+anything below 2.0 before downloading it.
+
+
 ### Added
 
 - **`RemoteControl` — the one gRPC control service, and `GetControlManifest` is its
@@ -43,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has one movement source; `StartRecordingTrajectory` cycles the control hand through a
   movement so the recorded pose stream sweeps a continuous range instead of snapping
   between held states; `GetRecordingSessionState` reports session state plus the
-  movement names a trajectory may use. These RPCs live on `VhiControl` rather than a
+  movement names a trajectory may use. These RPCs live on `RemoteControl` rather than a
   service of their own — a standard discrete DOF is a *held state*, and a running
   trajectory must not redefine that, so while one runs it owns the control hand and
   discrete DOFs are refused with the reason.
@@ -190,7 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   channels 6-8 they were described as — see Fixed, below. They are read-back channels 0,
   1 and 6-8 on `VHI_Control` / `VHI_Predict`; inbound they are streams of their own.
 - **BREAKING: the control plane collapsed to one gRPC service, and none of this has a
-  compatibility window.** `VhiTrainingAid` is gone; its RPCs move onto `VhiControl` and
+  compatibility window.** `VhiTrainingAid` is gone; its RPCs move onto `RemoteControl` and
   lose "training" from their names in the process (`StartTrainingProgram` →
   `StartRecordingTrajectory`, `StopTrainingProgram` → `StopRecordingTrajectory`,
   `GetTrainingState` → `GetRecordingSessionState`) — a recording aid that cannot see what

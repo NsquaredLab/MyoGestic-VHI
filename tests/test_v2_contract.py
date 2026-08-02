@@ -991,16 +991,36 @@ def test_a_dof_holds_while_a_second_one_moves(v2):
     )
     predict, sample = None, None
     try:
+        # Drive both to rest *first*, and wait for that to land. A DOF holds what it was
+        # last commanded, by design and per the assertion at the end of this test — so a
+        # preceding test can leave the index at 1.0, and a plain "wait until both read
+        # high" would then be satisfied by that residue before VHI has bound the outlets
+        # this test just created. Pushing 0.0 first proves these producers are the ones
+        # being read, because nothing else is publishing them.
         deadline = time.time() + 25.0
         while time.time() < deadline:
-            thumb.push_sample([1.0])
-            index.push_sample([1.0])
+            thumb.push_sample([0.0])
+            index.push_sample([0.0])
             if predict is None:
                 found = [s for s in pylsl.resolve_streams(wait_time=1.0)
                          if s.name() == "VHI_Predict"]
                 if found:
                     predict = pylsl.StreamInlet(found[0])
                 continue
+            predict.flush()
+            time.sleep(0.5)
+            sample, _ = predict.pull_sample(timeout=2.0)
+            if sample and abs(sample[0]) < 0.05 and abs(sample[2]) < 0.05:
+                break
+        assert sample, "VHI_Predict never delivered a sample"
+        assert abs(sample[2]) < 0.05, (
+            f"the index never reached rest under this test's own producer: {sample}"
+        )
+
+        deadline = time.time() + 25.0
+        while time.time() < deadline:
+            thumb.push_sample([1.0])
+            index.push_sample([1.0])
             predict.flush()
             time.sleep(0.5)
             sample, _ = predict.pull_sample(timeout=2.0)
