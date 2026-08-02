@@ -248,6 +248,15 @@ public class VhiControlService : VhiControl.VhiControlBase
 	/// </remarks>
 	private const string VocabularyVersion = "2";
 
+	/// <summary>The one discrete control this build exports, by address.</summary>
+	/// <remarks>
+	/// Named once and used by both halves of the contract — the manifest that advertises it
+	/// and the <see cref="SetControl"/> that accepts commands for it — so the two cannot
+	/// drift apart. Its <i>states</i> are discovered per call from the movement mode; only
+	/// the address is fixed.
+	/// </remarks>
+	private const string GestureAddress = "vhi.control.gesture";
+
 	/// <summary>
 	/// Every control this build exports, with the semantics VHI itself declares.
 	/// </summary>
@@ -331,7 +340,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 			// addressable prediction controls above.
 			var gesture = new ControlCapability
 			{
-				Address = "vhi.control.gesture",
+				Address = GestureAddress,
 				Kind = Kind.Discrete,
 				RestState = "Rest",
 				Description = "a control-hand movement preset, held until changed. Includes "
@@ -349,7 +358,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 			return manifest;
 		});
 
-	/// <summary>Apply one standard frame. Continuous only, for now.</summary>
+	/// <summary>Apply one standard frame. Both maps are keyed by address.</summary>
 	public override Task<ControlAck> SetControl(SetControlRequest request, ServerCallContext context) =>
 		server.InvokeOnMainThread(() =>
 		{
@@ -374,15 +383,27 @@ public class VhiControlService : VhiControl.VhiControlBase
 				}
 				predictedHand.SetStandardValue(slot.Channel, Math.Clamp(value, -1f, 1f));
 			}
-			foreach ((string name, string state) in request.Discrete)
+			foreach ((string address, string state) in request.Discrete)
 			{
+				// Keyed by address, exactly like Continuous above: the key says *which*
+				// control this is for, the value says which of its states. Resolving on the
+				// state alone would leave two discrete controls that share a state name
+				// indistinguishable — and would accept a key naming nothing at all.
+				if (address != GestureAddress)
+				{
+					ack.Rejected[address] =
+						$"'{address}' is not a discrete control this build exports — the only "
+						+ $"one is '{GestureAddress}'. See GetControlManifest.";
+					ack.Applied = false;
+					continue;
+				}
 				if (controlHand.RecordingTrajectoryActive)
 				{
 					// The recording aid owns the control hand while a trajectory runs.
 					// Refuse rather than let a control command interrupt the trajectory a
 					// recording is being aligned against — and refuse *visibly*, so the
 					// caller learns why instead of watching a state quietly not apply.
-					ack.Rejected[name] =
+					ack.Rejected[address] =
 						$"a recording trajectory is running ('{controlHand.RecordingTrajectoryMovement}') "
 						+ "— stop it before commanding discrete DOFs";
 					ack.Applied = false;
@@ -391,7 +412,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 				string movement = ResolveMovement(state);
 				if (movement == null)
 				{
-					ack.Rejected[name] = $"no movement matches state '{state}' — see GetControlManifest";
+					ack.Rejected[address] = $"no movement matches state '{state}' — see GetControlManifest";
 					ack.Applied = false;
 					continue;
 				}
@@ -400,7 +421,7 @@ public class VhiControlService : VhiControl.VhiControlBase
 				// would render something the client never asked for.
 				if (!controlHand.SetMovement(movement, false))
 				{
-					ack.Rejected[name] =
+					ack.Rejected[address] =
 						$"'{movement}' was refused — a control-pose stream is driving the "
 						+ "control hand";
 					ack.Applied = false;

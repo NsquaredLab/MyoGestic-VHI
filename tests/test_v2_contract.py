@@ -114,6 +114,26 @@ def test_setcontrol_rejects_an_unresolvable_state(v2):
     assert "vhi.control.gesture" in ack.rejected
 
 
+def test_setcontrol_rejects_a_discrete_address_this_build_does_not_export(v2, movements):
+    """The key names the *control*, so a key naming nothing is refusable.
+
+    `grip` is what a client's control map calls its left-hand side, and forwarding that
+    instead of the address is the defect this asserts against: a renderer that resolved on
+    the state alone would happily apply a movement it was never told the target of, and
+    two discrete controls sharing a state name would be indistinguishable.
+    """
+    stub, pb2 = v2
+    ack = stub.SetControl(
+        pb2.SetControlRequest(discrete={"grip": movements[0]}), timeout=10.0
+    )
+    assert not ack.applied
+    # Keyed by what the client sent, and it says which half is wrong: the address, not
+    # the state — the state here is a perfectly good one.
+    assert "grip" in ack.rejected
+    assert "not a discrete control this build exports" in ack.rejected["grip"]
+    assert "vhi.control.gesture" in ack.rejected["grip"]
+
+
 # --- SetControl, continuous ----------------------------------------------------
 
 
