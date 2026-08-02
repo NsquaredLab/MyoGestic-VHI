@@ -85,14 +85,14 @@ python3 "$ROOT/tools/strip_godot_lifecycle.py" "$OUT"/*.md
 # Strip protobuf-generated boilerplate (WriteTo/MergeFrom/CalculateSize/Equals/
 # GetHashCode/Clone/ToString/Parser/Descriptor/*FieldNumber/constructors) from
 # the generated protobuf pages. The user-facing message fields stay.
-echo "▶ stripping protobuf boilerplate from Myogestic.Vhi.* pages"
-python3 "$ROOT/tools/strip_protobuf_boilerplate.py" "$OUT"/Myogestic.Vhi.*.md
+echo "▶ stripping protobuf boilerplate from Myogestic.Renderer.* pages"
+python3 "$ROOT/tools/strip_protobuf_boilerplate.py" "$OUT"/Myogestic.Renderer.*.md
 
-# The MyogesticVhiReflection helper is protobuf reflection internals, not a
+# The RendererControlReflection helper is protobuf reflection internals, not a
 # user-facing type - drop the whole page and scrub its index entry.
-rm -f "$OUT"/Myogestic.Vhi.*.MyogesticVhi*Reflection.md
+rm -f "$OUT"/Myogestic.Renderer.*Reflection.md
 find "$OUT" -name '*.md' -exec perl -i -ne \
-  'print unless m{Myogestic\.Vhi\..*Reflection\.md}' {} +
+  'print unless m{Myogestic\.Renderer\..*Reflection\.md}' {} +
 
 # Strip "Parameters" subsections that have no <param> description prose - they
 # just repeat the signature. Methods that DO have <param> tags keep their
@@ -101,7 +101,7 @@ echo "▶ stripping empty Parameters sections"
 python3 "$ROOT/tools/strip_empty_param_sections.py" "$OUT"/*.md
 
 # Inject a "what's this" admonition above the namespace listing in index.md
-# so the protobuf-generated Myogestic.Vhi.* namespace has context.
+# so the protobuf-generated Myogestic.Renderer.* namespace has context.
 PRELUDE="$ROOT/tools/api_index_prelude.md"
 if [[ -f "$PRELUDE" ]]; then
   awk -v insert_file="$PRELUDE" '

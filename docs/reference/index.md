@@ -13,6 +13,6 @@ for *recipes*, see [How-to](../how-to/index.md).
 - **[Configuration](configuration.md)** - every `[Export]` field, by node,
   with defaults.
 - **[C# API](api/index.md)** - the auto-generated class/method reference for
-  the `Vhi.*` and `Myogestic.Vhi.*` (gRPC) namespaces, built from the
+  the `Vhi.*` and `Myogestic.Renderer.*` (gRPC) namespaces, built from the
   `///` XML doc comments. Regenerate locally with `tools/gen_api_docs.sh`;
   the generated tree is gitignored.

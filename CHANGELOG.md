@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`VhiControl` — the one gRPC control service, and `GetControlManifest` is its whole
-  contract.** The manifest lists every **address** VHI exports
+- **`RendererControl` — the one gRPC control service, and `GetControlManifest` is its
+  whole contract.** The manifest lists every **address** VHI exports
   (`vhi.prediction.index`, `vhi.control.gesture`) with what it can render for each: the
   kind, and the range or the states. A client calls it once, unconditionally, before it
   sends anything, and maps its own configuration's names onto those addresses. There is no
@@ -75,6 +75,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: the contract is named for what it is, not for who serves it first.**
+  `proto/myogestic_vhi.proto` → `proto/renderer_control.proto`, `package myogestic.vhi` →
+  `package myogestic.renderer`, and `service VhiControl` → `service RendererControl`.
+  Nothing about the wire's *data* moved — every field number, name and type is unchanged
+  — but the **service path** did (`/myogestic.renderer.RendererControl/SetControl`), so
+  MyoGestic and VHI must be upgraded together. The contract never described a hand: it
+  describes a renderer that publishes a manifest of addressed controls, and VHI is one
+  implementation of it. The C# namespace follows the package: `Myogestic.Vhi.*` →
+  `Myogestic.Renderer.*`. `Vhi.VhiControlService` keeps its name — it is VHI's
+  implementation, and that *is* VHI-specific.
 - **BREAKING: `stream_name` and `channel` are gone from `ControlCapability`, and
   `vocabulary_version` is now the gate that says so.** The two fields described a
   transport that had stopped needing describing: VHI publishes one LSL stream per DOF,

@@ -107,9 +107,9 @@ hardened-runtime note there.
 
 ## gRPC code generation
 
-The C# gRPC types - the `VhiControl` server stub and the request/reply
+The C# gRPC types - the `RendererControl` server stub and the request/reply
 messages - are **generated at build time** by `Grpc.Tools` from
-`proto/myogestic_vhi.proto` (see the `<Protobuf>` item in `VHI_godot.csproj`).
+`proto/renderer_control.proto` (see the `<Protobuf>` item in `VHI_godot.csproj`).
 The `.proto` is the authoritative contract; there are no hand-written stub files in
 the repo. Edit the `.proto` and rebuild to regenerate them. MyoGestic vendors
 its own copy of the same `.proto` and regenerates its Python stubs separately.

@@ -28,7 +28,7 @@ VHI talks to MyoGestic over two transports, each chosen for the kind of traffic 
 - **LSL** for **continuous time-series**: one stream per DOF, inbound — `vhi.prediction.*` drives the predicted hand (~32 Hz) and the optional `vhi.control.pose.*` drives the control hand — plus VHI's own `VHI_Control` / `VHI_Predict` outlets (60 Hz, nine channels each) so the experiment records what was actually shown on screen.
 - **gRPC** for **discovery, discrete state and verification**: `GetControlManifest` publishes every control VHI exports, `SetControl` carries held states, `SweepControl` reports what the rig actually did, and the same service gates a recording session and drives its trajectories. VHI hosts the server in-process on `127.0.0.1:50051`; MyoGestic is the client.
 
-`proto/myogestic_vhi.proto` is the wire contract for the gRPC side. MyoGestic vendors a copy and regenerates its Python stubs from it. The pre-2.0 `VhiControl` service is gone — see [Upgrading to VHI 2.0](docs/upgrading-to-v2.md).
+`proto/renderer_control.proto` is the wire contract for the gRPC side. It is deliberately generic — `myogestic.renderer.RendererControl` is the contract *any* renderer serves, and VHI is one implementation of it. MyoGestic vendors a copy and regenerates its Python stubs from it. The pre-2.0 `myogestic.vhi.v1.VhiControl` service is gone — see [Upgrading to VHI 2.0](docs/upgrading-to-v2.md).
 
 ## Quick start
 

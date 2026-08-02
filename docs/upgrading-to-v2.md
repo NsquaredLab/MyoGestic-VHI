@@ -164,11 +164,12 @@ handshake that carried it.
 ### If you use MyoGestic
 
 Say what you control in your own names, point each at an address VHI publishes, and let
-`VhiTarget` resolve the two against the manifest:
+`RendererTarget` resolve the two against the manifest:
 
 ```python
 from myogestic.controls import ControlBus, load_control_map, resolve
-from myogestic.vhi import VhiTarget, virtual_hand
+from myogestic.renderer import RendererTarget
+from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
 client = vhi.control_client()
@@ -186,9 +187,9 @@ CONTROL_MAP = load_control_map({
 # semantics. So resolve after VHI is up, not at import.
 controls = resolve(CONTROL_MAP, client.capabilities())
 
-target = VhiTarget(
-    vhi.outlet(),
+target = RendererTarget(
     client=client,                       # reads the manifest; refuses a pre-2.0 build
+    interface=vhi,                       # one single-channel stream per address driven
 )
 bus = ControlBus(controls, targets=[target], hz=32)
 recording = vhi.recording_client()
@@ -236,7 +237,7 @@ by it, and calling it twice costs one extra RPC.
 
 ### If you use VHI directly
 
-Generate stubs from `proto/myogestic_vhi.proto`, then:
+Generate stubs from `proto/renderer_control.proto`, then:
 
 1. Call `GetControlManifest` once, unconditionally, before you send anything, and
    **refuse a `vocabulary_version` below `2`**. It is a string holding a decimal integer;

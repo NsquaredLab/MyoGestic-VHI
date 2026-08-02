@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Strip protobuf-generated boilerplate from the ``Myogestic.Vhi.V1.*`` pages.
+Strip protobuf-generated boilerplate from the ``Myogestic.Renderer.*`` pages.
 
 ``Grpc.Tools`` emits a fixed set of plumbing members on every generated
 message class - serialization (``WriteTo`` / ``MergeFrom`` /
@@ -27,13 +27,13 @@ PLUMBING = {
 }
 
 
-# Match a section keyed off its anchor in the Myogestic.Vhi.V1 namespace.
+# Match a section keyed off its anchor in the Myogestic.Renderer namespace.
 # The anchor pattern is:
-#   <a name='Myogestic.Vhi.V1.<ClassName>.<MemberName>(<args>)?'></a>
+#   <a name='Myogestic.Renderer.<ClassName>.<MemberName>(<args>)?'></a>
 # - methods have (args), properties / fields don't, and parameter anchors
 #   would have a trailing .<paramName> which we explicitly exclude.
 SECTION_RE = re.compile(
-    r"^<a name='Myogestic\.Vhi\.V1\.(\w+)\.(\w+)(?:\([^']*\))?'></a>\n.*?(?=^<a name='|^### |\Z)",
+    r"^<a name='Myogestic\.Renderer\.(\w+)\.(\w+)(?:\([^']*\))?'></a>\n.*?(?=^<a name='|^### |\Z)",
     re.MULTILINE | re.DOTALL,
 )
 

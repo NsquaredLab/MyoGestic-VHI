@@ -69,9 +69,9 @@ the one place both sides' versions are visible at once.
 
 ## The full contract
 
-`proto/myogestic_vhi.proto` is the authoritative source - MyoGestic vendors a copy
+`proto/renderer_control.proto` is the authoritative source - MyoGestic vendors a copy
 and regenerates its stubs from it.
 
 ```protobuf
---8<-- "proto/myogestic_vhi.proto"
+--8<-- "proto/renderer_control.proto"
 ```

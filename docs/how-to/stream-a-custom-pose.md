@@ -124,7 +124,7 @@ does not touch the predicted hand.
   just like a played movement does. The read-back shape did not change with the
   per-DOF inlets: a recording wants one row per instant.
 - Driving this from MyoGestic rather than raw `pylsl`? Point your control map at the
-  `vhi.control.pose.*` addresses and let `VhiTarget` resolve them against the manifest —
+  `vhi.control.pose.*` addresses and let `RendererTarget` resolve them against the manifest —
   see [Drive VHI from MyoGestic](drive-from-myogestic.md).
 
 ## Use case: 9-DOF model-robustness validation

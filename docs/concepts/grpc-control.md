@@ -35,8 +35,10 @@ calls; the return value *is* the acknowledgement.
 
 ## The contract
 
-The contract is `proto/myogestic_vhi.proto` in this repo — the authoritative
-source. MyoGestic vendors a copy and regenerates its Python stubs from it.
+The contract is `proto/renderer_control.proto` in this repo — the authoritative
+source. It names no hand: `myogestic.renderer.RendererControl` is what *any* renderer
+serves, and VHI is one implementation. MyoGestic vendors a copy and regenerates its
+Python stubs from it.
 
 ### `GetControlManifest` is the whole contract
 
@@ -96,8 +98,8 @@ VHI enforces the same contract from the receiving end: a resolved LSL stream who
 count is not exactly 1 is logged as an error and its inlet is never opened. See
 [the LSL reference](../reference/lsl-reference.md#a-stream-that-is-not-one-channel-wide-is-never-opened).
 
-!!! warning "The legacy `VhiControl` service has been removed"
-    `proto/myogestic_vhi.proto` and its service are gone. They spoke in movement
+!!! warning "The legacy `myogestic.vhi.v1.VhiControl` service has been removed"
+    The v1 proto and its service are gone. They spoke in movement
     names and a nine-float pose whose channel meaning lived nowhere — channels 6-8
     were dead on both ends for years without anything noticing, and MyoGestic's own
     tables documented channel 1 wrongly.

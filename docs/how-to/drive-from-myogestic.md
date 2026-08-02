@@ -34,7 +34,8 @@ import pathlib
 import tomllib
 
 from myogestic.controls import ControlBus, load_control_map, resolve
-from myogestic.vhi import VhiTarget, virtual_hand
+from myogestic.renderer import RendererTarget
+from myogestic.vhi import virtual_hand
 from myogestic.widgets import ProcessLauncher
 
 vhi = virtual_hand()
@@ -58,7 +59,7 @@ control_map = load_control_map({
 #    needs VHI *running*. An app that launches it from a button resolves in the
 #    handler, not at import.
 controls = resolve(control_map, client.capabilities())
-bus = ControlBus(controls, targets=[VhiTarget(vhi.outlet(), client=client)], hz=32)
+bus = ControlBus(controls, targets=[RendererTarget(client=client, interface=vhi)], hz=32)
 
 # 5. Command by your own names.
 bus.push({"my_index": 0.8})              # a number, onto the predicted hand
@@ -72,13 +73,13 @@ returns immediately, so a 60 fps GUI never stalls on the network. The worker
 issues the unary RPC and logs the acknowledgement.
 
 !!! warning "VHI 2.0 or newer"
-    There is no fallback. `VhiTarget` asks the renderer which controls it exports and
+    There is no fallback. `RendererTarget` asks the renderer which controls it exports and
     refuses to guess, so a pre-2.0 build — which has no manifest — is reported as
     unsupported rather than driven. MyoGestic's installer and launcher both check the
     version; run a checkout from source with `$VHI_PATH` and `$GODOT_BIN` if you have
     no 2.x release.
 
-    `VhiTarget` also reads `vocabulary_version` off the manifest and **refuses anything
+    `RendererTarget` also reads `vocabulary_version` off the manifest and **refuses anything
     below `2`**, loudly, at bind. Vocabulary 2 is the one in which every DOF is its own
     single-channel stream named for its address; a renderer still reporting `1` expects
     the retired `stream_name`/`channel` manifest, and driving it would leave the hand

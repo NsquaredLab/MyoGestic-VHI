@@ -80,7 +80,8 @@ ways to get motion:
 
     ```python
     from myogestic.controls import ControlBus, load_control_map, resolve
-    from myogestic.vhi import VhiTarget, virtual_hand
+    from myogestic.renderer import RendererTarget
+    from myogestic.vhi import virtual_hand
 
     vhi = virtual_hand()
     client = vhi.control_client()
@@ -88,7 +89,7 @@ ways to get motion:
         load_control_map({"dofs": {"gesture": "vhi.control.gesture"}}),
         client.capabilities(),          # needs VHI running
     )
-    bus = ControlBus(controls, targets=[VhiTarget(vhi.outlet(), client=client)])
+    bus = ControlBus(controls, targets=[RendererTarget(client=client, interface=vhi)])
     bus.select("gesture", "Fist")       # control hand snaps to the Fist pose
     ```
 
