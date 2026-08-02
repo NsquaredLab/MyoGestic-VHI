@@ -12,7 +12,7 @@ while a recording trajectory is deliberately sweeping the control hand.
 !!! warning "The legacy `VhiControl` service (v1) has been removed"
     A client that still speaks it receives `UNIMPLEMENTED` — the same signal a current
     client gets from `GetControlManifest` against a build too old to answer, and how it
-    recognises a renderer it cannot drive. Its capabilities were
+    recognises a target it cannot drive. Its capabilities were
     split by *kind* rather than moved wholesale: `SetMovement` became a standard
     discrete DOF, `SetSessionActive` and movement cycling became the recording session
     RPCs, and `SetSmoothing` became `SetPresentation`. `Freeze`, `SetSpeed`, `SetChirality`
@@ -27,7 +27,7 @@ while a recording trajectory is deliberately sweeping the control hand.
 | `GetControlManifest` | `GetControlManifestRequest` | `ControlManifest` | Every address VHI exports, each with its kind and its range or its states — plus the `vocabulary_version` to gate on. A streamed DOF's **address is its stream name**: there is no separate stream name or channel number, because a stream is one DOF and one `float32` channel. **Call this first**, unconditionally — there is nothing else to open, declare or negotiate. |
 | `SetControl` | `SetControlRequest` | `ControlAck` | Command one frame. Both maps are keyed by **address**, as published in the manifest: the key says which control, the value says the number or the held state. Refusals are keyed by the same address in `rejected`, never silent. |
 | `SweepControl` | `SweepControlRequest` | `SweepControlReply` | Drive one DOF across its range; reports which rig elements moved and the signed degrees, read back off the skeleton. |
-| `SetPresentation` | `SetPresentationRequest` | `ControlAck` | Renderer blending. Appearance only — never a substitute for a client-side debounce. |
+| `SetPresentation` | `SetPresentationRequest` | `ControlAck` | Target-side blending. Appearance only — never a substitute for a client-side debounce. |
 | `SetRecordingSession` | `SetRecordingSessionRequest` | `RecordingAck` | Mark a recording session active; gates VHI's local keyboard so the session has one movement source. |
 | `StartRecordingTrajectory` | `StartRecordingTrajectoryRequest` | `RecordingAck` | Cycle the control hand through a movement to generate a trajectory. Refused if one is already running. |
 | `StopRecordingTrajectory` | `StopRecordingTrajectoryRequest` | `RecordingAck` | Stop it, resting the hand only if one was running. Idempotent. |
@@ -54,8 +54,8 @@ of 2.
 
 VHI and its clients are separately installed applications, so upgrading one does not
 upgrade the other. Without the gate a skewed pair fails silently in both directions: an
-old renderer waits for a wide pose stream nobody publishes any more and logs nothing, and
-a new renderer refuses an old client's wide stream at the LSL layer instead — either way
+old target waits for a wide pose stream nobody publishes any more and logs nothing, and
+a new target refuses an old client's wide stream at the LSL layer instead — either way
 the hand does not move, and only one of those two says so out loud. The version check is
 the one place both sides' versions are visible at once.
 
@@ -69,9 +69,9 @@ the one place both sides' versions are visible at once.
 
 ## The full contract
 
-`proto/renderer_control.proto` is the authoritative source - MyoGestic vendors a copy
+`proto/remote_control.proto` is the authoritative source - MyoGestic vendors a copy
 and regenerates its stubs from it.
 
 ```protobuf
---8<-- "proto/renderer_control.proto"
+--8<-- "proto/remote_control.proto"
 ```

@@ -89,7 +89,7 @@ Publish one single-channel `float32` outlet per DOF, named for that DOF's addres
 
 ## A client refuses to bind, naming the vocabulary version
 
-**Symptom** — the client will not drive this renderer and says so at bind, quoting a
+**Symptom** — the client will not drive this target and says so at bind, quoting a
 vocabulary version.
 
 `GetControlManifest` reports a `vocabulary_version`; this build reports **`"2"`**, and a

@@ -185,7 +185,7 @@ wrong inverts every joint, so it is worth stating per direction:
 |---|---|---|
 | `vhi.prediction.*` (inlets) | into VHI | **Standard** — `+1` is the direction the DOF's *name* denotes, so `+1` on `vhi.prediction.index` *flexes*. |
 | `vhi.control.pose.*` (inlets) | into VHI | **Standard**, unconditionally — see below. |
-| `VHI_Control` (outlet) | out of VHI | **Standard** — `+1` flexes. It published renderer units, `-1` flexing, before 2.0. |
+| `VHI_Control` (outlet) | out of VHI | **Standard** — `+1` flexes. It published VHI's rig units, `-1` flexing, before 2.0. |
 | `VHI_Predict` (outlet) | out of VHI | **Standard** — `+1` flexes. |
 
 The domain is `[-1, 1]` everywhere, `0` is rest, and VHI clamps to it. Both outlets
@@ -197,7 +197,7 @@ the wire rather than by remembering which release you are on.
 
 The prediction side had its convention *changed* in 2.0. The control-pose side used to be
 handled differently again: its convention was chosen by the client through a field on a
-`Declare` handshake, defaulting to the old renderer units. Both the field and the
+`Declare` handshake, defaulting to the old rig units. Both the field and the
 handshake are gone. There is one encoding now — standard, unconditionally, on every
 inbound stream — and VHI multiplies into rig degrees internally by
 `Vhi.StandardPose.AtPlusOne`, so a producer never chooses a convention. It only chooses

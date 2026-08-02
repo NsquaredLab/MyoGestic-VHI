@@ -36,8 +36,8 @@ import pytest
 
 #: Standard name -> the bones it must move, and the signed degrees at standard +1.
 #:
-#: **Literal calibration, not derived from anything the renderer also reads.** Every earlier
-#: version of this table was computed from `MovementPoses` — and so was the renderer, so the
+#: **Literal calibration, not derived from anything the target also reads.** Every earlier
+#: version of this table was computed from `MovementPoses` — and so was the target, so the
 #: two agreed with each other and both disagreed with the hand. Twice: once when the suite
 #: took its numbers from a live sweep, and once when it took them from the pose library
 #: without accounting for `ApplyMovementPose` negating every row on the way to the bone. A
@@ -45,7 +45,7 @@ import pytest
 #:
 #: Positive X is flexion on this rig. The independent anchor for that claim is not here — it
 #: is `test_a_named_flexion_publishes_standard_plus_one`, which holds the movement whose
-#: *name* says what it is and reads the ground-truth stream. A human named it; no renderer
+#: *name* says what it is and reads the ground-truth stream. A human named it; no target
 #: computed it.
 #:
 #: Thumb abduction has only two entries on purpose: it drives all three thumb bones
@@ -118,7 +118,7 @@ def test_setcontrol_rejects_a_discrete_address_this_build_does_not_export(v2, mo
     """The key names the *control*, so a key naming nothing is refusable.
 
     `grip` is what a client's control map calls its left-hand side, and forwarding that
-    instead of the address is the defect this asserts against: a renderer that resolved on
+    instead of the address is the defect this asserts against: a target that resolved on
     the state alone would happily apply a movement it was never told the target of, and
     two discrete controls sharing a state name would be indistinguishable.
     """
@@ -285,7 +285,7 @@ def aid(v2_pb2, vhi_process):
 
     pb2, pb2_grpc = v2_pb2
     channel = grpc.insecure_channel("127.0.0.1:50051")
-    stub = pb2_grpc.RendererControlStub(channel)
+    stub = pb2_grpc.RemoteControlStub(channel)
     yield stub, pb2
     # Never leave a trajectory running for the next test.
     stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0)
@@ -542,22 +542,22 @@ def test_the_control_hand_follows_one_control_pose_stream(v2, control_inlet, mov
 #
 # This section has been wrong twice, in opposite directions, and both times it passed.
 #
-#   1. The expectation was filled in from a live sweep of a renderer that negated every
+#   1. The expectation was filled in from a live sweep of a target that negated every
 #      channel on ingest. The suite agreed with the rig; both disagreed with the names.
 #   2. The expectation was then derived from `MovementPoses` instead — the rig's own
 #      library of named postures, which looks like ground truth and is not. Those rows
 #      reach the bone through `ApplyMovementPose`, which negated them, so a held
-#      `Movements.Fist` put bone 4 at `+85°` while the table read `-85`. The renderer read
+#      `Movements.Fist` put bone 4 at `+85°` while the table read `-85`. The target read
 #      the table the same wrong way, so again the two agreed and the hand was backwards.
 #
-# Neither failure is detectable from inside one renderer. `VHI_Predict`'s read-back cannot
+# Neither failure is detectable from inside one target. `VHI_Predict`'s read-back cannot
 # help either — it is the algebraic inverse of the conversion that rendered the pose, so it
 # round-trips whichever way the pair points.
 #
-# The anchor below is therefore the **control hand**: VHI's own ground-truth renderer,
+# The anchor below is therefore the **control hand**: VHI's own ground-truth rig,
 # holding the movement whose *name* says what it is. `Movements.Index` is index flexion
 # because it is called that and an operator watched it. Driving the predicted hand at
-# standard +1 and requiring the same bones to land in the same place compares two renderers
+# standard +1 and requiring the same bones to land in the same place compares two implementations
 # and consults no table, so a sign error has to be made identically in both to survive.
 
 SOURCE = pathlib.Path(__file__).resolve().parent.parent / "src"
@@ -580,7 +580,7 @@ FLEXION_DOFS = tuple(
 #: Movement the control hand can hold -> the VHI_Control channel it must drive to +1, and
 #: the channels it must leave alone. Both names are the rig's own; nothing is computed.
 #: `Movements.Index` is index flexion because it is called that and an operator watched it,
-#: which is the only claim in this file that no renderer also makes.
+#: which is the only claim in this file that no target also makes.
 NAMED_FLEXIONS = {
     "Thumb": 0,
     "Index": 2,
@@ -681,10 +681,10 @@ def _hold(stub, pb2, inlet, movement):
 def test_a_named_flexion_publishes_standard_plus_one(v2, control_inlet, movement):
     """The non-circular anchor. `Movements.Index` is flexion because it is *called* that.
 
-    Every other direction check in this file consults something the renderer also consults
-    — the pose table, or an inverse of the renderer's own conversion — and therefore agrees
+    Every other direction check in this file consults something the target also consults
+    — the pose table, or an inverse of the target's own conversion — and therefore agrees
     with it whichever way it points. This one starts from a human-assigned name and asks
-    what the ground-truth stream says while the hand is in it. A renderer bending the wrong
+    what the ground-truth stream says while the hand is in it. A target bending the wrong
     way publishes `-1` here.
 
     It is also what a user actually does: train on `VHI_Control`, drive
@@ -799,8 +799,8 @@ def test_the_manifest_reports_the_vocabulary_a_client_gates_on(v2):
     """The version is load-bearing, so a build that forgot to bump it must fail here.
 
     MyoGestic and VHI are installed separately, so shipping them together does not make
-    any running pair a matching pair. A client refuses a renderer below its own minimum by
-    name; a renderer that still claimed `"1"` while serving this transport would be
+    any running pair a matching pair. A client refuses a target below its own minimum by
+    name; a target that still claimed `"1"` while serving this transport would be
     refused as though it were the old one — correctly, and confusingly.
     """
     stub, pb2 = v2

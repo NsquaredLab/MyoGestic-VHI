@@ -12,7 +12,7 @@ All of it is breaking, and all of it is detectable — nothing degrades silently
 
     The manifest now carries the check for exactly this. `vocabulary_version` is `"2"` on
     2.0, a client declares the oldest vocabulary it can drive, and MyoGestic **refuses**
-    any renderer reporting less — by name, at bind, rather than by leaving you to notice
+    any target reporting less — by name, at bind, rather than by leaving you to notice
     that a hand is not moving.
 
 ## What changed, and why
@@ -129,7 +129,7 @@ carry it. See [What drives the control hand](concepts/control-hand-drivers.md).
 
 The `vhi.prediction.*` streams carry **standard** values: `+1` means the direction the DOF
 name denotes, so `+1` on `vhi.prediction.index` *flexes*. v1 took raw rig units — the pose multipliers
-the renderer applies to its per-bone gains — and named no channel, so what a value meant
+VHI applies to its per-bone gains — and named no channel, so what a value meant
 was a matter of matching tables.
 
 A pre-release draft of v2 let a client ask which convention was in force, through a
@@ -141,7 +141,7 @@ is one encoding now, standard, unconditionally; the field is gone, and so is the
 handshake that carried it.
 
 !!! warning "`VHI_Control` changed too, and it is a wire break"
-    It published the renderer's own units, opposite to `VHI_Predict` on five channels —
+    It published VHI's own rig units, opposite to `VHI_Predict` on five channels —
     so a fist read `-1` on the stream you train from and `+1` on the one you drive, and
     every model needed its weights flipped by hand. Both are standard now. Sessions
     recorded before this are in the old units: convert them once with
@@ -151,7 +151,7 @@ handshake that carried it.
 
     `VHI_Predict` publishes **standard** values, so pushing `+1` on
     `vhi.prediction.index` and reading `VHI_Predict` channel 2 gives `+1` back — the
-    renderer is the identity rather than a sign flip. Nothing archived depends on that
+    VHI is the identity rather than a sign flip. Nothing archived depends on that
     stream, which is what makes the change safe to make.
 
     The optional `vhi.control.pose.*` streams are standard too, unconditionally. There
@@ -164,11 +164,11 @@ handshake that carried it.
 ### If you use MyoGestic
 
 Say what you control in your own names, point each at an address VHI publishes, and let
-`RendererTarget` resolve the two against the manifest:
+`RemoteTarget` resolve the two against the manifest:
 
 ```python
 from myogestic.controls import ControlBus, load_control_map, resolve
-from myogestic.renderer import RendererTarget
+from myogestic.remote import RemoteTarget
 from myogestic.vhi import virtual_hand
 
 vhi = virtual_hand()
@@ -187,7 +187,7 @@ CONTROL_MAP = load_control_map({
 # semantics. So resolve after VHI is up, not at import.
 controls = resolve(CONTROL_MAP, client.capabilities())
 
-target = RendererTarget(
+target = RemoteTarget(
     client=client,                       # reads the manifest; refuses a pre-2.0 build
     interface=vhi,                       # one single-channel stream per address driven
 )
@@ -237,7 +237,7 @@ by it, and calling it twice costs one extra RPC.
 
 ### If you use VHI directly
 
-Generate stubs from `proto/renderer_control.proto`, then:
+Generate stubs from `proto/remote_control.proto`, then:
 
 1. Call `GetControlManifest` once, unconditionally, before you send anything, and
    **refuse a `vocabulary_version` below `2`**. It is a string holding a decimal integer;
@@ -251,9 +251,9 @@ Generate stubs from `proto/renderer_control.proto`, then:
    `SetControl` for held states. Nothing has to be opened, declared or requested first,
    and you publish only the DOFs you drive — the rest hold where they are.
 
-An `UNIMPLEMENTED` on step 1 is a renderer too old to have a manifest at all; a
+An `UNIMPLEMENTED` on step 1 is a target too old to have a manifest at all; a
 `vocabulary_version` below your minimum is one that has a manifest and speaks a transport
-you do not. Both are a renderer you cannot drive, and both are worth naming in a log
+you do not. Both are a target you cannot drive, and both are worth naming in a log
 rather than working around. Read `ControlAck.rejected` on every `SetControl` too: a
 refusal is always named, and a name missing from it is the only evidence a value landed.
 

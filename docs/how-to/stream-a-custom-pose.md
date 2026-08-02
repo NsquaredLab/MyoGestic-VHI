@@ -67,7 +67,7 @@ removed for exactly that reason; a client that still reads `cap.stream_name` or
 
 The manifest also reports a `vocabulary_version`, and it is **`"2"`** here — one stream
 per DOF, named for the address. Check it before you publish anything: a client that
-refuses a renderer below its minimum finds out at bind, and one that does not finds out
+refuses a target below its minimum finds out at bind, and one that does not finds out
 by watching a hand that never moves.
 
 `vhi.control.pose.*` is the control hand's own namespace — deliberately distinct from
@@ -124,7 +124,7 @@ does not touch the predicted hand.
   just like a played movement does. The read-back shape did not change with the
   per-DOF inlets: a recording wants one row per instant.
 - Driving this from MyoGestic rather than raw `pylsl`? Point your control map at the
-  `vhi.control.pose.*` addresses and let `RendererTarget` resolve them against the manifest —
+  `vhi.control.pose.*` addresses and let `RemoteTarget` resolve them against the manifest —
   see [Drive VHI from MyoGestic](drive-from-myogestic.md).
 
 ## Use case: 9-DOF model-robustness validation

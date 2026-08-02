@@ -6,7 +6,7 @@ actually does, so it needs a running VHI and generated Python stubs.
 
 Both are produced here rather than committed:
 
-- The stubs come from ``proto/renderer_control.proto`` via ``grpcio-tools`` into a
+- The stubs come from ``proto/remote_control.proto`` via ``grpcio-tools`` into a
   temp directory. Generating them at session start means the test can never drift
   from the contract — a proto edit is picked up on the next run instead of silently
   testing a stale copy.
@@ -40,7 +40,7 @@ import time
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-PROTO = REPO / "proto" / "renderer_control.proto"
+PROTO = REPO / "proto" / "remote_control.proto"
 GRPC_PORT = 50051
 #: Generous: Godot has to boot, load the scene, map bones and start Kestrel.
 STARTUP_TIMEOUT_S = 90.0
@@ -87,8 +87,8 @@ def v2_pb2():
     )
     assert result.returncode == 0, f"protoc failed:\n{result.stderr}"
     sys.path.insert(0, str(out))
-    import renderer_control_pb2 as pb2
-    import renderer_control_pb2_grpc as pb2_grpc
+    import remote_control_pb2 as pb2
+    import remote_control_pb2_grpc as pb2_grpc
 
     return pb2, pb2_grpc
 
@@ -148,7 +148,7 @@ def v2(v2_pb2, vhi_process):
 
     pb2, pb2_grpc = v2_pb2
     channel = grpc.insecure_channel(f"127.0.0.1:{GRPC_PORT}")
-    stub = pb2_grpc.RendererControlStub(channel)
+    stub = pb2_grpc.RemoteControlStub(channel)
 
     # The port opens before the scene finishes wiring, so wait for a real answer
     # rather than for the socket.

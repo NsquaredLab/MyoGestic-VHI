@@ -51,7 +51,7 @@ public partial class GrpcControlServer : Node
             // One service. A client that still speaks the legacy VhiControl RPC set
             // now gets UNIMPLEMENTED — the same signal a current client gets from
             // GetControlManifest against a build too old to answer, and how it
-            // recognises a renderer it cannot drive.
+            // recognises a target it cannot drive.
             app.MapGrpcService<VhiControlService>();
             app.StartAsync().Wait(5000);
 

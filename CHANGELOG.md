@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`RendererControl` — the one gRPC control service, and `GetControlManifest` is its
+- **`RemoteControl` — the one gRPC control service, and `GetControlManifest` is its
   whole contract.** The manifest lists every **address** VHI exports
   (`vhi.prediction.index`, `vhi.control.gesture`) with what it can render for each: the
   kind, and the range or the states. A client calls it once, unconditionally, before it
@@ -62,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `'<movement>' was refused — a control-pose stream is driving the control hand` in
   `ControlAck.rejected`. v1 arbitrated the same conflict through `ControlMode`, where a
   client only ever saw commands quietly not apply.
-- **`SetPresentation` — renderer blending, named for what it is.** The third of three
+- **`SetPresentation` — target-side blending, named for what it is.** The third of three
   distinct smoothing layers (continuous smoothing and discrete debounce are the other
   two, both on the MyoGestic side). Appearance only; it cannot make an unstable
   prediction stable.
@@ -76,14 +76,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **BREAKING: the contract is named for what it is, not for who serves it first.**
-  `proto/myogestic_vhi.proto` → `proto/renderer_control.proto`, `package myogestic.vhi` →
-  `package myogestic.renderer`, and `service VhiControl` → `service RendererControl`.
+  `proto/myogestic_vhi.proto` → `proto/remote_control.proto`, `package myogestic.vhi` →
+  `package myogestic.remote`, and `service VhiControl` → `service RemoteControl`.
   Nothing about the wire's *data* moved — every field number, name and type is unchanged
-  — but the **service path** did (`/myogestic.renderer.RendererControl/SetControl`), so
+  — but the **service path** did (`/myogestic.remote.RemoteControl/SetControl`), so
   MyoGestic and VHI must be upgraded together. The contract never described a hand: it
-  describes a renderer that publishes a manifest of addressed controls, and VHI is one
+  describes a remote target that publishes a manifest of addressed controls, and VHI is one
   implementation of it. The C# namespace follows the package: `Myogestic.Vhi.*` →
-  `Myogestic.Renderer.*`. `Vhi.VhiControlService` keeps its name — it is VHI's
+  `Myogestic.Remote.*`. `Vhi.VhiControlService` keeps its name — it is VHI's
   implementation, and that *is* VHI-specific.
 - **BREAKING: `stream_name` and `channel` are gone from `ControlCapability`, and
   `vocabulary_version` is now the gate that says so.** The two fields described a
@@ -104,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declares the oldest vocabulary it can drive and **refuses** anything below it, by name,
   at bind. MyoGestic declares a minimum of 2. VHI and its clients are separately installed
   applications, so upgrading one does not upgrade the other, and without the gate the skew
-  is silent in the worst way available: an old renderer waits for a wide pose stream nobody
+  is silent in the worst way available: an old target waits for a wide pose stream nobody
   publishes any more, logs nothing at all, and the hand simply never moves. Vocabulary `1`
   was the `stream_name`/`channel` manifest, in which several controls could share one wider
   stream; `2` is one stream per DOF, named for the address.
@@ -173,7 +173,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on disk whose numbers mean the opposite of what they say.
 - **BREAKING: the continuous LSL inlets take standard values.** Every inbound stream now
   carries values where `+1` means the direction the DOF name denotes, so `+1` on
-  `vhi.prediction.index` *flexes*. v1 expected the renderer's own units of the day — the
+  `vhi.prediction.index` *flexes*. v1 expected VHI's own rig units of the day — the
   Unity-signed gain table, in which flexion was negative — so a v1 sample and a standard
   one of the same sign render opposite hands. There is exactly one encoding now, so
   nothing negotiates it: the field that once announced it is gone, and a client simply
@@ -208,7 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING: the v1 `VhiControl` service and `proto/myogestic_vhi.proto`.** A client
   that still speaks v1 receives `UNIMPLEMENTED` — the same signal a current client gets
   from `GetControlManifest` against a build too old to answer, and how it recognises a
-  renderer it cannot drive.
+  target it cannot drive.
 
   Capabilities were split by *kind* rather than moved wholesale: `SetMovement` → a
   standard discrete DOF; `SetMovement(cycle=true)` and `SetSessionActive` → the
@@ -252,12 +252,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way to the bone. Those rows are rig-native now, so nothing in this repository is
   Unity-signed and no sentence here needs to be read twice.
 
-  The direction anchor is no longer derived from anything the renderer also reads. It
+  The direction anchor is no longer derived from anything VHI also reads. It
   holds the movement whose *name* says what it is — `Movements.Index` is index flexion
   because a human called it that — and asserts what `VHI_Control` publishes.
 - **VHI no longer reads a sender's channel labels back off the inlet, and does not
   crash.** Asking an inlet for its stream info is the only thing that starts liblsl's
-  `info_receiver` thread, and cancelling that thread mid-request crashed the renderer. All
+  `info_receiver` thread, and cancelling that thread mid-request crashed VHI. All
   it bought was a producer's right to send a narrower frame, which saved three floats.
   What a stream carries is settled before a byte moves — by its **name**, which is the
   address of the one DOF it drives — so there is nothing to reconstruct on arrival.
@@ -323,7 +323,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `tests/test_v2_contract.py` now derives its expectation from the movement library rather
   than from a sweep. That mattered: the old expectation table had been filled in *from* the
-  negating renderer, so the suite agreed with the rig while both disagreed with the DOF
+  negating rig, so the suite agreed with itself while both disagreed with the DOF
   names. Restoring the blanket negation fails 11 assertions.
 - **The standard conversion is unconditional, and no longer claims otherwise.** The
   ingest comment said it was "gated behind the handshake" while negating regardless of
@@ -334,7 +334,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changes sign, so a sample beyond `±1.06` on an `85°` gain flipped the read-back. Both
   paths clamp now.
 - `VHI_Predict` publishes standard values, so pushing `+1` on `vhi.prediction.index` and
-  reading channel 2 of that stream returns `+1` — the renderer is the identity rather
+  reading channel 2 of that stream returns `+1` — VHI is the identity rather
   than a sign flip.
   `VHI_Control` publishes standard values too, so a fist is the same
   `[1, -1, 1, 1, 1, 1, 0, 0, 0]` on the stream you train from and the one you drive.

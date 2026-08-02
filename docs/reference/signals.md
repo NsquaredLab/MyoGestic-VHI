@@ -84,7 +84,7 @@ rather than nine independently timed ones.
 Both are standard, and that is the point: push `+1` on `vhi.prediction.index` and read it
 back as `+1` on `VHI_Predict` channel 2, and a fist on the ground-truth stream is the same
 vector that would produce one on the predicted hand. They disagreed once — `VHI_Control`
-published the renderer's
+published VHI's own rig
 own units, opposite on five channels — so every model trained on it needed its weights
 flipped by hand, and nothing on either wire said so. Sessions recorded before that are in
 the old units and were converted once by `myogestic.tools.migrate_vhi_sessions`; the

@@ -38,7 +38,7 @@ public partial class LSLCommunicationController : Node
 	/// <remarks>
 	/// <see cref="Name"/> is the DOF's address and the LSL stream's name — they are the same
 	/// string, which is the point of the design. <see cref="Channel"/> is where the value goes
-	/// in the hand's nine-slot pose and is nobody's business but this renderer's; what a
+	/// in the hand's nine-slot pose and is nobody's business but VHI's own; what a
 	/// producer writes is channel 0 of a stream of its own.
 	/// </remarks>
 	private sealed class DofInlet
@@ -261,17 +261,17 @@ public partial class LSLCommunicationController : Node
 	/// <c>stream_inlet</c> is a native object with its own receiver threads and open
 	/// sockets, and dropping the managed reference only queues it for the GC. Teardown then
 	/// happened at some arbitrary later moment on the finalizer thread — in practice while
-	/// this renderer had already resolved and opened a *replacement* inlet for the same
+	/// VHI had already resolved and opened a *replacement* inlet for the same
 	/// stream, because the retry loop starts as soon as the field reads null.</para>
 	/// <para>That is what crashed VHI: liblsl 1.17.4's <c>cancellable_streambuf</c>
 	/// destructor flushes through a socket that <c>cancel()</c> has already reset, so the
 	/// abandoned inlet's <c>info_receiver</c> thread dereferenced null and took the process
-	/// with it (<c>EXC_BAD_ACCESS at 0x0</c>). A renderer that reconnects on a 5s stale
+	/// with it (<c>EXC_BAD_ACCESS at 0x0</c>). An application that reconnects on a 5s stale
 	/// timer does this often — 28 times in one session here — and the suite that churns
 	/// outlets made it likely enough to hit.</para>
 	/// <para>The field is cleared under the lock, because the resolve pass assigns it from a
 	/// task thread. The close happens *outside* the lock: it joins the inlet's threads, and
-	/// holding a lock the connect path wants across a network teardown is how this renderer
+	/// holding a lock the connect path wants across a network teardown is how this application
 	/// used to stall the app it was talking to.</para>
 	/// </remarks>
 	private void DropInlet(DofInlet dof)
@@ -301,7 +301,7 @@ public partial class LSLCommunicationController : Node
 	/// does on every save) would leave this inlet dead for the life of the process, still
 	/// reporting itself as working. Off, a lost producer simply stops delivering, the
 	/// staleness clock drops the inlet, and this pass picks up whoever publishes that name
-	/// now. That is the recovery this renderer actually wants.</para>
+	/// now. That is the recovery VHI actually wants.</para>
 	/// </remarks>
 	private void ResolveMissingInletsAsync()
 	{

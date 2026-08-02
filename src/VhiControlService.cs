@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using Grpc.Core;
-using Myogestic.Renderer;
+using Myogestic.Remote;
 
 namespace Vhi;
 
@@ -16,7 +16,7 @@ namespace Vhi;
 /// <remarks>
 /// <para>
 /// A client calls <see cref="GetControlManifest"/> once, unconditionally, and gets back
-/// every <b>address</b> VHI exports ("vhi.prediction.index") with what it can render —
+/// every <b>address</b> VHI exports ("vhi.prediction.index") with what it can drive —
 /// no per-client negotiation, no declared subset. <see cref="Renderable"/> is the only
 /// table in VHI that knows both the manifest's addresses and the rig they resolve to,
 /// and it exists so that nothing outside this file has to.
@@ -33,7 +33,7 @@ namespace Vhi;
 /// <see cref="StartRecordingTrajectory"/>, <see cref="StopRecordingTrajectory"/> and
 /// <see cref="GetRecordingSessionState"/> are a second, unrelated concern that lives
 /// here because both drive the same control hand through the same state machine —
-/// splitting them into a second service implied an independence the renderer does not
+/// splitting them into a second service implied an independence the target does not
 /// have. Nothing here is a standard DOF and none of it may change what one means: a
 /// standard discrete DOF is a held state, while a recording trajectory keeps the
 /// control hand cycling so the recorded pose stream sweeps a continuous range for EMG
@@ -49,7 +49,7 @@ namespace Vhi;
 /// single main-thread closure is never rendered before the closure returns.
 /// </para>
 /// </remarks>
-public class VhiControlService : RendererControl.RendererControlBase
+public class VhiControlService : RemoteControl.RemoteControlBase
 {
 	/// <summary>Which rotation axis of a joint a standard DOF drives.</summary>
 	private enum Axis { X, Y, Z }
@@ -175,7 +175,7 @@ public class VhiControlService : RendererControl.RendererControlBase
 	/// VHI used to accept a second spelling of five controls — <c>vhi.prediction.index.flexion</c>
 	/// for <c>vhi.prediction.index</c>, a bare <c>vhi.prediction.thumb</c> for its two axes —
 	/// without advertising any of them. Two vocabularies for one set of controls is one more
-	/// than a renderer can keep in step, so there is now exactly one: what the manifest says.
+	/// than a target can keep in step, so there is now exactly one: what the manifest says.
 	/// </para>
 	/// <para>
 	/// Which makes the refusal the migration path, and it has to carry the new spelling. The
@@ -239,7 +239,7 @@ public class VhiControlService : RendererControl.RendererControlBase
 	/// silently. A client declares the oldest vocabulary it can drive and refuses anything
 	/// below it, by name, when it binds — which is the only thing that makes a version-skewed
 	/// pair of these two <i>separately installed</i> applications say so out loud. Before that
-	/// gate existed the mismatch was silent in the worst way: an old renderer listening for a
+	/// gate existed the mismatch was silent in the worst way: an old target listening for a
 	/// whole-pose stream a new client no longer publishes logs nothing at all, and the hand
 	/// simply never moves.</para>
 	/// <para><c>1</c> — a manifest carrying <c>stream_name</c> and <c>channel</c>, several
@@ -265,7 +265,7 @@ public class VhiControlService : RendererControl.RendererControlBase
 	/// This is the target-owned half of the contract. A client maps its own arbitrary
 	/// model-output names onto these addresses; it does not invent addresses and it does
 	/// not hard-code what they mean. Everything needed to send a value correctly is
-	/// declared here, by the side that renders it.
+	/// declared here, by the side that carries it out.
 	/// </para>
 	/// <para>
 	/// One absence is deliberate and worth stating, because it would otherwise be
@@ -297,7 +297,7 @@ public class VhiControlService : RendererControl.RendererControlBase
 				Rest = 0.0f,
 				// No stream name and no channel: a DOF is its own stream, named for this
 				// very address and one channel wide, so both fields only ever repeated what
-				// `Address` already says. The DOFs this renderer exports are independently
+				// `Address` already says. The DOFs this target exports are independently
 				// actuated, may come from different producers and may update at different
 				// rates, so nothing links them and there is no frame for a client to fill in.
 				Description = Describes.TryGetValue(address, out string what) ? what : "",
@@ -430,7 +430,7 @@ public class VhiControlService : RendererControl.RendererControlBase
 			return ack;
 		});
 
-	/// <summary>Configure how the renderer blends between commanded values.</summary>
+	/// <summary>Configure how the target blends between commanded values.</summary>
 	/// <remarks>
 	/// <para>
 	/// Appearance only. This is the third of three separate layers and the one most

@@ -124,7 +124,7 @@ joints internally by per-joint gains (see [Architecture](architecture.md)).
 
     Everything is standard as of 2.0: `+1` is the direction the DOF's name denotes, on the
     inbound streams and both outlets alike. `VHI_Control` was the exception and it was a
-    bug — it published the renderer's own units, opposite on five channels, so a fist read
+    bug — it published VHI's own rig units, opposite on five channels, so a fist read
     `-1` on the stream you train from and `+1` on the one you drive. Recordings from before
     the fix are converted by `myogestic.tools.migrate_vhi_sessions`; the outlets advertise
     `pose_convention` so a reader never has to infer which it holds.

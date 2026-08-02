@@ -345,7 +345,7 @@ public static class MovementPoses
 /// <remarks>
 /// <para>A standard <c>+1</c> is the direction the DOF's name denotes, <c>0</c> is rest, and
 /// the domain is <c>[-1, 1]</c>. <see cref="AtPlusOne"/> states, per joint and axis, the
-/// rotation that <c>+1</c> produces — so a renderer multiplies, a reader divides, and
+/// rotation that <c>+1</c> produces — so a target multiplies, a reader divides, and
 /// neither carries a sign of its own.</para>
 /// <para><b>Positive X is flexion on this rig.</b> That is not what
 /// <see cref="MovementPoses"/> appears to say, and the appearance is what this class exists

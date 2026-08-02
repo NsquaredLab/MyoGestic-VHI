@@ -28,7 +28,7 @@ VHI talks to MyoGestic over two transports, each chosen for the kind of traffic 
 - **LSL** for **continuous time-series**: one stream per DOF, inbound — `vhi.prediction.*` drives the predicted hand (~32 Hz) and the optional `vhi.control.pose.*` drives the control hand — plus VHI's own `VHI_Control` / `VHI_Predict` outlets (60 Hz, nine channels each) so the experiment records what was actually shown on screen.
 - **gRPC** for **discovery, discrete state and verification**: `GetControlManifest` publishes every control VHI exports, `SetControl` carries held states, `SweepControl` reports what the rig actually did, and the same service gates a recording session and drives its trajectories. VHI hosts the server in-process on `127.0.0.1:50051`; MyoGestic is the client.
 
-`proto/renderer_control.proto` is the wire contract for the gRPC side. It is deliberately generic — `myogestic.renderer.RendererControl` is the contract *any* renderer serves, and VHI is one implementation of it. MyoGestic vendors a copy and regenerates its Python stubs from it. The pre-2.0 `myogestic.vhi.v1.VhiControl` service is gone — see [Upgrading to VHI 2.0](docs/upgrading-to-v2.md).
+`proto/remote_control.proto` is the wire contract for the gRPC side. It is deliberately generic — `myogestic.remote.RemoteControl` is the contract *any* remote target serves, and VHI is one implementation of it. MyoGestic vendors a copy and regenerates its Python stubs from it. The pre-2.0 `myogestic.vhi.v1.VhiControl` service is gone — see [Upgrading to VHI 2.0](docs/upgrading-to-v2.md).
 
 ## Quick start
 
@@ -57,7 +57,7 @@ Nine addresses drive the predicted hand — thumb flexion and abduction, index, 
 
 The address **is** the stream name — that is the whole of the inbound transport contract, and the manifest carries nothing further about the wire. A stream that resolves under one of those names and is not exactly one channel wide is refused rather than read at index 0.
 
-Values are **standard**: `+1` is the direction the DOF's name denotes, so a closed fist is `[1, -1, 1, 1, 1, 1, 0, 0, 0]` across the nine — five flexions and an *ad*ducted thumb. Before 2.0 the same fist was `[-1, -1, …]` in the renderer's own units. Rather than hard-code any of it, call `GetControlManifest`, check that its `vocabulary_version` is at least `"2"`, and publish under the addresses it lists — see [the LSL reference](docs/reference/lsl-reference.md#the-nine-dofs).
+Values are **standard**: `+1` is the direction the DOF's name denotes, so a closed fist is `[1, -1, 1, 1, 1, 1, 0, 0, 0]` across the nine — five flexions and an *ad*ducted thumb. Before 2.0 the same fist was `[-1, -1, …]` in VHI's own rig units. Rather than hard-code any of it, call `GetControlManifest`, check that its `vocabulary_version` is at least `"2"`, and publish under the addresses it lists — see [the LSL reference](docs/reference/lsl-reference.md#the-nine-dofs).
 
 ## Documentation
 

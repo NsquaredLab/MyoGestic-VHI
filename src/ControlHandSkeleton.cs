@@ -172,7 +172,7 @@ public partial class ControlHandSkeleton : HandSkeleton
 	/// <summary>True when a MyoGestic recording session is currently active.
 	/// While set, VHI's local keyboard input is gated off so the gRPC client
 	/// is the sole movement source. Toggled via the
-	/// <c>RendererControl.SetRecordingSession</c> RPC.</summary>
+	/// <c>RemoteControl.SetRecordingSession</c> RPC.</summary>
 	public bool SessionActive { get; set; } = false;
 
 	// --- recording trajectories (v2 recording aid) --------------------------------

@@ -38,7 +38,7 @@ adjust the joint values.
 
 !!! warning "Files written before VHI 2 are signed the other way"
 
-    They said `negative = flexion`, and the renderer negated every row again on the
+    They said `negative = flexion`, and VHI negated every row again on the
     way to the bone, so the two cancelled. That is fixed, which means the old signs
     now mean what they say — backwards. A file without a `convention` key is
     detected as Unity-signed and **migrated in place on first load**, with a

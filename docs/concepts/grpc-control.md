@@ -35,8 +35,8 @@ calls; the return value *is* the acknowledgement.
 
 ## The contract
 
-The contract is `proto/renderer_control.proto` in this repo — the authoritative
-source. It names no hand: `myogestic.renderer.RendererControl` is what *any* renderer
+The contract is `proto/remote_control.proto` in this repo — the authoritative
+source. It names no hand: `myogestic.remote.RemoteControl` is what *any* remote target
 serves, and VHI is one implementation. MyoGestic vendors a copy and regenerates its
 Python stubs from it.
 
@@ -75,11 +75,11 @@ The sequence is:
 `ControlManifest.vocabulary_version` is a decimal integer, compared numerically, and this
 build reports **`"2"`**. A client declares the oldest vocabulary it can drive and
 **refuses** anything below it, loudly, at bind — MyoGestic declares a minimum of 2 and
-will not drive a renderer reporting less.
+will not drive a target reporting less.
 
 That refusal exists because VHI and its clients are *separately installed applications*.
 Upgrading one does not upgrade the other, and a version-skewed pair otherwise fails in the
-quietest way this system has: an old renderer sits waiting for a wide pose stream nobody
+quietest way this system has: an old target sits waiting for a wide pose stream nobody
 publishes any more, logs nothing at all, and the hand simply never moves. There is no
 symptom to read, so the check has to happen at the one moment both versions are on the
 table.
@@ -106,21 +106,21 @@ count is not exactly 1 is logged as an error and its inlet is never opened. See
 
     A client that still speaks v1 now gets `UNIMPLEMENTED`. That is also what a
     current client sees when it calls `GetControlManifest` against a build too old to
-    answer, which is how it recognises a renderer it cannot drive. Nothing degrades
+    answer, which is how it recognises a target it cannot drive. Nothing degrades
     silently.
 
     Its capabilities went to three different places, because they were three
     different kinds of thing: `SetMovement` became a standard **discrete DOF**
     (a held state), `SetSessionActive` and movement cycling became the
     **recording-session RPCs**, and `SetSmoothing` became `SetPresentation` — a
-    renderer presentation setting. `Freeze`, `SetSpeed`, `SetChirality` and
+    target presentation setting. `Freeze`, `SetSpeed`, `SetChirality` and
     `SetControlMode` were transport concepts with no consumer and were not
     replaced. `GetState`'s only real job, discovering movement names, is
     `GetRecordingSessionState`.
 
 ### Smoothing is three layers, not one
 
-`SetPresentation` (on `VhiControl`) configures the renderer's visual
+`SetPresentation` (on `VhiControl`) configures VHI's own visual
 blending. It is deliberately the *third* of three separate mechanisms, and treating
 any two as interchangeable is a bug:
 
@@ -128,7 +128,7 @@ any two as interchangeable is a bug:
 |---|---|---|---|
 | 1. Continuous smoothing | MyoGestic's `ControlBus`, before any target | continuous DOFs | **yes** — sets the commanded value |
 | 2. Debounce + hysteresis | MyoGestic, declared on the DOF | discrete DOFs | **yes** — sets *when* a state changes |
-| 3. Presentation blending | **here**, in the renderer | how a value looks | no — appearance only |
+| 3. Presentation blending | **here**, in VHI | how a value looks | no — appearance only |
 
 A discrete control is never numerically low-pass filtered as though it were an axis:
 averaging "rest" and "fist" interpolates through states nobody selected. A noisy
@@ -137,7 +137,7 @@ classifier needs a stability gate, which is layer 2 and lives on the MyoGestic s
 Layer 3 is worth having — a hand that snaps between poses looks wrong — but it cannot
 make an unstable prediction stable. A build with blending on and no debounce still
 jumps between states; it just does so smoothly, which is arguably worse because it
-looks deliberate. Blending is a renderer setting a client *writes* and never reads
+looks deliberate. Blending is a target setting a client *writes* and never reads
 back — there is no field anywhere reporting whether it is on, precisely so nothing
 can be built on top of it.
 
@@ -151,7 +151,7 @@ EMG windows to be aligned against. Folding that into the discrete vocabulary wou
 made "grip" mean "grip, unless someone is recording", which is how a control standard
 rots. They live in the same service as control because both drive the same control
 hand through the same state machine — splitting them into a second service implied an
-independence the renderer does not have.
+independence the target does not have.
 
 So these RPCs carry the two things that belong to a recording *session* rather than to
 the thing being controlled:
@@ -196,7 +196,7 @@ what is arriving at the moment of the command.
 | `GetControlManifest` | every address VHI exports with its kind, range and states, plus the vocabulary version to gate on. Call it first |
 | `SetControl` | command one standard frame — continuous values and discrete states |
 | `SweepControl` | drive one DOF across its range and report which bones moved, in signed degrees |
-| `SetPresentation` | renderer blending (appearance only — layer 3 of three) |
+| `SetPresentation` | target-side blending (appearance only — layer 3 of three) |
 
 `SetControl` returns a `ControlAck { applied, rejected }`, where `rejected` maps a
 DOF name to the reason it was refused. A refusal is always *named*: a DOF that
