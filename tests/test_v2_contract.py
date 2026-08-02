@@ -285,7 +285,7 @@ def aid(v2_pb2, vhi_process):
 
     pb2, pb2_grpc = v2_pb2
     channel = grpc.insecure_channel("127.0.0.1:50051")
-    stub = pb2_grpc.VhiControlStub(channel)
+    stub = pb2_grpc.RendererControlStub(channel)
     yield stub, pb2
     # Never leave a trajectory running for the next test.
     stub.StopRecordingTrajectory(pb2.StopRecordingTrajectoryRequest(), timeout=10.0)

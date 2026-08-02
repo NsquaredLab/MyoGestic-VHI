@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using Grpc.Core;
-using Myogestic.Vhi;
+using Myogestic.Renderer;
 
 namespace Vhi;
 
@@ -49,7 +49,7 @@ namespace Vhi;
 /// single main-thread closure is never rendered before the closure returns.
 /// </para>
 /// </remarks>
-public class VhiControlService : VhiControl.VhiControlBase
+public class VhiControlService : RendererControl.RendererControlBase
 {
 	/// <summary>Which rotation axis of a joint a standard DOF drives.</summary>
 	private enum Axis { X, Y, Z }
