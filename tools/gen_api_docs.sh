@@ -85,14 +85,24 @@ python3 "$ROOT/tools/strip_godot_lifecycle.py" "$OUT"/*.md
 # Strip protobuf-generated boilerplate (WriteTo/MergeFrom/CalculateSize/Equals/
 # GetHashCode/Clone/ToString/Parser/Descriptor/*FieldNumber/constructors) from
 # the generated protobuf pages. The user-facing message fields stay.
-echo "▶ stripping protobuf boilerplate from Myogestic.Renderer.* pages"
-python3 "$ROOT/tools/strip_protobuf_boilerplate.py" "$OUT"/Myogestic.Renderer.*.md
+echo "▶ stripping protobuf boilerplate from Myogestic.Remote.* pages"
+# `shopt -s nullglob` in a subshell: an unmatched glob must expand to nothing, not be
+# passed through as a literal path. Without it a renamed namespace fails the docs build
+# with a FileNotFoundError naming the glob itself, which is what happened when the proto
+# package went from Myogestic.Renderer to Myogestic.Remote and this line was missed.
+( shopt -s nullglob
+  proto_pages=( "$OUT"/Myogestic.Remote.*.md )
+  if (( ${#proto_pages[@]} )); then
+    python3 "$ROOT/tools/strip_protobuf_boilerplate.py" "${proto_pages[@]}"
+  else
+    echo "  no Myogestic.Remote.* pages found — is the proto namespace still that?" >&2
+  fi )
 
-# The RendererControlReflection helper is protobuf reflection internals, not a
+# The RemoteControlReflection helper is protobuf reflection internals, not a
 # user-facing type - drop the whole page and scrub its index entry.
-rm -f "$OUT"/Myogestic.Renderer.*Reflection.md
+rm -f "$OUT"/Myogestic.Remote.*Reflection.md
 find "$OUT" -name '*.md' -exec perl -i -ne \
-  'print unless m{Myogestic\.Renderer\..*Reflection\.md}' {} +
+  'print unless m{Myogestic\.Remote\..*Reflection\.md}' {} +
 
 # Strip "Parameters" subsections that have no <param> description prose - they
 # just repeat the signature. Methods that DO have <param> tags keep their
@@ -101,7 +111,7 @@ echo "▶ stripping empty Parameters sections"
 python3 "$ROOT/tools/strip_empty_param_sections.py" "$OUT"/*.md
 
 # Inject a "what's this" admonition above the namespace listing in index.md
-# so the protobuf-generated Myogestic.Renderer.* namespace has context.
+# so the protobuf-generated Myogestic.Remote.* namespace has context.
 PRELUDE="$ROOT/tools/api_index_prelude.md"
 if [[ -f "$PRELUDE" ]]; then
   awk -v insert_file="$PRELUDE" '
