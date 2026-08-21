@@ -248,6 +248,16 @@ public class VhiControlService : RemoteControl.RemoteControlBase
 	/// </remarks>
 	private const string VocabularyVersion = "2";
 
+	/// <summary>This build's own release version — the numeric part of its release tag.</summary>
+	/// <remarks>
+	/// Reported in the manifest as <c>target_version</c>, so a client that knows this
+	/// target's release history can refuse a build whose protocol is current but whose
+	/// behaviour is known-bad — the case <see cref="VocabularyVersion"/> cannot see
+	/// (v1.0.0 served vocabulary 2 correctly and still dropped gesture edges under
+	/// load). Bump with the release, alongside the tag.
+	/// </remarks>
+	private const string BuildVersion = "2.1.0";
+
 	/// <summary>The one discrete control this build exports, by address.</summary>
 	/// <remarks>
 	/// Named once and used by both halves of the contract — the manifest that advertises it
@@ -330,6 +340,7 @@ public class VhiControlService : RemoteControl.RemoteControlBase
 			{
 				TargetName = "Virtual Hand Interface",
 				VocabularyVersion = VocabularyVersion,
+				TargetVersion = BuildVersion,
 			};
 			manifest.Capabilities.AddRange(BuildCapabilities());
 
