@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-09-12
+
+### Added
+
+- **The manifest reports this build's release version** (`target_version`, proto field 4,
+  mirrored byte-identical with MyoGestic's vendored `remote_control.proto`). The vocabulary
+  gate catches protocol skew but not behaviour: v1.0.0 passed it and still froze hands. A
+  client that knows this target's release history can now refuse builds below a floor it
+  trusts; MyoGestic sets that floor to 2.1.0. Builds reporting nothing are warned about,
+  never refused.
+
 ### Fixed
 
 - **liblsl is configured by VHI itself at startup** (macOS and Linux): IPv6 off and, on macOS,
