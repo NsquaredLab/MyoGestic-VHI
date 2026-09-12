@@ -76,6 +76,30 @@ ASP.NET Core shared framework** (Kestrel, the `Microsoft.Extensions.*` and
 `Microsoft.AspNetCore.*` assemblies) that VHI's [gRPC server](../concepts/grpc-control.md)
 needs.
 
+## Godot runs the *system* `dotnet`, not the one on your `PATH`
+
+On macOS the exporter looks for `/usr/local/share/dotnet/dotnet` before anything on
+`PATH`, and that muxer only sees the SDKs installed under its own root. With a .NET 8 SDK
+in `~/.dotnet` and a newer one in `/usr/local/share/dotnet`, the export reports
+`dotnet publish exited with code: 155` and produces a bundle with **no**
+`data_VHI_godot_macos_*` folders, so the app opens with no C# running (2026-09-12).
+
+Two ways out. Install the .NET 8 SDK into the system root as well
+(`sudo bash dotnet-install.sh --channel 8.0 --install-dir /usr/local/share/dotnet`), or
+publish by hand and assemble the bundle yourself, which is exactly what the exporter does:
+
+```bash
+export DOTNET_ROOT="$HOME/.dotnet" PATH="$HOME/.dotnet:$PATH"
+for rid in osx-arm64 osx-x64; do
+  dotnet publish VHI_godot.csproj -c ExportRelease -r $rid --self-contained \
+    -p:GodotTargetPlatform=macos -p:DebugType=None -p:DebugSymbols=false -o /tmp/pub-$rid
+done
+cp -R /tmp/pub-osx-arm64 VHI.app/Contents/Resources/data_VHI_godot_macos_arm64
+cp -R /tmp/pub-osx-x64   VHI.app/Contents/Resources/data_VHI_godot_macos_x86_64
+```
+
+then re-sign as below.
+
 ## macOS: re-sign without the hardened runtime
 
 This is the one that bites. Godot ad-hoc-signs the macOS `.app` **with the

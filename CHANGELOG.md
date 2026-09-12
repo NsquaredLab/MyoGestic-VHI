@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **liblsl is configured by VHI itself at startup** (macOS and Linux): IPv6 off and, on macOS,
+  multicast pinned to the first physical interface, written to `user://lsl_api.cfg` and applied through `LSLAPICFG` (an
+  `LSLAPICFG` already in the environment wins). The repo's `lsl_api.cfg` carried the IPv6 half
+  since July, but liblsl reads that file only from the working directory, so no exported build
+  ever applied it. On a Mac with VPN tunnels up this is the difference between fingers that
+  drop and come back at random — discovery replies from tunnel addresses that never connect, a
+  resolver that dies with "internal error" when a tunnel goes down, and two configd-watchdog
+  kernel panics (2026-07-31, 2026-09-12) — and a link that stays up.
+  Known limit: the address is read once at startup, so restart VHI after changing networks.
+- **The inlet resolve loop backs off** while it finds nothing: 5 s doubling to 30 s, reset by a
+  connect or a dropped inlet. A producer that is not running no longer costs a resolve every
+  five seconds for as long as VHI is open.
+
 ## [2.0.0] - 2026-08-02
 
 **One control service, and the manifest is the contract.** VHI 2.0 and **MyoGestic 2.5 are one

@@ -126,7 +126,17 @@ public partial class LSLCommunicationController : Node
 
 	/// <summary>When the last resolve pass started. One pass, whatever is missing.</summary>
 	private DateTime lastConnectionAttempt;
-	private float connectionRetryInterval = 5.0f;
+	/// <summary>Seconds between resolve passes: <see cref="RetryIntervalMinSeconds"/> while
+	/// passes connect something, doubling to <see cref="RetryIntervalMaxSeconds"/> while they
+	/// find nothing; reset by a connect or a drop.</summary>
+	/// <remarks>The floor is the old fixed interval. The ceiling is the safety: a producer that
+	/// is simply not running used to cost a full resolve every five seconds for as long as VHI
+	/// stayed open, and resolves are what wedged configd on this hardware (see
+	/// <c>LSLWrapper.ConfigureLiblsl</c>). A drop resets it, so a producer that restarts is
+	/// found within the floor; only a producer that stays away is asked about less often.</remarks>
+	private float connectionRetryInterval = RetryIntervalMinSeconds;
+	private const float RetryIntervalMinSeconds = 5.0f;
+	private const float RetryIntervalMaxSeconds = 30.0f;
 
 	/// <summary>A resolve pass is running. There is never more than one — see `_Process`.</summary>
 	private bool isConnecting = false;
@@ -281,6 +291,7 @@ public partial class LSLCommunicationController : Node
 		{
 			doomed = dof.Inlet;
 			dof.Inlet = null;
+			connectionRetryInterval = RetryIntervalMinSeconds;  // look again soon: something changed
 		}
 		if (doomed != null)
 			LSLWrapper.Dispose(doomed);
@@ -305,6 +316,7 @@ public partial class LSLCommunicationController : Node
 	/// </remarks>
 	private void ResolveMissingInletsAsync()
 	{
+		int connected = 0;
 		try
 		{
 			if (isShuttingDown)
@@ -368,6 +380,7 @@ public partial class LSLCommunicationController : Node
 					// it was opened for having a `LastAttempt` that had not landed yet.
 					dof.Inlet = inlet;
 				}
+				connected++;
 				CallDeferred(nameof(LogMessage), $"✅ Connected to LSL inlet: {dof.Name}");
 			}
 		}
@@ -380,6 +393,12 @@ public partial class LSLCommunicationController : Node
 			lock (connectionLock)
 			{
 				isConnecting = false;
+				float next = connected > 0
+					? RetryIntervalMinSeconds
+					: Math.Min(connectionRetryInterval * 2f, RetryIntervalMaxSeconds);
+				if (next != connectionRetryInterval)
+					CallDeferred(nameof(LogMessage), $"🔁 Next LSL resolve in {next:F0} s");
+				connectionRetryInterval = next;
 			}
 		}
 	}

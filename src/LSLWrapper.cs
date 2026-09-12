@@ -1,8 +1,12 @@
 using Godot;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace Vhi;
 
@@ -22,12 +26,33 @@ public static class LSLWrapper
 
 	private static bool initialized = false;
 
+	/// <summary>The environment variable liblsl reads its config path from.</summary>
+	private const string LiblslConfigEnv = "LSLAPICFG";
+
+	/// <summary>libc's <c>setenv</c>: the native environment block, which liblsl reads.</summary>
+	/// <remarks>On macOS and Linux, .NET's <c>Environment.SetEnvironmentVariable</c> only
+	/// updates the runtime's own copy of the environment; a native library's <c>getenv</c>
+	/// never sees it, and liblsl then falls back to <c>./lsl_api.cfg</c> — the first build of
+	/// this fix loaded the repo's file from the working directory instead of ours.</remarks>
+	[DllImport("libc", SetLastError = true)]
+	private static extern int setenv(string name, string value, int overwrite);
+
+	private static void SetNativeEnv(string name, string value)
+	{
+		System.Environment.SetEnvironmentVariable(name, value);  // for managed readers
+		if (setenv(name, value, 1) != 0)
+			throw new InvalidOperationException($"setenv({name}) failed, errno {Marshal.GetLastWin32Error()}");
+	}
+
 	/// <summary>
 	/// Initialize LSL types via reflection. Call this once before using LSL.
 	/// </summary>
 	public static void Initialize()
 	{
 		if (initialized) return;
+
+		// Before the first liblsl call: liblsl reads its config once, on first use.
+		ConfigureLiblsl();
 
 		try
 		{
@@ -47,6 +72,94 @@ public static class LSLWrapper
 			GD.PrintErr($"❌ Failed to initialize LSLWrapper: {e.Message}");
 			throw;
 		}
+	}
+
+	/// <summary>
+	/// Point liblsl at a config this process wrote — IPv6 off, and on macOS multicast pinned to
+	/// the first physical interface — unless the environment already points it somewhere.
+	/// </summary>
+	/// <remarks>
+	/// <para>liblsl enumerates the machine's interfaces once, at first use, then binds a
+	/// multicast responder per group per interface address and sends every resolve out over
+	/// all of them. On a lab Mac with Tailscale or eduVPN up that is half a dozen <c>utun</c>s
+	/// besides Wi-Fi, and it fails three ways at once. A discovery reply can come back from a
+	/// tunnel address, which the inlet then never connects to — measured 2026-09-12: loopback
+	/// and Wi-Fi accept in milliseconds, every tunnel address hangs. A tunnel going down leaves
+	/// sockets on a dead interface, and every resolve after that throws ("internal error")
+	/// until the process restarts. And the per-interface fan-out under a resolve loop is what
+	/// wedges configd: the machine panicked on 2026-07-31 and again on 2026-09-12. The repo's
+	/// <c>lsl_api.cfg</c> holds the first investigation, including the Wi-Fi driver's part.</para>
+	/// <para>Pinning to one physical interface removes all three: replies carry an address that
+	/// connects, tunnels are never touched, and a resolve costs two sockets rather than twenty.
+	/// The repo's <c>lsl_api.cfg</c> was half of this idea, but liblsl reads that file from the
+	/// working directory, which an exported app launched from elsewhere never has — so no
+	/// installed build ever applied it. This writes the config where the app can always find it
+	/// and points liblsl at it itself. An <c>LSLAPICFG</c> already in the environment wins, so a
+	/// launcher can still override.</para>
+	/// </remarks>
+	private static void ConfigureLiblsl()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			// Not verified on Windows, and a managed SetEnvironmentVariable does not reach the
+			// CRT environment liblsl's getenv reads. The problem was diagnosed on macOS; on
+			// Windows liblsl keeps its defaults unless $LSLAPICFG is set from outside.
+			GD.Print("LSL: liblsl defaults (Windows); set $LSLAPICFG to override");
+			return;
+		}
+		string preset = System.Environment.GetEnvironmentVariable(LiblslConfigEnv);
+		if (!string.IsNullOrEmpty(preset))
+		{
+			GD.Print($"LSL: config from ${LiblslConfigEnv} = {preset}");
+			return;
+		}
+		string path = ProjectSettings.GlobalizePath("user://lsl_api.cfg");
+		try
+		{
+			// The pin is macOS-only. Windows and Linux report Hyper-V, WSL and docker bridges as
+			// Ethernet with routable IPv4, often ahead of the real NIC; pinning to one of those
+			// would kill discovery silently. IPv6 off is platform-neutral and stays on Linux too.
+			string ip = OperatingSystem.IsMacOS() ? PhysicalIPv4() : null;
+			string body = "[ports]\nIPv6 = disable\n";
+			if (ip != null)
+				body += $"\n[multicast]\nInterfaces = {{{ip}}}\n";
+			Directory.CreateDirectory(Path.GetDirectoryName(path));
+			File.WriteAllText(path, body);
+			SetNativeEnv(LiblslConfigEnv, path);
+			GD.Print(ip != null
+				? $"LSL: IPv6 off, multicast pinned to {ip} ({path})"
+				: $"LSL: IPv6 off; multicast on liblsl's default interfaces ({path})");
+		}
+		catch (Exception e)
+		{
+			GD.PrintErr($"⚠️ LSL: could not configure liblsl ({e.Message}) — it keeps its defaults");
+		}
+	}
+
+	/// <summary>The IPv4 address of the first physical interface that is up, or null.</summary>
+	/// <remarks>Ethernet or Wi-Fi only, by type and by name: no loopback, no tunnels
+	/// (<c>utun</c>, <c>ipsec</c>, <c>ppp</c>), no bridges, no link-local <c>169.254.x</c>.
+	/// macOS reports the Wi-Fi chip's helpers <c>awdl0</c> and <c>llw0</c> as Ethernet; they
+	/// carry no IPv4, and are excluded by name as well.</remarks>
+	private static string PhysicalIPv4()
+	{
+		string[] notPhysical = ["lo", "utun", "ipsec", "ppp", "bridge", "awdl", "llw", "gif", "stf", "ap"];
+		foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
+		{
+			if (nic.OperationalStatus != OperationalStatus.Up) continue;
+			if (nic.NetworkInterfaceType != NetworkInterfaceType.Ethernet
+				&& nic.NetworkInterfaceType != NetworkInterfaceType.Wireless80211) continue;
+			string name = nic.Name.ToLowerInvariant();
+			if (notPhysical.Any(prefix => name.StartsWith(prefix))) continue;
+			foreach (UnicastIPAddressInformation a in nic.GetIPProperties().UnicastAddresses)
+			{
+				if (a.Address.AddressFamily != AddressFamily.InterNetwork) continue;
+				byte[] b = a.Address.GetAddressBytes();
+				if (b[0] == 169 && b[1] == 254) continue;
+				return a.Address.ToString();
+			}
+		}
+		return null;
 	}
 
 	/// <summary>
