@@ -99,7 +99,7 @@ single-channel stream under that name.
 | address suffix | outlet ch | outlet label | bone | renders? |
 |---|---|---|---|---|
 | `thumb.flexion` | 0 | `ThumbFlexion` | 1/2/3, X | yes |
-| `thumb.abduction` | 1 | `ThumbAbduction` | 1/2/3, Z | yes - the distal bone's Z gain is `0`, so two of three move |
+| `thumb.abduction` | 1 | `ThumbAbduction` | 1/2/3, Z | yes - the distal bone's Z gain is `0`, so two of three move; above 0 the metacarpal (`WaveBone_2`) also abducts, up to 45° |
 | `index` | 2 | `IndexFlexion` | 4, 5, 6 | yes |
 | `middle` | 3 | `MiddleFlexion` | 7, 8, 9 | yes |
 | `ring` | 4 | `RingFlexion` | 10, 11, 12 | yes |

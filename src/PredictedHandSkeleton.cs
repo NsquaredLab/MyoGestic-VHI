@@ -82,6 +82,9 @@ public partial class PredictedHandSkeleton : HandSkeleton
 		SmoothBoneRotation(1, pose[0] * StandardPose.AtPlusOne[1][0], pose[0] * StandardPose.AtPlusOne[1][1], pose[1] * StandardPose.AtPlusOne[1][2], lerpFactor);
 		SmoothBoneRotation(2, pose[0] * StandardPose.AtPlusOne[2][0], 0, pose[1] * StandardPose.AtPlusOne[2][2], lerpFactor);
 		SmoothBoneRotation(3, pose[0] * StandardPose.AtPlusOne[3][0], 0, pose[1] * StandardPose.AtPlusOne[3][2], lerpFactor);
+		if (metacarpalBone != -1)
+			skeleton.SetBonePoseRotation(metacarpalBone,
+				skeleton.GetBonePoseRotation(metacarpalBone).Normalized().Slerp(MetacarpalTarget().Normalized(), lerpFactor));
 
 		// Index
 		SmoothBoneRotation(4, pose[2] * StandardPose.AtPlusOne[4][0], 0, 0, lerpFactor);

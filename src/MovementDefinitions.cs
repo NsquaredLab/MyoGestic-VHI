@@ -428,6 +428,23 @@ public static class StandardPose
 		[15] = [60, 0, 0],
 	};
 
+	/// <summary>Degrees the thumb's metacarpal abducts at abduction <c>+1</c>.</summary>
+	/// <remarks>
+	/// Z on joints 1-3 runs along each thumb bone, so the abduction channel's Z pair is a
+	/// roll about the thumb's own length that cancels by the tip: a cued abduction looked
+	/// like rest. Abduction happens at the carpometacarpal joint, <c>WaveBone_2</c>, which is
+	/// not one of the 16 animated joints. Above 0 that bone swings the whole thumb out of
+	/// the palm plane (palmar abduction) by this much, on top of the 18° the rest pose
+	/// already has. Below 0 it stays at rest, so the fist is unchanged. 45° was picked from
+	/// 30, 45 and 60: at 60 the thumb points straight at the camera and reads as a stub.
+	/// </remarks>
+	public const float ThumbMetacarpalAbduction = 45f;
+
+	/// <summary>The thumb's metacarpal in the FBX. Named here and not in
+	/// <c>HandSkeleton.cs</c>, whose quoted bone names are exactly the 16 joints: the
+	/// contract suite reads that list from the source.</summary>
+	public const string ThumbMetacarpalBone = "WaveBone_2";
+
 	/// <summary>Rendered degrees → the standard value that produced them. The inverse of
 	/// <see cref="Degrees"/> in range, so a read-back round-trips rather than flipping.
 	/// </summary>

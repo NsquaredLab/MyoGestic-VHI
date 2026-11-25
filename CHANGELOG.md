@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Thumb abduction is visible.** The channel only turned joints 1 and 2 on Z, and Z runs
+  along each thumb bone: a +30° roll and a -35° roll back, so a cued abduction looked like
+  rest. Abduction happens at the carpometacarpal joint, and the thumb's metacarpal
+  (`WaveBone_2`) was never animated. Above 0 the channel now also turns that bone, up to
+  45° at standard `+1`, about the axis that lifts the thumb straight out of the palm plane
+  (palmar abduction, as the Prensilia Azzurra's thumb rotates); the axis is computed from
+  the rig's rest pose. With flexion the thumb now comes across the palm in opposition.
+  Below 0 nothing changes, so the Fist looks the same. The bone is outside the 16 joints,
+  so read-backs, sweeps and the contract suite's expected degrees are unchanged, and the
+  suite does not see it.
+- **A thumb raised toward the camera is no longer cut open.** The orthographic camera sat
+  0.383 above the hands with a 0.05 near plane; it now sits at 1.0, which changes nothing
+  else in the picture.
 - **Android builds again.** The gRPC control server runs on ASP.NET Core, which has no
   Android runtime pack (`NETSDK1082`), so every Android export had failed since gRPC
   arrived. An Android build now leaves gRPC out (`GODOT_ANDROID`) and follows its pose

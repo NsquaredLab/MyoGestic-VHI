@@ -172,7 +172,7 @@ public class VhiControlService
 		["vhi.prediction.ring"] = "ring flexion (bones 10-12)",
 		["vhi.prediction.little"] = "little flexion (bones 13-15)",
 		["vhi.prediction.thumb.flexion"] = "thumb flexion (bones 1-3, X axis)",
-		["vhi.prediction.thumb.abduction"] = "thumb abduction (bones 1-3, Z axis). The distal bone's Z gain is 0, so two of the three thumb bones move.",
+		["vhi.prediction.thumb.abduction"] = "thumb abduction (bones 1-3, Z axis). The distal bone's Z gain is 0, so two of the three thumb bones move. Above 0 the metacarpal (WaveBone_2, outside the 16 joints a sweep reads) also swings the thumb up to 45° out of the palm plane.",
 		["vhi.prediction.wrist.flexion"] = "wrist flexion (bone 0, X axis). Bone 0 parents every digit, so the whole hand turns with it.",
 		["vhi.prediction.wrist.abduction"] = "wrist abduction (bone 0, Z axis). Bone 0 parents every digit, so the whole hand turns with it.",
 		["vhi.prediction.wrist.rotation"] = "wrist rotation \u2014 pronation/supination (bone 0, Y axis). The hand twists about its own long axis; there is no forearm to carry the motion.",

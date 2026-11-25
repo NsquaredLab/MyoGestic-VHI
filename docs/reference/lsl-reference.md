@@ -144,7 +144,7 @@ inbound producer indexes.
 | Address suffix | # on the outlets | Outlet channel label | Bones |
 |---|---|---|---|
 | `thumb.flexion` | 0 | `ThumbFlexion` | 1/2/3, X axis |
-| `thumb.abduction` | 1 | `ThumbAbduction` | 1/2/3, Z axis. The distal bone's Z gain is `0`, so only two of the three move. |
+| `thumb.abduction` | 1 | `ThumbAbduction` | 1/2/3, Z axis. The distal bone's Z gain is `0`, so only two of the three move. Above 0 the metacarpal (`WaveBone_2`) also swings the thumb up to 45° out of the palm plane. |
 | `index` | 2 | `IndexFlexion` | 4, 5, 6 |
 | `middle` | 3 | `MiddleFlexion` | 7, 8, 9 |
 | `ring` | 4 | `RingFlexion` | 10, 11, 12 |

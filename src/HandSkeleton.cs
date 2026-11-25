@@ -17,8 +17,10 @@ public abstract partial class HandSkeleton : Node3D
 	/// <summary>Joint index -> bone name in the FBX (WaveBone naming).</summary>
 	/// <remarks>
 	/// 0 is the wrist, then thumb, index, middle, ring and pinky, proximal to distal. The
-	/// gaps are the model's, not ours: `WaveBone_2`, `_6`, `_10` and so on are the digits'
-	/// tip bones, which nothing animates.
+	/// gaps are the model's, not ours. `WaveBone_2` is the thumb's metacarpal: it is driven
+	/// apart from these 16, by the abduction channel alone (<see cref="MetacarpalTarget"/>).
+	/// `_6`, `_11`, `_16` and `_21` are the fingers' metacarpals and `_10`, `_15`, `_20` and
+	/// `_25` their tips, which nothing animates.
 	/// </remarks>
 	protected static readonly string[] BoneNames =
 	[
@@ -42,6 +44,12 @@ public abstract partial class HandSkeleton : Node3D
 
 	protected Skeleton3D skeleton;
 	protected readonly Dictionary<string, int> boneMap = [];
+
+	/// <summary>Bone index of the thumb's metacarpal, which is outside the 16 joints and only
+	/// abducts, or -1 when the rig has none.</summary>
+	protected int metacarpalBone = -1;
+	private Quaternion metacarpalRest;
+	private Vector3 metacarpalAxis;
 
 	/// <summary>Which joints each pose channel drives.</summary>
 	/// <remarks>
@@ -89,6 +97,8 @@ public abstract partial class HandSkeleton : Node3D
 		SetBoneRotation(1, pose[0] * StandardPose.AtPlusOne[1][0], pose[0] * StandardPose.AtPlusOne[1][1], pose[1] * StandardPose.AtPlusOne[1][2]);
 		SetBoneRotation(2, pose[0] * StandardPose.AtPlusOne[2][0], 0, pose[1] * StandardPose.AtPlusOne[2][2]);
 		SetBoneRotation(3, pose[0] * StandardPose.AtPlusOne[3][0], 0, pose[1] * StandardPose.AtPlusOne[3][2]);
+		if (metacarpalBone != -1)
+			skeleton.SetBonePoseRotation(metacarpalBone, MetacarpalTarget());
 
 		// Index (channel 2)
 		SetBoneRotation(4, pose[2] * StandardPose.AtPlusOne[4][0], 0, 0);
@@ -110,6 +120,11 @@ public abstract partial class HandSkeleton : Node3D
 		SetBoneRotation(14, pose[5] * StandardPose.AtPlusOne[14][0], 0, 0);
 		SetBoneRotation(15, pose[5] * StandardPose.AtPlusOne[15][0], 0, 0);
 	}
+
+	/// <summary>The thumb metacarpal's rotation for the commanded abduction.</summary>
+	protected Quaternion MetacarpalTarget() =>
+		new Quaternion(metacarpalAxis, Mathf.DegToRad(Mathf.Max(0f, pose[1]) * StandardPose.ThumbMetacarpalAbduction))
+		* metacarpalRest;
 
 	/// <summary>Show the commanded pose. Overridden by a hand that interpolates toward it.</summary>
 	/// <remarks>Not <c>Show</c>: that is <see cref="Node3D"/>'s, and it makes the node visible.</remarks>
@@ -168,6 +183,20 @@ public abstract partial class HandSkeleton : Node3D
 				GD.PrintErr($"  ⚠️ Bone '{name}' not found in skeleton!");
 		}
 		GD.Print($"  Mapped {boneMap.Count}/{BoneNames.Length} bones");
+
+		metacarpalBone = skeleton.FindBone(StandardPose.ThumbMetacarpalBone);
+		if (metacarpalBone != -1 && boneMap.TryGetValue(BoneNames[1], out int proximal))
+		{
+			// Both in the wrist's frame, the metacarpal's parent. Flexion is +X, which
+			// carries the fingers (+Z) toward -Y, so -Y is the palmar side. Turning about
+			// (thumb × palmar) lifts the thumb straight out of the palm plane.
+			Transform3D rest = skeleton.GetBoneRest(metacarpalBone);
+			Vector3 along = (rest.Basis * skeleton.GetBoneRest(proximal).Origin).Normalized();
+			metacarpalRest = rest.Basis.GetRotationQuaternion();
+			metacarpalAxis = along.Cross(Vector3.Down).Normalized();
+			if (!metacarpalAxis.IsNormalized())
+				metacarpalBone = -1;
+		}
 	}
 
 	private static Skeleton3D FindSkeletonRecursive(Node node)
