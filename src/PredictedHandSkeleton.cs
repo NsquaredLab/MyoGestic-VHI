@@ -79,7 +79,7 @@ public partial class PredictedHandSkeleton : HandSkeleton
 		SmoothBoneRotation(0, pose[6] * StandardPose.AtPlusOne[0][0], pose[8] * StandardPose.AtPlusOne[0][1], pose[7] * StandardPose.AtPlusOne[0][2], lerpFactor);
 
 		// Thumb
-		SmoothBoneRotation(1, pose[0] * StandardPose.AtPlusOne[1][0], 0, pose[1] * StandardPose.AtPlusOne[1][2], lerpFactor);
+		SmoothBoneRotation(1, pose[0] * StandardPose.AtPlusOne[1][0], pose[0] * StandardPose.AtPlusOne[1][1], pose[1] * StandardPose.AtPlusOne[1][2], lerpFactor);
 		SmoothBoneRotation(2, pose[0] * StandardPose.AtPlusOne[2][0], 0, pose[1] * StandardPose.AtPlusOne[2][2], lerpFactor);
 		SmoothBoneRotation(3, pose[0] * StandardPose.AtPlusOne[3][0], 0, pose[1] * StandardPose.AtPlusOne[3][2], lerpFactor);
 

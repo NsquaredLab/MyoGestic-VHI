@@ -40,6 +40,12 @@ import time
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+
+# Before anything loads liblsl, which reads its config once. VHI looks for streams on this
+# machine only and ignores an inherited $LSLAPICFG, so the tests have to resolve the same
+# way to see VHI's outlets, and the VHI launched below must not pick up a Connection
+# setting saved on this machine.
+os.environ["LSLAPICFG"] = os.environ["VHI_LSLAPICFG"] = str(REPO / "tests" / "lsl_api.cfg")
 PROTO = REPO / "proto" / "remote_control.proto"
 GRPC_PORT = 50051
 #: Generous: Godot has to boot, load the scene, map bones and start Kestrel.

@@ -8,6 +8,27 @@ All LSL I/O lives in `LSLCommunicationController`. Streams are resolved **by
 name**; an inlet that isn't found yet is retried every few seconds, so VHI and
 its peer can start in any order.
 
+## Where VHI looks
+
+**Hand Settings › Connection** decides where VHI looks for its streams:
+
+| Choice | Default on | liblsl config VHI writes |
+|---|---|---|
+| This computer | macOS, Linux | `ResolveScope = machine`, `KnownPeers = {127.0.0.1}` |
+| Another computer / its IP address | - | `ResolveScope = machine`, `KnownPeers = {<address>}` |
+| Searching the network | Android | liblsl's multicast discovery, IPv6 off |
+
+A computer never searches the network: discovery multicast on Wi-Fi is what a
+Mac kernel-panicked under. The setting is saved in `user://connection.cfg`,
+and a change needs a restart, because liblsl reads its config once per process.
+`$VHI_LSLAPICFG` overrides it with a config file of your own; `$LSLAPICFG`
+does not reach VHI. Windows keeps liblsl's defaults.
+
+Recording `VHI_Control` or `VHI_Predict` from the same machine (LabRecorder, a
+script) needs `KnownPeers = {127.0.0.1}` in that program's config too, or
+liblsl 1.18: on 1.16/1.17 machine-scope outlets answer a plain resolve one
+stream per machine. `tests/lsl_api.cfg` is a working config.
+
 ## Inlets - what VHI consumes
 
 **One stream per DOF.** Every control VHI can be driven with is its own LSL

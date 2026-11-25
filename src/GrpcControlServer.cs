@@ -1,3 +1,4 @@
+#if !GODOT_ANDROID
 using Godot;
 using System;
 using System.Collections.Concurrent;
@@ -117,3 +118,12 @@ public partial class GrpcControlServer : Node
         GD.Print("gRPC control server: skipping graceful StopAsync (process exit will reclaim)");
     }
 }
+#else
+namespace Vhi;
+
+/// <summary>No gRPC control plane on Android: it runs on ASP.NET Core, which has no Android
+/// runtime. The hand still follows its pose streams over LSL.</summary>
+public partial class GrpcControlServer : Godot.Node
+{
+}
+#endif

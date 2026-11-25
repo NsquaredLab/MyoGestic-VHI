@@ -2,9 +2,6 @@ using Godot;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -74,9 +71,57 @@ public static class LSLWrapper
 		}
 	}
 
+	/// <summary>A launcher's own liblsl config for VHI. Wins over the Connection setting.</summary>
+	/// <remarks>Not <c>LSLAPICFG</c>: MyoGestic sets that at import, to a config that only
+	/// quiets liblsl's logging, and VHI inherits it when MyoGestic launches it. Honouring it
+	/// left VHI on liblsl's defaults in every MyoGestic session — IPv6 on, discovery on every
+	/// interface — which is the setup the crashes below came from.</remarks>
+	private const string OverrideEnv = "VHI_LSLAPICFG";
+
+	/// <summary>Where VHI looks for its pose streams.</summary>
+	public enum ConnectionMode { ThisComputer, Peer, Network }
+
+	/// <summary>The Connection setting this process applied. liblsl reads its config once,
+	/// at first use, so a changed setting only takes effect in the next process.</summary>
+	public static (ConnectionMode Mode, string Peer) Connection { get; private set; }
+
+	private const string ConnectionPath = "user://connection.cfg";
+
+	/// <summary>The saved Connection setting, or this platform's default.</summary>
+	/// <remarks>A phone searches the network: MyoGestic never runs on one. A computer looks
+	/// only at itself, and is never offered the network search — that is the traffic the
+	/// crashes below came from — so a stored <c>Network</c> falls back to it there.</remarks>
+	public static (ConnectionMode Mode, string Peer) LoadConnection()
+	{
+		bool phone = OS.GetName() == "Android";
+		var fallback = phone ? ConnectionMode.Network : ConnectionMode.ThisComputer;
+		var cfg = new ConfigFile();
+		if (cfg.Load(ConnectionPath) != Error.Ok)
+			return (fallback, "");
+		string peer = cfg.GetValue("connection", "peer", "").AsString();
+		if (!Enum.TryParse(cfg.GetValue("connection", "mode", "").AsString(), out ConnectionMode mode)
+			|| (mode == ConnectionMode.Peer && !IsValidPeer(peer))
+			|| (mode == ConnectionMode.Network && !phone))
+			mode = fallback;
+		return (mode, peer);
+	}
+
+	public static void SaveConnection(ConnectionMode mode, string peer)
+	{
+		var cfg = new ConfigFile();
+		cfg.SetValue("connection", "mode", mode.ToString());
+		cfg.SetValue("connection", "peer", peer);
+		cfg.Save(ConnectionPath);
+	}
+
+	/// <summary>An IPv4 address or a host name: what liblsl's <c>KnownPeers</c> can reach with
+	/// IPv6 off, and nothing that could break out of the config line it is written into.</summary>
+	public static bool IsValidPeer(string peer) =>
+		Uri.CheckHostName(peer) is UriHostNameType.IPv4 or UriHostNameType.Dns;
+
 	/// <summary>
-	/// Point liblsl at a config this process wrote — IPv6 off, and on macOS multicast pinned to
-	/// the first physical interface — unless the environment already points it somewhere.
+	/// Point liblsl at a config this process wrote from the Connection setting, unless
+	/// <c>$VHI_LSLAPICFG</c> names one.
 	/// </summary>
 	/// <remarks>
 	/// <para>liblsl enumerates the machine's interfaces once, at first use, then binds a
@@ -89,13 +134,18 @@ public static class LSLWrapper
 	/// until the process restarts. And the per-interface fan-out under a resolve loop is what
 	/// wedges configd: the machine panicked on 2026-07-31 and again on 2026-09-12. The repo's
 	/// <c>lsl_api.cfg</c> holds the first investigation, including the Wi-Fi driver's part.</para>
-	/// <para>Pinning to one physical interface removes all three: replies carry an address that
-	/// connects, tunnels are never touched, and a resolve costs two sockets rather than twenty.
-	/// The repo's <c>lsl_api.cfg</c> was half of this idea, but liblsl reads that file from the
-	/// working directory, which an exported app launched from elsewhere never has — so no
-	/// installed build ever applied it. This writes the config where the app can always find it
-	/// and points liblsl at it itself. An <c>LSLAPICFG</c> already in the environment wins, so a
-	/// launcher can still override.</para>
+	/// <para>Pinning discovery to the one physical interface (this code until 2.2) kept it off the
+	/// tunnels but not off Wi-Fi, and a Mac panicked in its Wi-Fi driver with that pin on
+	/// (2026-10-29, VHI idle-resolving). So a computer now looks only at itself:
+	/// <c>ResolveScope = machine</c> keeps every query on loopback, and
+	/// <c>KnownPeers = {127.0.0.1}</c> asks each local stream on its own port. Machine scope
+	/// alone finds one stream per machine on liblsl 1.16/1.17: every outlet listens on the one
+	/// shared port 16571, and the OS hands a unicast datagram to only one of them. Another
+	/// computer is reached the same way, by unicast to its address. Only a phone searches the
+	/// network, by multicast.</para>
+	/// <para>The repo's <c>lsl_api.cfg</c> holds the first investigation. liblsl reads that
+	/// file from the working directory, which an exported app never has, so this writes the
+	/// config where the app can always find it and points liblsl at it itself.</para>
 	/// </remarks>
 	private static void ConfigureLiblsl()
 	{
@@ -104,31 +154,24 @@ public static class LSLWrapper
 			// Not verified on Windows, and a managed SetEnvironmentVariable does not reach the
 			// CRT environment liblsl's getenv reads. The problem was diagnosed on macOS; on
 			// Windows liblsl keeps its defaults unless $LSLAPICFG is set from outside.
+			Connection = (ConnectionMode.Network, "");
 			GD.Print("LSL: liblsl defaults (Windows); set $LSLAPICFG to override");
 			return;
 		}
-		string preset = System.Environment.GetEnvironmentVariable(LiblslConfigEnv);
-		if (!string.IsNullOrEmpty(preset))
-		{
-			GD.Print($"LSL: config from ${LiblslConfigEnv} = {preset}");
-			return;
-		}
-		string path = ProjectSettings.GlobalizePath("user://lsl_api.cfg");
+		Connection = LoadConnection();
+		string preset = System.Environment.GetEnvironmentVariable(OverrideEnv);
+		string path = string.IsNullOrEmpty(preset) ? ProjectSettings.GlobalizePath("user://lsl_api.cfg") : preset;
 		try
 		{
-			// The pin is macOS-only. Windows and Linux report Hyper-V, WSL and docker bridges as
-			// Ethernet with routable IPv4, often ahead of the real NIC; pinning to one of those
-			// would kill discovery silently. IPv6 off is platform-neutral and stays on Linux too.
-			string ip = OperatingSystem.IsMacOS() ? PhysicalIPv4() : null;
-			string body = "[ports]\nIPv6 = disable\n";
-			if (ip != null)
-				body += $"\n[multicast]\nInterfaces = {{{ip}}}\n";
-			Directory.CreateDirectory(Path.GetDirectoryName(path));
-			File.WriteAllText(path, body);
+			if (string.IsNullOrEmpty(preset))
+			{
+				Directory.CreateDirectory(Path.GetDirectoryName(path));
+				File.WriteAllText(path, LiblslConfig(Connection.Mode, Connection.Peer));
+			}
 			SetNativeEnv(LiblslConfigEnv, path);
-			GD.Print(ip != null
-				? $"LSL: IPv6 off, multicast pinned to {ip} ({path})"
-				: $"LSL: IPv6 off; multicast on liblsl's default interfaces ({path})");
+			GD.Print(string.IsNullOrEmpty(preset)
+				? $"LSL: connection {Connection.Mode} {Connection.Peer} ({path})"
+				: $"LSL: config from ${OverrideEnv} = {path}");
 		}
 		catch (Exception e)
 		{
@@ -136,31 +179,12 @@ public static class LSLWrapper
 		}
 	}
 
-	/// <summary>The IPv4 address of the first physical interface that is up, or null.</summary>
-	/// <remarks>Ethernet or Wi-Fi only, by type and by name: no loopback, no tunnels
-	/// (<c>utun</c>, <c>ipsec</c>, <c>ppp</c>), no bridges, no link-local <c>169.254.x</c>.
-	/// macOS reports the Wi-Fi chip's helpers <c>awdl0</c> and <c>llw0</c> as Ethernet; they
-	/// carry no IPv4, and are excluded by name as well.</remarks>
-	private static string PhysicalIPv4()
+	private static string LiblslConfig(ConnectionMode mode, string peer) => mode switch
 	{
-		string[] notPhysical = ["lo", "utun", "ipsec", "ppp", "bridge", "awdl", "llw", "gif", "stf", "ap"];
-		foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
-		{
-			if (nic.OperationalStatus != OperationalStatus.Up) continue;
-			if (nic.NetworkInterfaceType != NetworkInterfaceType.Ethernet
-				&& nic.NetworkInterfaceType != NetworkInterfaceType.Wireless80211) continue;
-			string name = nic.Name.ToLowerInvariant();
-			if (notPhysical.Any(prefix => name.StartsWith(prefix))) continue;
-			foreach (UnicastIPAddressInformation a in nic.GetIPProperties().UnicastAddresses)
-			{
-				if (a.Address.AddressFamily != AddressFamily.InterNetwork) continue;
-				byte[] b = a.Address.GetAddressBytes();
-				if (b[0] == 169 && b[1] == 254) continue;
-				return a.Address.ToString();
-			}
-		}
-		return null;
-	}
+		ConnectionMode.Network => "[ports]\nIPv6 = disable\n",
+		_ => "[ports]\nIPv6 = disable\n\n[multicast]\nResolveScope = machine\n\n[lab]\nKnownPeers = {"
+			+ (mode == ConnectionMode.Peer ? peer : "127.0.0.1") + "}\n",
+	};
 
 	/// <summary>
 	/// Every LSL stream visible on the network right now.

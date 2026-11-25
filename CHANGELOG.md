@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Connection setting** in Hand Settings: where VHI looks for its pose streams, with a live
+  count of them and a chip beside the panel's chevron that shows the count while the panel
+  is collapsed. A computer looks on **this computer** by default, or at **another computer**
+  by its address. A phone **searches the network** by default, or asks one address. Saved in
+  `user://connection.cfg`; a change needs a restart (on Android: reopening the app),
+  because liblsl reads its config once per process.
+
+### Fixed
+
+- **Android builds again.** The gRPC control server runs on ASP.NET Core, which has no
+  Android runtime pack (`NETSDK1082`), so every Android export had failed since gRPC
+  arrived. An Android build now leaves gRPC out (`GODOT_ANDROID`) and follows its pose
+  streams over LSL alone. Verified on a Galaxy S26 Ultra (Android 17): with the Connection
+  set to a Mac's Tailscale address, all nine prediction streams connected and the hand
+  followed them.
+
+### Changed
+
+- **A computer no longer sends LSL discovery over the network.** VHI's own liblsl config is
+  now `ResolveScope = machine` plus `KnownPeers = {127.0.0.1}`, or the chosen computer's
+  address. Until now it pinned multicast to the first physical interface: that kept
+  discovery off VPN tunnels but not off Wi-Fi, and a Mac kernel-panicked in its Wi-Fi driver
+  (2026-10-29) with the pin on, while VHI was idle-resolving. Machine scope alone finds one
+  stream per machine on liblsl 1.16/1.17; `KnownPeers` asks each outlet on its own port,
+  verified with 18 streams over 3 processes and with VHI against a producer on liblsl's
+  network defaults.
+- **`$LSLAPICFG` no longer reaches VHI's liblsl; `$VHI_LSLAPICFG` does.** MyoGestic sets
+  `LSLAPICFG` at import, to a config that only quiets logging, and VHI inherited it when
+  MyoGestic launched it. So in every MyoGestic session VHI ran liblsl's defaults: IPv6 on,
+  discovery on every interface. Consumers on the same machine that read `VHI_Control` or
+  `VHI_Predict` (a recorder, `tests/`) need `KnownPeers = {127.0.0.1}` too, or liblsl
+  1.18, which fixes machine-scope discovery itself. `tests/lsl_api.cfg` is that config.
+- **Hand Settings scrolls and runs to the bottom of the window.** It used to be a fixed
+  393 px box whose content spilled over the logos once it outgrew it.
+- **Thumb flexion now twists the metacarpal into opposition** (joint 1, Y, up to +40° at
+  standard `+1`). Without it a fully flexed thumb stopped on the index tip whatever its
+  abduction, so no pose could put the tip between index and middle for a three-finger
+  pinch. With it, abduction `0` lands the tip there and `-1` keeps it on the index. Every
+  read-back (`VHI_Control`, `VHI_Predict`, sweeps) uses only X and Z, so recorded values and
+  the contract's expected degrees are unchanged; what changes is the rendered thumb of every
+  pose with thumb flexion, Fist included.
+
 ## [2.1.0] - 2026-09-12
 
 ### Added

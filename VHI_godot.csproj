@@ -1,6 +1,9 @@
 <Project Sdk="Godot.NET.Sdk/4.6.1">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <!-- Android: .NET 9 is the first whose Mono runtime is built for 16 KB memory pages
+         (8.0.33's libmonosgen is 4 KB-aligned), which Android 15+ devices require. -->
+    <TargetFramework Condition="'$(GodotTargetPlatform)' == 'android'">net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <!-- Lets the runtimeconfig roll forward onto a newer installed runtime when
          the exact net8.0 shared framework is not present. -->
@@ -13,17 +16,20 @@
     <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="SharpLSL.Native.all" Version="1.16.2" />
+    <PackageReference Include="SharpLSL.Native.all" Version="1.16.2.7" />
     <PackageReference Include="SharpLSL" Version="1.16.2-rc.1" />
     <PackageReference Include="Tomlyn" Version="0.17.0" />
-    <!-- gRPC server. Godot's host needs SharedFrameworkAssemblyLoader.cs to
-         resolve the Microsoft.AspNetCore.App shared framework at runtime
-         (godot#112701). Grpc.Tools must be referenced explicitly — its MSBuild
-         codegen targets do not flow transitively from Grpc.AspNetCore. -->
+  </ItemGroup>
+  <!-- gRPC server. Godot's host needs SharedFrameworkAssemblyLoader.cs to
+       resolve the Microsoft.AspNetCore.App shared framework at runtime
+       (godot#112701). Grpc.Tools must be referenced explicitly — its MSBuild
+       codegen targets do not flow transitively from Grpc.AspNetCore.
+       Not on Android: ASP.NET Core has no Android runtime pack (NETSDK1082), so an
+       Android build has no gRPC control plane and follows its pose streams over LSL
+       alone (GrpcControlServer.cs, VhiControlService.cs). -->
+  <ItemGroup Condition="'$(GodotTargetPlatform)' != 'android'">
     <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
     <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="all" />
-  </ItemGroup>
-  <ItemGroup>
     <Protobuf Include="proto/remote_control.proto" GrpcServices="Server" />
   </ItemGroup>
 </Project>

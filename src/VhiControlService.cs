@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Godot;
+#if !GODOT_ANDROID
 using Grpc.Core;
 using Myogestic.Remote;
+#endif
 
 namespace Vhi;
 
@@ -49,7 +51,10 @@ namespace Vhi;
 /// single main-thread closure is never rendered before the closure returns.
 /// </para>
 /// </remarks>
-public class VhiControlService : RemoteControl.RemoteControlBase
+public class VhiControlService
+#if !GODOT_ANDROID
+	: RemoteControl.RemoteControlBase
+#endif
 {
 	/// <summary>Which rotation axis of a joint a standard DOF drives.</summary>
 	private enum Axis { X, Y, Z }
@@ -154,6 +159,10 @@ public class VhiControlService : RemoteControl.RemoteControlBase
 		Renderable
 			.Select(entry => (entry.Key, false, entry.Value.Channel))
 			.Concat(ControlPoseRenderable.Select(entry => (entry.Key, true, entry.Value)));
+
+#if !GODOT_ANDROID
+	// The gRPC control plane. Not on Android: it runs on ASP.NET Core, which has no Android
+	// runtime. The tables above stay, because the LSL controller subscribes from them.
 
 	/// <summary>What each address renders, for the manifest's description field.</summary>
 	private static readonly Dictionary<string, string> Describes = new()
@@ -657,4 +666,5 @@ public class VhiControlService : RemoteControl.RemoteControlBase
 			state.AvailableMovements.AddRange(controlHand.GetAvailableMovements());
 			return state;
 		});
+#endif
 }

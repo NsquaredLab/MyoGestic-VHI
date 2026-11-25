@@ -403,7 +403,11 @@ public static class StandardPose
 
 		// Thumb. X flexes, Z abducts. The fist adducts the thumb — Z of -30 and +35 — so
 		// abduction, being the direction the name denotes, is the other way.
-		[1] = [45, 0, 30],
+		// Joint 1's Y is the metacarpal's opposition twist, and *flexion* drives it: a
+		// thumb that flexes at the CMC also pronates. Without it the flexed tip stops on
+		// the index and can never reach between index and middle for a three-finger
+		// pinch. The only Y not driven by its own channel; read-backs never use it.
+		[1] = [45, 40, 30],
 		[2] = [55, 0, -35],
 		[3] = [80, 0, 0],
 

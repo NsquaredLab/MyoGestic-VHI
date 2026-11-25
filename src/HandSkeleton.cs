@@ -86,7 +86,7 @@ public abstract partial class HandSkeleton : Node3D
 		SetBoneRotation(0, pose[6] * StandardPose.AtPlusOne[0][0], pose[8] * StandardPose.AtPlusOne[0][1], pose[7] * StandardPose.AtPlusOne[0][2]);
 
 		// Thumb (channels 0 and 1: flexion and abduction).
-		SetBoneRotation(1, pose[0] * StandardPose.AtPlusOne[1][0], 0, pose[1] * StandardPose.AtPlusOne[1][2]);
+		SetBoneRotation(1, pose[0] * StandardPose.AtPlusOne[1][0], pose[0] * StandardPose.AtPlusOne[1][1], pose[1] * StandardPose.AtPlusOne[1][2]);
 		SetBoneRotation(2, pose[0] * StandardPose.AtPlusOne[2][0], 0, pose[1] * StandardPose.AtPlusOne[2][2]);
 		SetBoneRotation(3, pose[0] * StandardPose.AtPlusOne[3][0], 0, pose[1] * StandardPose.AtPlusOne[3][2]);
 

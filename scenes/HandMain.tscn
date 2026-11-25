@@ -187,10 +187,6 @@ directional_shadow_fade_start = 0.593
 sky_mode = 1
 
 [node name="ControlPanel" parent="." instance=ExtResource("7_ou7ap")]
-anchors_preset = 1
-anchor_bottom = 0.0
 offset_left = -321.0
 offset_top = 116.0
 offset_right = 0.0
-offset_bottom = 509.0
-grow_vertical = 1

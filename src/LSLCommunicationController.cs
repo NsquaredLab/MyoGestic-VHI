@@ -124,6 +124,16 @@ public partial class LSLCommunicationController : Node
 	/// </remarks>
 	public bool ControlPoseLive { get; private set; }
 
+	/// <summary>Pose streams with an inlet right now: what the Connection panel reports.</summary>
+	public int LiveStreams
+	{
+		get { lock (connectionLock) return dofs.FindAll(d => d.Inlet != null).Count; }
+	}
+
+	/// <summary>Seconds until the next resolve pass may start; 0 while one may or is running.</summary>
+	public double SecondsToNextResolve =>
+		Math.Max(0.0, connectionRetryInterval - (DateTime.Now - lastConnectionAttempt).TotalSeconds);
+
 	/// <summary>When the last resolve pass started. One pass, whatever is missing.</summary>
 	private DateTime lastConnectionAttempt;
 	/// <summary>Seconds between resolve passes: <see cref="RetryIntervalMinSeconds"/> while
